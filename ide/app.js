@@ -151,6 +151,8 @@ function bytesMatch(memory, offset, bytes) {
 async function findLoadedComSegment() {
   // DOS .COMはPSPと同じセグメントのCS:0100から始まる。RAM上でCOM全バイトを照合し、
   // さらにPSP先頭のINT 20h (CD 20)を確認することで、ディスクキャッシュ中の偶然一致を除く。
+  // 暫定制約: 探索中も対象を生存させるPC98DEV_IDE入力待ちスタブが必須で、対象のキー入力と
+  // タイミングを変える。無改変の既存バイナリや即時終了対象には使えず、汎用ローダではない。
   const limit = Date.now() + 20_000;
   while (Date.now() < limit) {
     const memory = debug.readMemory(0, 0xa0000);

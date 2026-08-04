@@ -40,6 +40,12 @@ ide/                WebNP2 embedを使う最小IDE実証
 
 ## 最小IDE実証
 
+> **重要: 現在のCS決定方式は暫定実証であり、一般的なプログラムローダではない。**
+> `PC98DEV_IDE` でソースへ入力待ちスタブを注入できる自前ビルドだけが対象である。
+> スタブはキー入力を1文字消費してタイミングも変えるため、ユーザープログラムの挙動を変える。
+> ソースを変更できない既存COM/EXE（SAKA.EXE等）には使えず、待機しない即時終了プログラムは
+> RAM探索前に終了して取りこぼす。この制約を解消するまでは汎用ソースデバッガとは扱わない。
+
 `ide/` は `samples/hello.asm` をブラウザのwasm NASMでアセンブルし、行マップとFAT12 FDを
 その場で生成して、IDEが用意したcanvas上のNP2kaiへ渡す。ソース行クリックBP、現在行強調、
 「次の行まで実行」を備える。レジスタはembedのUIを使わないIDE独自表示、逆アセンブルはembed部品である。
@@ -64,6 +70,30 @@ node ide/verify-ide.mjs
 同期物の `ide/vendor/webnp2/LICENSE.WebNP2` はWebNP2由来コードの出所を、
 `ide/core/LICENSE.NP2kai` はNP2kaiの利用条件を示す。FreeDOS起動FDには同じディレクトリの
 `README.txt`（GPLv2+とソース情報）が対応するため、配布時は各バイナリとライセンス表示を分離しない。
+
+### 汎用ローダへ進むための調査（未実装）
+
+NP2kaiのi386c/ia32では `INT imm8` が命令実装でベクタを読み、`INTERRUPT` が実モードならIVT、
+保護モードならIDTへCPU状態を遷移させる。DOSのINT 21h、EXEC、PSP管理自体はゲストOSのコードであり、
+NP2kaiは実装しない。`ENABLE_TRAP` 時だけINT実行直前に `softinttrap(CS,EIP,vector)` を呼ぶ既存経路は
+あるが、現在のemnp21kai_sdl2のコンパイル定義には `ENABLE_TRAP` がなく、同関数もログ用で停止できない。
+
+したがって現在のpause/step/固定CS:EIP BPだけでは、コマンドインタプリタのINT 21h AH=4Bhを
+**ロード直後・子プログラム実行前**で止められない。1命令ずつ逆アセンブルしてAH=4BhのINT直前を
+見つけること自体は可能だが、その時点では未ロードである。通常の4B00hは子の終了まで呼出元へ戻らず、
+以後のDOS内部経路もOS実装依存なので、INT入口の検出だけでは開始CS:IPを得られない。
+
+本命案は、対象とは別のゲスト側デバッガローダがDOS EXEC 4B01h（load but do not execute）を呼び、
+DOSが再配置を完了して返した初期CS:IP・SS:SPを共有メールボックスへ書いて待つ方式である。
+ホストは既存のメモリ読出しで入口を受け取りBPを設定してからローダを解放する。対象COM/EXEの改変は不要で、
+MZ EXEの再配置後CSもDOS自身が確定する。ただしNEC MS-DOS/FreeDOS各版で4B01h対応を実機相当環境で
+検証する必要がある。
+
+4B01hを使えないDOS向けにC側を補助するなら、まず
+`webnp2_dbg_run_until_softint(vector, ax_mask, ax_value, max_steps)` を追加し、命令実行**前**の
+CD imm8とAX条件をC内で効率よく監視する。これはAH=4Bh入口の捕捉APIであり、単独ではロード完了を
+意味しない。OS非依存性を保つには、併せて汎用メモリwatch/mailbox通知を提供してゲストローダと協調する。
+NP2kai内へDOSバージョン依存のPSP/MCB解析を直接組み込む `run_until_exec_entry` は最終手段とする。
 
 ## 使い方
 
