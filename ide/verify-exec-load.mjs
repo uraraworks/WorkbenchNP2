@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 
 import assert from 'node:assert/strict';
+import { createReadStream } from 'node:fs';
 import { createServer } from 'node:http';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, extname, join, resolve, sep } from 'node:path';
 import { createRequire } from 'node:module';
@@ -15,6 +16,7 @@ const ROOT = dirname(IDE_DIR);
 const BASE_URL = process.env.PC98DEV_EXEC_URL ?? 'http://127.0.0.1:5185/ide/exec-load-probe.html';
 const CHROME = process.env.CHROME_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
+const RESULT_PATTERN = /E0 (?:4A ERROR AX=[0-9A-F]{4}|4B01 ERROR AX=[0-9A-F]{4}|4B01 OK CS:IP=[0-9A-F]{4}:[0-9A-F]{4} SS:SP=[0-9A-F]{4}:[0-9A-F]{4})/i;
 
 async function loadPuppeteer() {
   try {
@@ -47,6 +49,21 @@ async function makeProbeFd() {
   };
 }
 
+async function externalCase(id, label, envName, imageName) {
+  const path = process.env[envName];
+  if (!path) return { id, label, envName, skip: `${envName}未指定` };
+  try {
+    const info = await stat(path);
+    if (!info.isFile()) return { id, label, envName, skip: '指定先が通常ファイルではありません' };
+    return { id, label, envName, path, imageName, size: info.size, promptTimeout: 180_000 };
+  } catch (error) {
+    if (error && typeof error === 'object' && error.code === 'ENOENT') {
+      return { id, label, envName, skip: '指定ファイルが存在しません' };
+    }
+    throw error;
+  }
+}
+
 const contentTypes = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
@@ -57,19 +74,41 @@ const harness = `<!doctype html>
 <html><body><canvas id="screen" width="640" height="400"></canvas>
 <script type="module">
 import { createDebugger, createWebNP2 } from './vendor/webnp2/webnp2-embed.js';
+const id = new URLSearchParams(location.search).get('case');
+const configResponse = await fetch('/probe-config/' + encodeURIComponent(id));
+if (!configResponse.ok) throw new Error('probe config fetch failed');
+const config = await configResponse.json();
 const engine = createWebNP2(document.querySelector('#screen'));
 const debug = createDebugger(engine);
+// 検証用の一時Chromeプロファイルにも外部HDDをIndexedDB保存しない。
+// 起動に必要なメモリ上のコピーだけを使い、page closeで破棄する。
+engine.persistNow = async () => {};
 window.execLoadProbe = {
   engine,
   readMemory: (address, length) => Array.from(debug.readMemory(address, length)),
   ready: (async () => {
-    const [fd1Response, fd2Response] = await Promise.all([
-      fetch('./freedos/fd98_2hd.xdf'), fetch('/exec-load-probe.xdf'),
-    ]);
-    if (!fd1Response.ok || !fd2Response.ok) throw new Error('FD image fetch failed');
+    const probeResponse = await fetch('/exec-load-probe.xdf');
+    if (!probeResponse.ok) throw new Error('probe FD fetch failed');
+    const probe = { file: { name: 'probe.xdf', bytes: new Uint8Array(await probeResponse.arrayBuffer()) }, sourceKey: 'probe:fd' };
+    if (config.boot === 'freedos') {
+      const bootResponse = await fetch('./freedos/fd98_2hd.xdf');
+      if (!bootResponse.ok) throw new Error('FreeDOS FD fetch failed');
+      await engine.boot({
+        fd1: { file: { name: 'freedos.xdf', bytes: new Uint8Array(await bootResponse.arrayBuffer()) }, sourceKey: 'probe:freedos' },
+        fd2: probe,
+        latencyMs: 40,
+        extMemMB: 1,
+      });
+      return;
+    }
+    const hddResponse = await fetch(config.imageUrl);
+    if (!hddResponse.ok) throw new Error('external HDD fetch failed');
     await engine.boot({
-      fd1: { file: { name: 'freedos.xdf', bytes: new Uint8Array(await fd1Response.arrayBuffer()) }, sourceKey: 'probe:fd1' },
-      fd2: { file: { name: 'probe.xdf', bytes: new Uint8Array(await fd2Response.arrayBuffer()) }, sourceKey: 'probe:fd2' },
+      hdd: {
+        file: { name: config.imageName, bytes: new Uint8Array(await hddResponse.arrayBuffer()) },
+        sourceKey: 'probe:external-hdd', alreadyPersisted: true,
+      },
+      fd1: probe,
       latencyMs: 40,
       extMemMB: 1,
     });
@@ -77,7 +116,13 @@ window.execLoadProbe = {
 };
 </script></body></html>`;
 
-function startServer(probeFd) {
+function startServer(probeFd, cases) {
+  const externalById = new Map(cases.filter((entry) => entry.path).map((entry) => [entry.id, entry]));
+  const configById = new Map(cases.filter((entry) => !entry.skip).map((entry) => [entry.id, {
+    boot: entry.id === 'freedos' ? 'freedos' : 'hdd',
+    imageName: entry.imageName,
+    imageUrl: entry.path ? `/external-hdd/${entry.id}` : undefined,
+  }]));
   return new Promise((resolveStart, reject) => {
     const server = createServer(async (request, response) => {
       try {
@@ -88,6 +133,24 @@ function startServer(probeFd) {
         }
         if (url.pathname === '/ide/exec-load-probe.html') {
           response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(harness);
+          return;
+        }
+        if (url.pathname.startsWith('/probe-config/')) {
+          const config = configById.get(decodeURIComponent(url.pathname.slice('/probe-config/'.length)));
+          if (!config) { response.writeHead(404).end('not found'); return; }
+          response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(config));
+          return;
+        }
+        if (url.pathname.startsWith('/external-hdd/')) {
+          const entry = externalById.get(decodeURIComponent(url.pathname.slice('/external-hdd/'.length)));
+          if (!entry) { response.writeHead(404).end('not found'); return; }
+          // 外部資産は許可リスト化したこの経路で直接ストリームし、repo内や一時領域へ複製しない。
+          response.writeHead(200, {
+            'Content-Type': 'application/octet-stream',
+            'Content-Length': entry.size,
+            'Cache-Control': 'no-store',
+          });
+          createReadStream(entry.path).on('error', () => response.destroy()).pipe(response);
           return;
         }
         let pathname = decodeURIComponent(url.pathname);
@@ -108,6 +171,18 @@ function startServer(probeFd) {
   });
 }
 
+async function withTimeout(promise, timeout, message) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(message)), timeout); }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function waitForText(page, pattern, timeout, message) {
   const limit = Date.now() + timeout;
   while (Date.now() < limit) {
@@ -118,13 +193,90 @@ async function waitForText(page, pattern, timeout, message) {
   throw new Error(message);
 }
 
+async function evaluateResult(page, scenario, screen, hello) {
+  const shrinkError = screen.match(/E0 4A ERROR AX=([0-9A-F]{4})/i);
+  if (shrinkError) throw new Error(`4Ahメモリ縮小失敗 AX=${shrinkError[1].toUpperCase()}`);
+
+  const execError = screen.match(/E0 4B01 ERROR AX=([0-9A-F]{4})/i);
+  if (execError) {
+    const code = execError[1].toUpperCase();
+    const note = code === '0008' ? '（メモリ不足）' : '';
+    return `[RESULT] ${scenario.label}: 4B01h CF=1 AX=${code}${note}`;
+  }
+
+  const self = screen.match(/E0 SELF CS=([0-9A-F]{4})/i);
+  const loaded = screen.match(
+    /E0 4B01 OK CS:IP=([0-9A-F]{4}):([0-9A-F]{4}) SS:SP=([0-9A-F]{4}):([0-9A-F]{4})/i,
+  );
+  assert.ok(self, 'ローダ自身のCSが表示されていません');
+  assert.ok(loaded, '4B01h成功時のCS:IP / SS:SPが表示されていません');
+  const [loaderCs, childCs, childIp, childSs, childSp] = [self[1], ...loaded.slice(1)].map(
+    (value) => Number.parseInt(value, 16),
+  );
+  assert.equal(childIp, 0x0100, `COMの初期IPが0100hではありません: ${loaded[2]}`);
+  assert.equal(childSs, childCs, `COMの初期SSとCSが一致しません: ${loaded[3]} != ${loaded[1]}`);
+  assert.ok(childCs >= 0x0050 && childCs < 0xA000 && childCs !== loaderCs,
+    `子CSが空きメモリ位置として不正です: ${loaded[1]}`);
+  assert.ok(childSp > 0x0100, `子SPが不正です: ${loaded[4]}`);
+  const loadedBytes = await page.evaluate(
+    ({ address, length }) => window.execLoadProbe.readMemory(address, length),
+    { address: childCs * 16, length: 0x100 + hello.byteLength },
+  );
+  assert.deepEqual(loadedBytes.slice(0, 2), [0xCD, 0x20], '返却CSにPSPのINT 20hがありません');
+  assert.deepEqual(loadedBytes.slice(0x100), Array.from(hello), '返却CS:0100にHELLO.COMがありません');
+  assert.equal(screen.includes('Hello, PC-98!'), false, 'load-onlyなのにHELLO.COMが実行されています');
+  return `[RESULT] ${scenario.label}: 4B01h対応 CS:IP=${loaded[1].toUpperCase()}:${loaded[2].toUpperCase()} SS:SP=${loaded[3].toUpperCase()}:${loaded[4].toUpperCase()}`;
+}
+
+async function runScenario(browser, scenario, hello) {
+  if (scenario.skip) return `[RESULT] ${scenario.label}: SKIP（${scenario.skip}）`;
+  const page = await browser.newPage();
+  try {
+    page.setDefaultNavigationTimeout(240_000);
+    const pageErrors = [];
+    page.on('pageerror', (error) => pageErrors.push(error.message));
+    await page.goto(`${BASE_URL}?case=${encodeURIComponent(scenario.id)}`, {
+      waitUntil: 'networkidle2', timeout: 240_000,
+    });
+    await withTimeout(
+      page.evaluate(() => window.execLoadProbe.ready),
+      240_000,
+      `${scenario.label}のWebNP2起動がタイムアウトしました`,
+    );
+    assert.deepEqual(pageErrors, []);
+    await waitForText(
+      page,
+      /[A-Z]:\\?>/i,
+      scenario.promptTimeout,
+      `${scenario.label}のDOSプロンプト待機がタイムアウトしました`,
+    );
+    // HDD起動時のWebNP2規約ではFD1=B:。FreeDOSケースではプローブはFD2=B:。
+    await page.evaluate(() => window.execLoadProbe.engine.pasteText('B:\\E0LOAD\r'));
+    const screen = await waitForText(
+      page, RESULT_PATTERN, 60_000, `${scenario.label}の4B01h結果がTVRAMへ表示されませんでした`,
+    );
+    return await evaluateResult(page, scenario, screen, hello);
+  } finally {
+    await page.close();
+  }
+}
+
 let server;
 let browser;
 let profile;
+const failures = [];
 
 try {
   const { hello, image: probeFd } = await makeProbeFd();
-  if (!process.env.PC98DEV_EXEC_URL) server = await startServer(probeFd);
+  const cases = [
+    { id: 'freedos', label: 'FreeDOS(98)', promptTimeout: 60_000 },
+    await externalCase('msdos33', 'MS-DOS 3.3', 'PC98DEV_MSDOS33_HDI', 'msdos33.hdi'),
+    await externalCase('legacy', '1996年HDD環境', 'PC98DEV_LEGACY_THD', 'legacy.thd'),
+  ];
+  if (process.env.PC98DEV_EXEC_URL) {
+    throw new Error('この検証は外部資産をno-store配信するためPC98DEV_EXEC_URLを使用できません');
+  }
+  server = await startServer(probeFd, cases);
   const puppeteer = await loadPuppeteer();
   profile = await mkdtemp(join(tmpdir(), 'pc98dev-exec-load-'));
   browser = await puppeteer.launch({
@@ -133,60 +285,23 @@ try {
     headless: 'new',
     args: ['--hide-scrollbars', '--autoplay-policy=no-user-gesture-required'],
   });
-  const page = await browser.newPage();
-  const pageErrors = [];
-  page.on('pageerror', (error) => pageErrors.push(error.message));
-  await page.goto(BASE_URL, { waitUntil: 'networkidle2' });
-  await page.evaluate(() => window.execLoadProbe.ready);
-  assert.deepEqual(pageErrors, []);
 
-  await waitForText(page, /A:\\?>/i, 60_000, 'FreeDOSプロンプト待機がタイムアウトしました');
-  await page.evaluate(() => window.execLoadProbe.engine.pasteText('B:\\E0LOAD\r'));
-  const screen = await waitForText(
-    page,
-    /E0 (?:4A ERROR AX=[0-9A-F]{4}|4B01 ERROR AX=[0-9A-F]{4}|4B01 OK CS:IP=[0-9A-F]{4}:[0-9A-F]{4} SS:SP=[0-9A-F]{4}:[0-9A-F]{4})/i,
-    30_000,
-    '4B01h検証結果がTVRAMへ表示されませんでした',
-  );
-
-  const shrinkError = screen.match(/E0 4A ERROR AX=([0-9A-F]{4})/i);
-  if (shrinkError) throw new Error(`4Ahメモリ縮小失敗 AX=${shrinkError[1].toUpperCase()}`);
-  const execError = screen.match(/E0 4B01 ERROR AX=([0-9A-F]{4})/i);
-  if (execError) {
-    const errorCode = execError[1].toUpperCase();
-    // 0008hだけは4Ah縮小量などプローブ側の不備をまず疑うべきであり、
-    // FreeDOS(98)の「非対応」という可否判定へ読み替えない。
-    if (errorCode === '0008') {
-      throw new Error('4B01hがメモリ不足 AX=0008を返しました（4Ah縮小量を再確認してください）');
+  for (const scenario of cases) {
+    try {
+      console.log(await runScenario(browser, scenario, hello));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      failures.push(`${scenario.label}: ${message}`);
+      console.log(`[RESULT] ${scenario.label}: 検証失敗（${message}）`);
     }
-    console.log(`[RESULT] FreeDOS(98) 4B01hはCF=1で終了 AX=${errorCode}`);
-    console.log('[PASS] CFエラーコードをTVRAMから取得（4B01h利用不可）');
-  } else {
-    const self = screen.match(/E0 SELF CS=([0-9A-F]{4})/i);
-    const loaded = screen.match(
-      /E0 4B01 OK CS:IP=([0-9A-F]{4}):([0-9A-F]{4}) SS:SP=([0-9A-F]{4}):([0-9A-F]{4})/i,
-    );
-    assert.ok(self, 'ローダ自身のCSが表示されていません');
-    assert.ok(loaded, '4B01h成功時のCS:IP / SS:SPが表示されていません');
-    const [loaderCs, childCs, childIp, childSs, childSp] = [self[1], ...loaded.slice(1)].map(
-      (value) => Number.parseInt(value, 16),
-    );
-    assert.equal(childIp, 0x0100, `COMの初期IPが0100hではありません: ${loaded[2]}`);
-    assert.equal(childSs, childCs, `COMの初期SSとCSが一致しません: ${loaded[3]} != ${loaded[1]}`);
-    assert.ok(childCs > loaderCs && childCs < 0xA000, `子CSが空きメモリ位置として不正です: ${loaded[1]}`);
-    assert.ok(childSp > 0x0100, `子SPが不正です: ${loaded[4]}`);
-    const loadedBytes = await page.evaluate(
-      ({ address, length }) => window.execLoadProbe.readMemory(address, length),
-      { address: childCs * 16, length: 0x100 + hello.byteLength },
-    );
-    assert.deepEqual(loadedBytes.slice(0, 2), [0xCD, 0x20], '返却CSにPSP先頭のINT 20hがありません');
-    assert.deepEqual(loadedBytes.slice(0x100), Array.from(hello), '返却CS:0100にHELLO.COMがありません');
-    assert.equal(screen.includes('Hello, PC-98!'), false, '4B01h load-onlyでHELLO.COMが実行されました');
-    console.log(`[RESULT] FreeDOS(98) 4B01h対応 CS:IP=${loaded[1].toUpperCase()}:${loaded[2].toUpperCase()} SS:SP=${loaded[3].toUpperCase()}:${loaded[4].toUpperCase()}`);
-    console.log('[PASS] PSP・HELLO.COM本体・load-only・初期レジスタ値を確認');
   }
 } finally {
   if (browser) await browser.close();
   if (profile) await rm(profile, { recursive: true, force: true });
   if (server) await new Promise((resolveClose) => server.close(resolveClose));
+}
+
+if (failures.length > 0) {
+  for (const failure of failures) console.error(`[ERROR] ${failure}`);
+  process.exitCode = 1;
 }

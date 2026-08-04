@@ -41,7 +41,7 @@ ide/                WebNP2 embedを使う最小IDE実証
 ## 最小IDE実証
 
 > **現在の制約:** デバッガローダが使うDOS EXEC 4B01hは同梱FreeDOS(98)で実地確認済みだが、
-> NEC MS-DOSを含む他のDOSでは未確認である。非対応DOSではこの方式を利用できない。
+> NEC MS-DOSを含む他のDOSは任意の外部HDDを使う検証を実行待ちである。非対応DOSではこの方式を利用できない。
 > また現時点のIDE実証UIはHELLO.COM固定で、任意ファイル選択UIはまだない。
 
 `ide/` は `samples/hello.asm` をブラウザのwasm NASMでアセンブルし、行マップとFAT12 FDを
@@ -110,7 +110,20 @@ Ralf Brown's Interrupt ListのINT 21h/AX=4B01h定義と照合したEXECパラメ
 成功時は `.COM` のIP=0100hに加え、返却CSのPSP先頭が`CD 20`で、CS:0100の全バイトが
 wasm NASM生成HELLO.COMと一致するところまで確認する。これにより単なる「値が出た」を成功扱いしない。
 
+MS-DOS環境は再配布できないためリポジトリへ置かず、`PC98DEV_MSDOS33_HDI` と
+`PC98DEV_LEGACY_THD` で外部HDDを任意指定する。指定時はHDDから起動し、プローブFDをFD1（B:）に置く。
+外部イメージはno-storeでブラウザへ直接ストリームし、IndexedDB自動保存も無効化する。未指定・不存在は
+明示的なSKIPとして成功扱いにする。各環境の実測結果は次のとおり。
+
+| DOS環境 | 4B01h実測 |
+|---|---|
+| FreeDOS(98) | 対応（CS:IP=0856:0100、SS:SP=0856:FFFC） |
+| MS-DOS 3.3 | 外部HDD検証の実行待ち |
+| 1996年HDD環境 | 外部HDD検証の実行待ち |
+
 ```bash
+PC98DEV_MSDOS33_HDI=/path/to/msdos33.hdi \
+PC98DEV_LEGACY_THD=/path/to/legacy.thd \
 node ide/verify-exec-load.mjs
 ```
 
