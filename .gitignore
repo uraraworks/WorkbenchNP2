@@ -1,0 +1,16 @@
+# NASM の upstream ソース（無改変・13MB）。build.sh が必要時に clone する
+toolchain/nasm-src/
+
+# ビルド中間物
+*.o
+*.obj
+*.tmp
+
+# 生成した COM / ディスクイメージ（成果物であってソースではない）
+*.com
+*.COM
+*.xdf
+
+# OS / エディタ
+.DS_Store
+node_modules/
