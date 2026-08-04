@@ -27,8 +27,11 @@ function parseErrors(stderr, exitCode) {
 /**
  * Assemble source bytes with a fresh NASM WebAssembly instance.
  * @param {Uint8Array} source Source bytes. They are copied verbatim into NASM's FS.
- * @param {{ format?: string }} opts
- * @returns {Promise<{ok: true, output: Uint8Array} | {ok: false, errors: {line: number, message: string}[]}>}
+ * @param {{ format?: string, listing?: boolean }} opts
+ * @returns {Promise<
+ *   {ok: true, output: Uint8Array, listing?: string} |
+ *   {ok: false, errors: {line: number, message: string}[]}
+ * >}
  */
 export async function assemble(source, opts = {}) {
   if (!(source instanceof Uint8Array)) {
@@ -38,6 +41,9 @@ export async function assemble(source, opts = {}) {
   const format = opts.format ?? 'bin';
   if (typeof format !== 'string' || !/^[A-Za-z0-9_-]+$/.test(format)) {
     throw new TypeError('opts.format must be a non-empty format name');
+  }
+  if (opts.listing !== undefined && typeof opts.listing !== 'boolean') {
+    throw new TypeError('opts.listing must be a boolean');
   }
 
   const stderr = [];
@@ -50,13 +56,27 @@ export async function assemble(source, opts = {}) {
       printErr: (line) => stderr.push(String(line)),
     });
     module.FS.writeFile('/in.asm', source);
-    const exitCode = module.callMain(['-f', format, '-o', '/out.bin', '/in.asm']);
+    const args = ['-f', format];
+    if (opts.listing) args.push('-l', '/out.lst');
+    args.push('-o', '/out.bin', '/in.asm');
+    const exitCode = module.callMain(args);
 
     if (exitCode !== 0) {
       return { ok: false, errors: parseErrors(stderr, exitCode) };
     }
 
-    return { ok: true, output: new Uint8Array(module.FS.readFile('/out.bin')) };
+    const result = { ok: true, output: new Uint8Array(module.FS.readFile('/out.bin')) };
+    if (opts.listing) {
+      const bytes = new Uint8Array(module.FS.readFile('/out.lst'));
+      // リスティング末尾のソース文字列は入力と同じ符号化。UTF-8を優先し、
+      // PC-98資産で標準のCP932はShift_JISデコーダへフォールバックする。
+      try {
+        result.listing = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+      } catch {
+        result.listing = new TextDecoder('shift_jis').decode(bytes);
+      }
+    }
+    return result;
   } catch (error) {
     return {
       ok: false,

@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 
 import { readFile, writeFile } from 'node:fs/promises';
-import { basename, extname, resolve } from 'node:path';
+import { basename, dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assemble } from './assemble.mjs';
+import { parseListing } from './listing.mjs';
 import { makeFd } from './makefd.mjs';
 
 function usage() {
@@ -49,7 +50,7 @@ async function main() {
 
   try {
     const source = await readFile(options.input);
-    const result = await assemble(source);
+    const result = await assemble(source, { listing: true });
     if (!result.ok) {
       for (const error of result.errors) {
         const location = error.line > 0 ? `${options.input}:${error.line}` : options.input;
@@ -59,9 +60,18 @@ async function main() {
       return;
     }
 
+    const map = parseListing(result.listing, result.output);
+    const inputStem = basename(options.input, extname(options.input));
+    const comPath = join(dirname(options.output), `${inputStem}.com`);
+    const mapPath = `${comPath}.map.json`;
     const image = makeFd([{ name: dosBaseName(options.input), ext: 'COM', data: result.output }]);
-    await writeFile(options.output, image);
+    await Promise.all([
+      writeFile(options.output, image),
+      writeFile(comPath, result.output),
+      writeFile(mapPath, `${JSON.stringify(map, null, 2)}\n`),
+    ]);
     console.log(`wrote ${options.output} (${result.output.byteLength}-byte COM)`);
+    console.log(`wrote ${comPath} and ${mapPath}`);
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;

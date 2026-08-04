@@ -26,6 +26,7 @@ toolchain/
     PATCHES.md         ビルド調整の記録（C ソースへのパッチは 0 件）
     verify.mjs         ホスト版 NASM との出力バイト一致検証
   assemble.mjs       アセンブル API（エラーを行番号付きで構造化して返す）
+  listing.mjs        NASMリスティング→ソース行/セグメント内offsetマップ
   makefd.mjs         PC-98 2HD 1232KB FAT12 イメージを新規生成
   fdadd.mjs          既存 FAT12 イメージへファイル追加（BPB 自動判別）
   build-com.mjs      CLI: .asm → .COM → 新規 FD
@@ -50,6 +51,24 @@ node toolchain/build-com.mjs samples/hello.asm -o /tmp/pc98dev.xdf
 # DOS プロンプトで:  B:  →  HELLO
 ```
 
+`build-com.mjs` はFDイメージに加え、出力先ディレクトリへ `hello.com` と
+`hello.com.map.json` も書き出す。マップは次の配列で、`bytes` はCOM本体から切り出した
+実バイト列、`offset` は `.COM` の `ORG 100h` を加えた**セグメント内オフセット**である。
+実行時のCSはDOSによるロードまで決まらないためマップには含めず、デバッガ側で組み合わせる。
+
+```json
+[
+  { "srcLine": 8, "offset": 256, "bytes": [180, 9], "text": "mov\tah,09h" }
+]
+```
+
+NASMのリスティングは`ORG 100h`でもアドレス欄が0起点で、再配置を含む値は
+`BA[0C00]`のように最終バイトと異なる表記になる。このため`listing.mjs`はアドレス欄から
+範囲だけを求め、バイト列は必ず生成済みCOMから取得する。ラベル/EQU/コメント等のバイトを
+生成しない行はマップから除外し、長い`db`/`times`の継続行は1エントリへ結合する。
+マクロで1行から複数命令へ展開された場合は、呼出行と同じ`srcLine`を持つ複数エントリにする。
+`lineToOffset`はその行の先頭を、`offsetToLine`は命令・データ途中のoffsetでも包含行を返す。
+
 起動ディスク自体に載せたい場合（AUTOEXEC から自動実行したい等）は
 `build-boot-fd.mjs` を使う。ベースイメージはコピーされ、元ファイルは変更されない。
 
@@ -71,6 +90,7 @@ cd toolchain
 node nasm-wasm/verify.mjs   # wasm NASM の出力がホスト版と sha256 一致するか
 node verify-fd.mjs          # FD 生成 → 独立コードで読み戻して round-trip 一致
 node verify-fdadd.mjs       # 既存イメージへの追加で元ファイルを壊していないか
+node verify-listing.mjs     # listingマップと.COM実バイト、行/offset逆引きの一致
 ```
 
 ## 技術選定
