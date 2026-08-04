@@ -95,6 +95,26 @@ CD imm8とAX条件をC内で効率よく監視する。これはAH=4Bh入口の�
 意味しない。OS非依存性を保つには、併せて汎用メモリwatch/mailbox通知を提供してゲストローダと協調する。
 NP2kai内へDOSバージョン依存のPSP/MCB解析を直接組み込む `run_until_exec_entry` は最終手段とする。
 
+### DOS EXEC 4B01h 実地確認（Phase E-0）
+
+`samples/exec-load-probe.asm` はwasm NASMで組み立てるFreeDOS(98)互換性プローブである。COMのスタックを
+保持領域へ移してからINT 21h AH=4Ahで自分のメモリブロックを縮小し、AX=4B01hで
+`B:\HELLO.COM`をロードする。EXEC前のSS:SP/DS/ESはCS相対変数へ保存し、戻り直後はスタックを
+一切使わず復元する。
+
+EXECパラメータブロックは `+00h=環境segment`、`+02h=command tail far ptr`、
+`+06h=FCB1 far ptr`、`+0Ah=FCB2 far ptr`。4B01h成功時の返却領域は、メモリ格納順で
+`+0Eh=SP`、`+10h=SS`、`+12h=IP`、`+14h=CS`（すべてword）である。表示時は人間向けに
+`CS:IP`、`SS:SP`へ並べ直す。
+
+検証はFreeDOSをFD1（A:）、プローブFDをFD2（B:）へ入れ、TVRAM上の成功またはCFエラーを判定する。
+成功時は `.COM` のIP=0100hに加え、返却CSのPSP先頭が`CD 20`で、CS:0100の全バイトが
+wasm NASM生成HELLO.COMと一致するところまで確認する。これにより単なる「値が出た」を成功扱いしない。
+
+```bash
+node ide/verify-exec-load.mjs
+```
+
 ## 使い方
 
 推奨は **成果物だけの FD を作って FDD2 に挿す**方式。FreeDOS の起動ディスクを
