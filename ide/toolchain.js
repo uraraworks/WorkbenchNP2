@@ -10,9 +10,9 @@ function decodeListing(bytes) {
 }
 
 /** ブラウザでも1アセンブルごとに新しいNASMインスタンスを生成する。 */
-export async function assembleHello() {
-  const sourceResponse = await fetch('../samples/hello.asm');
-  if (!sourceResponse.ok) throw new Error(`hello.asm: HTTP ${sourceResponse.status}`);
+async function assembleFile(url, listing = false) {
+  const sourceResponse = await fetch(url);
+  if (!sourceResponse.ok) throw new Error(`${url}: HTTP ${sourceResponse.status}`);
   const sourceBytes = new Uint8Array(await sourceResponse.arrayBuffer());
   const sourceText = new TextDecoder('utf-8').decode(sourceBytes);
   const createNasm = window.createNasm;
@@ -24,15 +24,28 @@ export async function assembleHello() {
     locateFile: (name) => new URL(`../toolchain/nasm-wasm/${name}`, location.href).href,
   });
   module.FS.writeFile('/in.asm', sourceBytes);
-  const exitCode = module.callMain([
-    '-f', 'bin', '-DPC98DEV_IDE=1', '-l', '/out.lst', '-o', '/out.bin', '/in.asm',
-  ]) ?? 0;
+  const args = ['-f', 'bin'];
+  if (listing) args.push('-l', '/out.lst');
+  args.push('-o', '/out.bin', '/in.asm');
+  const exitCode = module.callMain(args) ?? 0;
   if (exitCode !== 0) throw new Error(errors.join('\n') || `NASM exited with status ${exitCode}`);
   const output = new Uint8Array(module.FS.readFile('/out.bin'));
-  const listing = decodeListing(new Uint8Array(module.FS.readFile('/out.lst')));
-  return { sourceText, output, map: parseListing(listing, output) };
+  if (!listing) return { sourceText, output };
+  const listingText = decodeListing(new Uint8Array(module.FS.readFile('/out.lst')));
+  return { sourceText, output, map: parseListing(listingText, output) };
 }
 
-export function makeProgramFd(output) {
-  return makeFd([{ name: 'HELLO', ext: 'COM', data: output }]);
+export function assembleHello() {
+  return assembleFile('../samples/hello.asm', true);
+}
+
+export function assembleDebugLoader() {
+  return assembleFile('./debug-loader.asm');
+}
+
+export function makeProgramFd(output, loader) {
+  return makeFd([
+    { name: 'E0LOAD', ext: 'COM', data: loader },
+    { name: 'TARGET', ext: 'COM', data: output },
+  ]);
 }

@@ -23,6 +23,8 @@ export declare class DebuggerController {
     setBreakpoint(index: number, seg: number, off: number, enabled: boolean): void;
     runUntilBreakpoint(maxSteps: number): number;
     readMemory(addr: number, len: number): Uint8Array;
+    /** ゲストRAMへ書き込む。実行中CPUとの競合を避けるためpause中だけ許可する。 */
+    writeMemory(addr: number, bytes: Uint8Array): void;
     onPause(listener: Listener<PauseEvent>): () => void;
     onBreakpoint(listener: Listener<BreakpointEvent>): () => void;
 }

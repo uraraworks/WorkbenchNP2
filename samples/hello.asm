@@ -5,12 +5,6 @@
 	ORG	100h
 
 start:
-	; 暫定実証専用: IDEビルドだけはRAM探索まで生存させる（入力消費・タイミング変化あり）。
-	; 無改変バイナリや即時終了対象には使えないため、汎用デバッグ手段に流用しないこと。
-%ifdef PC98DEV_IDE
-	mov	ah,08h
-	int	21h
-%endif
 	mov	ah,09h
 	mov	dx,msg
 	int	21h

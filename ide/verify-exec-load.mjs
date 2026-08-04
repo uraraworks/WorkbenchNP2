@@ -162,27 +162,26 @@ try {
     console.log(`[RESULT] FreeDOS(98) 4B01hはCF=1で終了 AX=${errorCode}`);
     console.log('[PASS] CFエラーコードをTVRAMから取得（4B01h利用不可）');
   } else {
-
-  const self = screen.match(/E0 SELF CS=([0-9A-F]{4})/i);
-  const loaded = screen.match(
-    /E0 4B01 OK CS:IP=([0-9A-F]{4}):([0-9A-F]{4}) SS:SP=([0-9A-F]{4}):([0-9A-F]{4})/i,
-  );
-  assert.ok(self, 'ローダ自身のCSが表示されていません');
-  assert.ok(loaded, '4B01h成功時のCS:IP / SS:SPが表示されていません');
-  const [loaderCs, childCs, childIp, childSs, childSp] = [self[1], ...loaded.slice(1)].map(
-    (value) => Number.parseInt(value, 16),
-  );
-  assert.equal(childIp, 0x0100, `COMの初期IPが0100hではありません: ${loaded[2]}`);
-  assert.equal(childSs, childCs, `COMの初期SSとCSが一致しません: ${loaded[3]} != ${loaded[1]}`);
-  assert.ok(childCs > loaderCs && childCs < 0xA000, `子CSが空きメモリ位置として不正です: ${loaded[1]}`);
-  assert.ok(childSp > 0x0100, `子SPが不正です: ${loaded[4]}`);
-  const loadedBytes = await page.evaluate(
-    ({ address, length }) => window.execLoadProbe.readMemory(address, length),
-    { address: childCs * 16, length: 0x100 + hello.byteLength },
-  );
-  assert.deepEqual(loadedBytes.slice(0, 2), [0xCD, 0x20], '返却CSにPSP先頭のINT 20hがありません');
-  assert.deepEqual(loadedBytes.slice(0x100), Array.from(hello), '返却CS:0100にHELLO.COMがありません');
-  assert.equal(screen.includes('Hello, PC-98!'), false, '4B01h load-onlyでHELLO.COMが実行されました');
+    const self = screen.match(/E0 SELF CS=([0-9A-F]{4})/i);
+    const loaded = screen.match(
+      /E0 4B01 OK CS:IP=([0-9A-F]{4}):([0-9A-F]{4}) SS:SP=([0-9A-F]{4}):([0-9A-F]{4})/i,
+    );
+    assert.ok(self, 'ローダ自身のCSが表示されていません');
+    assert.ok(loaded, '4B01h成功時のCS:IP / SS:SPが表示されていません');
+    const [loaderCs, childCs, childIp, childSs, childSp] = [self[1], ...loaded.slice(1)].map(
+      (value) => Number.parseInt(value, 16),
+    );
+    assert.equal(childIp, 0x0100, `COMの初期IPが0100hではありません: ${loaded[2]}`);
+    assert.equal(childSs, childCs, `COMの初期SSとCSが一致しません: ${loaded[3]} != ${loaded[1]}`);
+    assert.ok(childCs > loaderCs && childCs < 0xA000, `子CSが空きメモリ位置として不正です: ${loaded[1]}`);
+    assert.ok(childSp > 0x0100, `子SPが不正です: ${loaded[4]}`);
+    const loadedBytes = await page.evaluate(
+      ({ address, length }) => window.execLoadProbe.readMemory(address, length),
+      { address: childCs * 16, length: 0x100 + hello.byteLength },
+    );
+    assert.deepEqual(loadedBytes.slice(0, 2), [0xCD, 0x20], '返却CSにPSP先頭のINT 20hがありません');
+    assert.deepEqual(loadedBytes.slice(0x100), Array.from(hello), '返却CS:0100にHELLO.COMがありません');
+    assert.equal(screen.includes('Hello, PC-98!'), false, '4B01h load-onlyでHELLO.COMが実行されました');
     console.log(`[RESULT] FreeDOS(98) 4B01h対応 CS:IP=${loaded[1].toUpperCase()}:${loaded[2].toUpperCase()} SS:SP=${loaded[3].toUpperCase()}:${loaded[4].toUpperCase()}`);
     console.log('[PASS] PSP・HELLO.COM本体・load-only・初期レジスタ値を確認');
   }

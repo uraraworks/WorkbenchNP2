@@ -61,6 +61,19 @@ function assertStoppedAt(actual, expected) {
   assert.equal(actual.paused, true, 'BP停止時にpauseではありません');
 }
 
+function assertEntryStopped(actual) {
+  assert.equal(actual.state.entryStopped, true, 'エントリ停止フラグが立っていません');
+  assert.equal(actual.state.paused, true, 'エントリでpauseしていません');
+  assert.equal(actual.regs.cs, actual.state.loaderControl.cs, 'CPU CSがローダ通知CSと不一致です');
+  assert.equal(actual.regs.eip, actual.state.loaderControl.ip, 'CPU IPがローダ通知IPと不一致です');
+  assert.equal(actual.regs.ss, actual.state.loaderControl.ss, 'CPU SSがローダ通知SSと不一致です');
+  assert.equal(actual.regs.esp & 0xffff, actual.state.loaderControl.sp, 'CPU SPがローダ通知SPと不一致です');
+  assert.equal(actual.regs.ds, actual.state.loaderControl.targetPsp, 'CPU DSが対象PSPと不一致です');
+  assert.equal(actual.regs.es, actual.state.loaderControl.targetPsp, 'CPU ESが対象PSPと不一致です');
+  assert.equal(actual.state.currentLine, actual.entryLine, '停止行が対象の最初の生成行ではありません');
+  assert.equal(actual.screen.includes('Hello, PC-98!'), false, 'エントリ停止前に対象が実行されています');
+}
+
 const results = [];
 async function check(number, name, action) {
   try {
@@ -100,30 +113,42 @@ try {
     assert.deepEqual(pageErrors, []);
     const state = await page.evaluate(() => window.pc98ide.getState());
     assert.equal(state.paused, true);
+    assert.equal(state.entryStopped, true);
     assert.ok(Number.isInteger(state.programCs) && state.programCs > 0, `CSが不正です: ${state.programCs}`);
   });
 
-  await check(2, 'ソース・行マップ・RAM実測CSを表示', async () => {
+  await check(2, '無改変COMを4B01hロードし、1命令目の実行前に停止', async () => {
     const evidence = await page.evaluate(() => ({
       lines: document.querySelectorAll('[data-source-line]').length,
       mapped: document.querySelectorAll('[data-source-line][data-debuggable]').length,
       programCs: Number(document.body.dataset.programCs),
       status: document.querySelector('#status').textContent,
+      source: Array.from(document.querySelectorAll('[data-source-line]'), (row) => row.dataset.text).join('\n'),
+      state: window.pc98ide.getState(),
+      regs: window.pc98ide.getRegisters(),
+      screen: window.pc98ide.getScreenText().text,
+      entryLine: Number(document.querySelector('[data-source-line][data-debuggable]').dataset.sourceLine),
     }));
     assert.ok(evidence.lines >= 10);
-    assert.ok(evidence.mapped >= 7);
-    assert.ok(evidence.status.includes('PSP/CS='), `RAM実測の表示がありません: ${evidence.status}`);
-    assert.equal(evidence.programCs, (await page.evaluate(() => window.pc98ide.getState())).programCs);
+    assert.ok(evidence.mapped >= 6);
+    assert.ok(evidence.status.includes('4B01hローダ'), `ローダ方式の表示がありません: ${evidence.status}`);
+    assert.equal(evidence.source.includes('PC98DEV_IDE'), false, 'hello.asmにIDE待機スタブが残っています');
+    assert.equal(evidence.state.programSize, 28, '無改変HELLO.COMが28 bytesではありません');
+    assert.equal(evidence.state.targetBytesMatched, true, 'ロード済み対象が無改変HELLO.COMと不一致です');
+    assert.equal(evidence.programCs, evidence.state.programCs);
+    assertEntryStopped(evidence);
     await page.click('#step');
-    assert.equal((await page.evaluate(() => window.pc98ide.getState())).lastStepCount, 1);
+    const stepped = await page.evaluate(() => window.pc98ide.getState());
+    assert.equal(stepped.lastStepCount, 1);
+    assert.equal(stepped.entryStopped, false);
   });
 
   await check(3, 'クリックしたソース行のBPで停止・同じ行を強調', async () => {
     targetLine = await page.$$eval('[data-source-line][data-debuggable]', (rows) => {
-      const row = rows.find((item) => /mov\s+ah,09h/i.test(item.dataset.text ?? ''));
+      const row = rows.find((item) => /^\s*int\s+21h/i.test(item.dataset.text ?? ''));
       return row ? Number(row.dataset.sourceLine) : null;
     });
-    assert.ok(Number.isInteger(targetLine), 'mov ah,09hのマップ行がありません');
+    assert.ok(Number.isInteger(targetLine), '最初のint 21hのマップ行がありません');
     await page.click(`[data-source-line="${targetLine}"]`);
     assert.equal((await page.evaluate(() => window.pc98ide.getState())).selectedLine, targetLine);
     await page.click('#continue');
@@ -184,10 +209,29 @@ try {
     console.log(`[SHOT] ${SHOT}`);
   });
 
-  await check(8, '検証ガードが意図的な停止行ずれを検出', async () => {
+  await check(8, '検証ガードが意図的な停止行・エントリ証拠の破壊を検出', async () => {
     const good = { currentLine: targetLine, selectedLine: targetLine, paused: true };
     assert.doesNotThrow(() => assertStoppedAt(good, targetLine));
     assert.throws(() => assertStoppedAt({ ...good, currentLine: targetLine + 1 }, targetLine));
+    const entryEvidence = await page.evaluate(() => {
+      const state = window.pc98ide.getState();
+      const first = document.querySelector('[data-source-line][data-debuggable]');
+      return {
+        state: { ...state, entryStopped: true, paused: true, currentLine: Number(first.dataset.sourceLine) },
+        regs: {
+          ...window.pc98ide.getRegisters(),
+          cs: state.loaderControl.cs, eip: state.loaderControl.ip,
+          ss: state.loaderControl.ss, esp: state.loaderControl.sp,
+          ds: state.loaderControl.targetPsp, es: state.loaderControl.targetPsp,
+        },
+        entryLine: Number(first.dataset.sourceLine), screen: '',
+      };
+    });
+    assert.doesNotThrow(() => assertEntryStopped(entryEvidence));
+    assert.throws(() => assertEntryStopped({
+      ...entryEvidence, regs: { ...entryEvidence.regs, eip: entryEvidence.regs.eip + 1 },
+    }));
+    assert.throws(() => assertEntryStopped({ ...entryEvidence, screen: 'Hello, PC-98!' }));
   });
 } finally {
   if (browser) await browser.close();

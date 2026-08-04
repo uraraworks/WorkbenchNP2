@@ -162,6 +162,12 @@ export declare function coreDiskAccess(): DiskAccessCounters | undefined;
  * wasmメモリから独立したコピーを返すので、呼び出し後にコア側が書き換えても影響しない。
  */
 export declare function coreReadMemory(addr: number, len: number): Uint8Array;
+/**
+ * デバッグ用にPC-98メインRAMへ書き込む。webnp2_mem_ptr()はwasmヒープ内の
+ * 実RAM先頭を返すため、HEAPU8の対応範囲へコピーすればゲストから即座に見える。
+ * CPU状態との競合を避ける責任は呼出側にあり、通常はpause中に使用する。
+ */
+export declare function coreWriteMemory(addr: number, bytes: Uint8Array): void;
 /** デバッガの一時停止状態を設定する。 */
 export declare function coreDbgSetPaused(paused: boolean): void;
 /** デバッガの一時停止状態を返す。 */

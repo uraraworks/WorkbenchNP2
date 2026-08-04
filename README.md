@@ -4,7 +4,7 @@
 [WebNP2](../WebNP2) を実行基盤に、C / アセンブラで書いたコードを
 その場でビルド・実行・デバッグできるようにするのが目標。
 
-## 現状（2026-08-04）
+## 現状（2026-08-05）
 
 **Step 3 まで到達。ビルドからソース行デバッグまでの縦一本が通っている。**
 
@@ -40,21 +40,24 @@ ide/                WebNP2 embedを使う最小IDE実証
 
 ## 最小IDE実証
 
-> **重要: 現在のCS決定方式は暫定実証であり、一般的なプログラムローダではない。**
-> `PC98DEV_IDE` でソースへ入力待ちスタブを注入できる自前ビルドだけが対象である。
-> スタブはキー入力を1文字消費してタイミングも変えるため、ユーザープログラムの挙動を変える。
-> ソースを変更できない既存COM/EXE（SAKA.EXE等）には使えず、待機しない即時終了プログラムは
-> RAM探索前に終了して取りこぼす。この制約を解消するまでは汎用ソースデバッガとは扱わない。
+> **現在の制約:** デバッガローダが使うDOS EXEC 4B01hは同梱FreeDOS(98)で実地確認済みだが、
+> NEC MS-DOSを含む他のDOSでは未確認である。非対応DOSではこの方式を利用できない。
+> また現時点のIDE実証UIはHELLO.COM固定で、任意ファイル選択UIはまだない。
 
 `ide/` は `samples/hello.asm` をブラウザのwasm NASMでアセンブルし、行マップとFAT12 FDを
 その場で生成して、IDEが用意したcanvas上のNP2kaiへ渡す。ソース行クリックBP、現在行強調、
 「次の行まで実行」を備える。レジスタはembedのUIを使わないIDE独自表示、逆アセンブルはembed部品である。
 
-`.COM` のCSは固定しない。IDEビルドでは `PC98DEV_IDE` を定義し、冒頭のDOS入力待ち中にRAMを走査する。
-生成したCOMの全バイトが物理アドレス `segment*16+100h` に一致し、同じsegmentのPSP先頭が
-`CD 20`（INT 20h）であることを確認してCSを決める。これはDOSのCOMロード規約
-（PSPとCSが同一、開始IP=100h）と実際のロード済み内容の両方を根拠にする。
-通常のCLIビルドでは定義しないため、従来のhello.comは28バイトのまま変わらない。
+`ide/debug-loader.asm` をwasm NASMで組み立て、対象を内容無改変の `TARGET.COM` として同じFDへ置く。
+ローダは4Ahで自身を縮小して4B01hで対象をロードし、署名付き制御ブロックへPSPと初期
+CS:IP / SS:SPをpublishする。ホストは対象バイト列を走査せず、この専用署名をRAMから読み、CPUをpauseして
+範囲検査付きRAM書込みでrelease byteだけを返す。`webnp2_mem_ptr` が指すHEAPU8は直接書込み可能だが、
+`window.Module`へ依存しないようembedの `DebuggerController.writeMemory` を公開経路にした。
+
+ローダはCOMなら返却CSをPSPとし、MZ EXEなら事前に読んだヘッダの `e_cs` を使って
+`PSP = relocated CS - e_cs - 10h` とする。COM/EXEともDS=ES=PSP、DOS返却のSS:SPとCS:IPを設定し、
+割り込み禁止下でSS→SPを連続設定する。最後はSTI直後のfar jumpをエントリBPまで1命令実行枠で追うため、
+対象の1命令目を実行する前に停止する。以前の `PC98DEV_IDE` 入力待ちスタブと対象RAM走査は削除した。
 
 WebNP2から埋め込み成果物とコアを同期してから、実ブラウザ検証を実行する。
 
@@ -63,33 +66,28 @@ WebNP2から埋め込み成果物とコアを同期してから、実ブラウ�
 node ide/verify-ide.mjs
 ```
 
-検証は、helloのTVRAM出力、クリックしたBP行と停止・強調行の一致、次行への遷移、IDE独自レジスタの
-表示値とAPI実値の一致を確認する。停止行検証へ意図的に+1した値が同じ検証関数で拒否されることも
-確認し、「要素が存在するだけ」の空回りを防ぐ。`PC98DEV_URL` と `CHROME_PATH` で起動先を上書きできる。
+検証は、28-byteの無改変hello、対象1命令目での初期レジスタ一致と未出力、クリックBPと停止・強調行、
+次行への遷移、IDE独自レジスタ表示、実行後のTVRAM出力を確認する。停止IPを+1した値や、実行済みの
+画面文字列を同じエントリ検証関数へ渡すとFAILすることも確認し、空回りを防ぐ。
+`PC98DEV_URL` と `CHROME_PATH` で起動先を上書きできる。
 
 同期物の `ide/vendor/webnp2/LICENSE.WebNP2` はWebNP2由来コードの出所を、
 `ide/core/LICENSE.NP2kai` はNP2kaiの利用条件を示す。FreeDOS起動FDには同じディレクトリの
 `README.txt`（GPLv2+とソース情報）が対応するため、配布時は各バイナリとライセンス表示を分離しない。
 
-### 汎用ローダへ進むための調査（未実装）
+### デバッガローダ方式
 
 NP2kaiのi386c/ia32では `INT imm8` が命令実装でベクタを読み、`INTERRUPT` が実モードならIVT、
 保護モードならIDTへCPU状態を遷移させる。DOSのINT 21h、EXEC、PSP管理自体はゲストOSのコードであり、
 NP2kaiは実装しない。`ENABLE_TRAP` 時だけINT実行直前に `softinttrap(CS,EIP,vector)` を呼ぶ既存経路は
 あるが、現在のemnp21kai_sdl2のコンパイル定義には `ENABLE_TRAP` がなく、同関数もログ用で停止できない。
 
-したがって現在のpause/step/固定CS:EIP BPだけでは、コマンドインタプリタのINT 21h AH=4Bhを
-**ロード直後・子プログラム実行前**で止められない。1命令ずつ逆アセンブルしてAH=4BhのINT直前を
-見つけること自体は可能だが、その時点では未ロードである。通常の4B00hは子の終了まで呼出元へ戻らず、
-以後のDOS内部経路もOS実装依存なので、INT入口の検出だけでは開始CS:IPを得られない。
+通常の4B00hは子の終了まで呼出元へ戻らず、INT入口の検出だけでは開始CS:IPを得られない。
+4B01hならDOSが再配置を終えた後、実行前にローダへ戻るため、対象を変更せず入口を確定できる。
+同梱FreeDOS(98)ではPhase E-0でCS:IP=0856:0100、SS:SP=0856:FFFCを実測し、PSPと対象全バイトが
+存在しながらHELLOが未実行であることまで確認した。これをPhase E-1のIDE開始経路として採用している。
 
-本命案は、対象とは別のゲスト側デバッガローダがDOS EXEC 4B01h（load but do not execute）を呼び、
-DOSが再配置を完了して返した初期CS:IP・SS:SPを共有メールボックスへ書いて待つ方式である。
-ホストは既存のメモリ読出しで入口を受け取りBPを設定してからローダを解放する。対象COM/EXEの改変は不要で、
-MZ EXEの再配置後CSもDOS自身が確定する。ただしNEC MS-DOS/FreeDOS各版で4B01h対応を実機相当環境で
-検証する必要がある。
-
-4B01hを使えないDOS向けにC側を補助するなら、まず
+4B01hを使えないDOS向けにC側を補助する場合は、まず
 `webnp2_dbg_run_until_softint(vector, ax_mask, ax_value, max_steps)` を追加し、命令実行**前**の
 CD imm8とAX条件をC内で効率よく監視する。これはAH=4Bh入口の捕捉APIであり、単独ではロード完了を
 意味しない。OS非依存性を保つには、併せて汎用メモリwatch/mailbox通知を提供してゲストローダと協調する。
@@ -102,7 +100,8 @@ NP2kai内へDOSバージョン依存のPSP/MCB解析を直接組み込む `run_u
 `B:\HELLO.COM`をロードする。EXEC前のSS:SP/DS/ESはCS相対変数へ保存し、戻り直後はスタックを
 一切使わず復元する。
 
-EXECパラメータブロックは `+00h=環境segment`、`+02h=command tail far ptr`、
+Ralf Brown's Interrupt ListのINT 21h/AX=4B01h定義と照合したEXECパラメータブロックは、
+`+00h=環境segment`、`+02h=command tail far ptr`、
 `+06h=FCB1 far ptr`、`+0Ah=FCB2 far ptr`。4B01h成功時の返却領域は、メモリ格納順で
 `+0Eh=SP`、`+10h=SS`、`+12h=IP`、`+14h=CS`（すべてword）である。表示時は人間向けに
 `CS:IP`、`SS:SP`へ並べ直す。

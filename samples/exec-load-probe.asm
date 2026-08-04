@@ -1,5 +1,6 @@
 ; DOS EXEC 4B01h (load but do not execute) 対応確認用 .COM
-; RBIL互換の返却領域はメモリ格納順で +0Eh=SP, +10h=SS, +12h=IP, +14h=CS。
+; Ralf Brown's Interrupt ListのINT 21h/AX=4B01h定義と照合した。
+; 返却領域はメモリ格納順で +0Eh=SP, +10h=SS, +12h=IP, +14h=CS。
 ; 人間向け表示ではこれをCS:IP / SS:SPへ並べ直す。
 	CPU	8086
 	BITS	16

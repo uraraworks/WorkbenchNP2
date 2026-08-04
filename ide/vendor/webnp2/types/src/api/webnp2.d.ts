@@ -368,6 +368,11 @@ export declare class WebNP2 extends TypedEmitter<WebNP2EventMap> {
         len: number;
         base64: string;
     };
+    /** デバッグ用にPC-98メインRAMへ書き込む。CPU停止中の利用を前提とする。 */
+    writeMemoryBase64(addr: number, base64: string): {
+        addr: number;
+        len: number;
+    };
     /** PC-98スキャンコードを1回注入する。 */
     sendKey(code: number, down: boolean): void;
     private sleep;
