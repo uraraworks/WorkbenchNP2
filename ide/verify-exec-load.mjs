@@ -19,6 +19,17 @@ const sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms)
 const RESULT_PATTERN = /E0 (?:4A ERROR AX=[0-9A-F]{4}|4B01 ERROR AX=[0-9A-F]{4}|4B01 OK CS:IP=[0-9A-F]{4}:[0-9A-F]{4} SS:SP=[0-9A-F]{4}:[0-9A-F]{4})/i;
 // PC-98のDOSは版・設定により A> / A:> / A:\> のいずれも使う。
 const DOS_PROMPT_PATTERN = /(?:^|\n)\s*[A-Z]:?\\?>\s*(?:\n|$)/i;
+// 当時のHDDはAUTOEXECからメニューやファイラーを起動する構成が普通で、素のプロンプトが出ない。
+// 検出したランチャごとに離脱キーを送ってDOSプロンプトまで抜ける。
+const LAUNCHER_ESCAPES = [
+  { name: 'NEC コマンドメニュー', pattern: /(?:コマンド[　 ]*メニュー|メニューの終了|Menu v)/, keys: ['F9'] },
+  // FDは Q で「FD を終了しますか ?」の確認が出るので Y まで送る。
+  { name: 'ファイラー FD', pattern: /(?:FD Version|by A\.Idei)/i, keys: ['Q', 'Y'] },
+];
+const MENU_PATTERN = new RegExp(LAUNCHER_ESCAPES.map((e) => e.pattern.source).join('|'), 'i');
+const PROMPT_OR_MENU_PATTERN = new RegExp(`${DOS_PROMPT_PATTERN.source}|${MENU_PATTERN.source}`, 'i');
+// HDD起動ではFDのドライブレターがパーティション構成で変わるので決め打ちしない。
+const HDD_FD_DRIVE_CANDIDATES = ['B', 'C', 'D', 'E', 'F'];
 
 async function loadPuppeteer() {
   try {
@@ -85,13 +96,21 @@ const debug = createDebugger(engine);
 // 検証用の一時Chromeプロファイルにも外部HDDをIndexedDB保存しない。
 // 起動に必要なメモリ上のコピーだけを使い、page closeで破棄する。
 engine.persistNow = async () => {};
+let pendingProbeFd = null;
 window.execLoadProbe = {
   engine,
   readMemory: (address, length) => Array.from(debug.readMemory(address, length)),
+  // HDD起動ケースではプローブFDを起動後にホットマウントするため、後から挿せるよう保持する。
+  insertProbeFd: async () => {
+    if (!pendingProbeFd) throw new Error('probe FD already inserted');
+    await engine.insertFd(1, pendingProbeFd.file, pendingProbeFd.sourceKey);
+    pendingProbeFd = null;
+  },
   ready: (async () => {
     const probeResponse = await fetch('/exec-load-probe.xdf');
     if (!probeResponse.ok) throw new Error('probe FD fetch failed');
     const probe = { file: { name: 'probe.xdf', bytes: new Uint8Array(await probeResponse.arrayBuffer()) }, sourceKey: 'probe:fd' };
+    pendingProbeFd = probe;
     if (config.boot === 'freedos') {
       const bootResponse = await fetch('./freedos/fd98_2hd.xdf');
       if (!bootResponse.ok) throw new Error('FreeDOS FD fetch failed');
@@ -101,6 +120,7 @@ window.execLoadProbe = {
         latencyMs: 40,
         extMemMB: 1,
       });
+      pendingProbeFd = null;   // FreeDOSケースは起動時からFD2に載っている
       return;
     }
     const hddResponse = await fetch(config.imageUrl);
@@ -110,7 +130,8 @@ window.execLoadProbe = {
         file: { name: config.imageName, bytes: new Uint8Array(await hddResponse.arrayBuffer()) },
         sourceKey: 'probe:external-hdd', alreadyPersisted: true,
       },
-      fd1: probe,
+      // PC-98はFDをHDDより先に起動対象として試すため、起動不能なプローブFDを
+      // 挿したままだとHDDへ落ちてこない。HDD単独で起動し、FDは後からホットマウントする。
       latencyMs: 40,
       extMemMB: 1,
     });
@@ -198,6 +219,48 @@ async function waitForText(page, pattern, timeout, message) {
   throw new Error(message);
 }
 
+/**
+ * HDD起動ケースのプローブ実行。
+ * 起動直後の状態はイメージによって「素のDOSプロンプト」とも限らず、MSDOS33.hdiは
+ * NEC純正のコマンドメニュー(Menu v2.41)が出る。メニューならF9で抜けてから進める。
+ * さらにHDD起動ではFDのドライブレターがイメージのパーティション構成で変わるため、
+ * 決め打ちせず候補を順に試して実際に起動できたものを採用する。
+ */
+async function runProbeOnHdd(page, scenario) {
+  const first = await page.evaluate(() => window.execLoadProbe.engine.getScreenText().text);
+  const launcher = LAUNCHER_ESCAPES.find((entry) => entry.pattern.test(first));
+  if (launcher && !DOS_PROMPT_PATTERN.test(first)) {
+    console.error(`[INFO] ${scenario.label}: ${launcher.name} を検出、${launcher.keys.join('→')} で離脱します`);
+    for (const key of launcher.keys) {
+      await page.evaluate((k) => window.execLoadProbe.engine.sendKeys(k), key);
+      await sleep(500);
+    }
+    await waitForText(
+      page, DOS_PROMPT_PATTERN, 60_000,
+      `${scenario.label}の${launcher.name}からDOSプロンプトへ抜けられませんでした`,
+    );
+  }
+  await page.evaluate(() => window.execLoadProbe.insertProbeFd());
+  await sleep(1000);
+  const tried = [];
+  for (const letter of HDD_FD_DRIVE_CANDIDATES) {
+    await page.evaluate((cmd) => window.execLoadProbe.engine.pasteText(cmd), `${letter}:\\E0LOAD\r`);
+    const limit = Date.now() + 15_000;
+    while (Date.now() < limit) {
+      const text = await page.evaluate(() => window.execLoadProbe.engine.getScreenText().text);
+      if (RESULT_PATTERN.test(text)) {
+        console.error(`[INFO] ${scenario.label}: プローブFDは ${letter}: に割り当てられました`);
+        return text;
+      }
+      await sleep(200);
+    }
+    tried.push(letter);
+  }
+  const last = await page.evaluate(() => window.execLoadProbe.engine.getScreenText().text);
+  console.error(`[TVRAM DUMP] ${scenario.label} ドライブ探索失敗(試行: ${tried.join(', ')})\n${last}\n[/TVRAM DUMP]`);
+  throw new Error(`${scenario.label}: プローブFDのドライブレターを特定できませんでした`);
+}
+
 async function evaluateResult(page, scenario, screen, hello) {
   const shrinkError = screen.match(/E0 4A ERROR AX=([0-9A-F]{4})/i);
   if (shrinkError) throw new Error(`4Ahメモリ縮小失敗 AX=${shrinkError[1].toUpperCase()}`);
@@ -251,15 +314,20 @@ async function runScenario(browser, scenario, hello) {
     assert.deepEqual(pageErrors, []);
     await waitForText(
       page,
-      DOS_PROMPT_PATTERN,
+      scenario.id === 'freedos' ? DOS_PROMPT_PATTERN : PROMPT_OR_MENU_PATTERN,
       scenario.promptTimeout,
       `${scenario.label}のDOSプロンプト待機がタイムアウトしました`,
     );
-    // HDD起動時のWebNP2規約ではFD1=B:。FreeDOSケースではプローブはFD2=B:。
-    await page.evaluate(() => window.execLoadProbe.engine.pasteText('B:\\E0LOAD\r'));
-    const screen = await waitForText(
-      page, RESULT_PATTERN, 60_000, `${scenario.label}の4B01h結果がTVRAMへ表示されませんでした`,
-    );
+    let screen;
+    if (scenario.id === 'freedos') {
+      // FreeDOSケースはプローブが起動時からFD2=B:に載っている。
+      await page.evaluate(() => window.execLoadProbe.engine.pasteText('B:\\E0LOAD\r'));
+      screen = await waitForText(
+        page, RESULT_PATTERN, 60_000, `${scenario.label}の4B01h結果がTVRAMへ表示されませんでした`,
+      );
+    } else {
+      screen = await runProbeOnHdd(page, scenario);
+    }
     return await evaluateResult(page, scenario, screen, hello);
   } finally {
     await page.close();
