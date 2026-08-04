@@ -12,6 +12,43 @@ const execFileAsync = promisify(execFile);
 const HELLO_ASM = fileURLToPath(new URL('../samples/hello.asm', import.meta.url));
 const BUILDER = fileURLToPath(new URL('./build-com.mjs', import.meta.url));
 
+/**
+ * リスティングの通常hexカラムを、parseListingとは独立した正規表現で読み.COMと照合する。
+ * `BA[0C00]`（再配置）と`AA<rep 14h>`（反復省略）は最終バイト列ではないためentry単位で除外する。
+ * 長いdb行末の`-`は単なる継続記号なので除去して比較する。
+ */
+function verifyListingHex(listing, output) {
+  let comparedBytes = 0;
+  let comparedEntries = 0;
+  const skipped = [];
+  for (const line of listing.split(/\r?\n/)) {
+    const match = line.match(/^\s*(\d+)\s+([0-9A-F]{8})\s+(\S+)/i);
+    if (!match) continue;
+    const [, srcLineText, addressText, rawHex] = match;
+    const address = Number.parseInt(addressText, 16);
+    const hex = rawHex.endsWith('-') ? rawHex.slice(0, -1) : rawHex;
+    if (!/^(?:[0-9A-F]{2})+$/i.test(hex)) {
+      const notation = rawHex.includes('[')
+        ? 'relocation notation'
+        : rawHex.includes('<rep') ? 'repeat notation' : 'special notation';
+      skipped.push({ srcLine: Number(srcLineText), address, rawHex, notation });
+      continue;
+    }
+    const expected = Uint8Array.from(hex.match(/[0-9A-F]{2}/gi), (byte) => Number.parseInt(byte, 16));
+    const actual = output.subarray(address, address + expected.length);
+    assert.equal(actual.length, expected.length, `line ${srcLineText}: hex range exceeds .com`);
+    assert.deepEqual(
+      actual,
+      expected,
+      `line ${srcLineText}: listing address 0x${addressText} does not match its hex column`,
+    );
+    comparedBytes += expected.length;
+    comparedEntries++;
+  }
+  assert.ok(comparedEntries > 0, 'listing contains no independently comparable hex entries');
+  return { comparedBytes, comparedEntries, skipped };
+}
+
 async function verify() {
   const result = await assemble(await readFile(HELLO_ASM), { listing: true });
   assert.equal(result.ok, true, result.ok ? undefined : JSON.stringify(result.errors));
@@ -23,21 +60,20 @@ async function verify() {
   assert.equal(map[0].offset, 0x100);
   console.log('PASS 2: first segment offset is ORG 100h');
 
-  let mappedBytes = 0;
+  const audit = verifyListingHex(result.listing, result.output);
+  assert.equal(audit.comparedBytes, 25);
+  assert.equal(audit.skipped.length, 1);
+  assert.equal(audit.skipped[0].rawHex, 'BA[0C00]');
+  console.log(
+    `PASS 3: ${audit.comparedBytes} bytes compared / ${audit.skipped.length} entry skipped `
+    + `(${audit.skipped[0].rawHex}: ${audit.skipped[0].notation})`,
+  );
+
   for (const entry of map) {
-    const fileOffset = entry.offset - 0x100;
-    assert.deepEqual(
-      entry.bytes,
-      Array.from(result.output.subarray(fileOffset, fileOffset + entry.bytes.length)),
-      `source line ${entry.srcLine} differs at offset 0x${entry.offset.toString(16)}`,
-    );
-    mappedBytes += entry.bytes.length;
     for (let index = 0; index < entry.bytes.length; index++) {
       assert.equal(offsetToLine(map, entry.offset + index), entry.srcLine);
     }
   }
-  assert.equal(mappedBytes, result.output.byteLength);
-  console.log(`PASS 3: all ${mappedBytes} mapped bytes exactly match hello.com`);
 
   for (const srcLine of new Set(map.map((entry) => entry.srcLine))) {
     const offset = lineToOffset(map, srcLine);
@@ -47,6 +83,15 @@ async function verify() {
   assert.equal(lineToOffset(map, 7), null); // バイトを生成しないラベル行
   assert.equal(offsetToLine(map, map[1].offset + 1), map[1].srcLine); // 命令途中
   console.log('PASS 4: lineToOffset / offsetToLine round-trip matched (including instruction interior)');
+
+  // 負例: 最初のアドレスだけを+1したlistingは、hexが同じでも.COM上の位置がずれるため必ず失敗する。
+  const shiftedListing = result.listing.replace(
+    /(^\s*\d+\s+)00000000(\s+\S+)/m,
+    (_line, prefix, suffix) => `${prefix}00000001${suffix}`,
+  );
+  assert.notEqual(shiftedListing, result.listing);
+  assert.throws(() => verifyListingHex(shiftedListing, result.output), /does not match its hex column/);
+  console.log('PASS 5: intentional +1 listing-address shift was detected');
 
   // NASMの実リスティングで、バイト非生成行・timesの<rep>・マクロの<1>展開も固定検証する。
   const expandedSource = new TextEncoder().encode([
@@ -62,7 +107,15 @@ async function verify() {
     { srcLine: 10, offset: 0x115, bytes: [0x40] },
     { srcLine: 11, offset: 0x116, bytes: [0xbb, 0x00, 0x01] },
   ]);
-  console.log('PASS 5: label/EQU omitted, times merged, and macro expansion mapped to its invocation line');
+  const expandedAudit = verifyListingHex(expanded.listing, expanded.output);
+  assert.deepEqual(expandedAudit.skipped.map(({ rawHex, notation }) => ({ rawHex, notation })), [
+    { rawHex: 'AA<rep', notation: 'repeat notation' },
+    { rawHex: 'BB[0000]', notation: 'relocation notation' },
+  ]);
+  console.log(
+    `PASS 6: label/EQU omitted, times merged, macro mapped; `
+    + `${expandedAudit.comparedBytes} bytes compared / ${expandedAudit.skipped.length} entries skipped`,
+  );
 
   const temporary = await mkdtemp(join(tmpdir(), 'pc98dev-listing-'));
   try {
@@ -74,7 +127,7 @@ async function verify() {
     ]);
     assert.deepEqual(new Uint8Array(com), result.output);
     assert.deepEqual(savedMap, map);
-    console.log('PASS 6: build-com wrote byte-identical .com and .com.map.json beside the FD image');
+    console.log('PASS 7: build-com wrote byte-identical .com and .com.map.json beside the FD image');
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }
