@@ -5,6 +5,11 @@
 	ORG	100h
 
 start:
+	; IDEビルドだけはロード済みCOMをRAMで同定してCSを確定するまで入力を待つ。
+%ifdef PC98DEV_IDE
+	mov	ah,08h
+	int	21h
+%endif
 	mov	ah,09h
 	mov	dx,msg
 	int	21h

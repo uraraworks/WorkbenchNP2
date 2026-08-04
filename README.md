@@ -6,7 +6,7 @@
 
 ## 現状（2026-08-04）
 
-**Step 2 まで到達。ビルドから実行までの縦一本が通っている。**
+**Step 3 まで到達。ビルドからソース行デバッグまでの縦一本が通っている。**
 
 ```
 .asm ──[wasm NASM]──> .COM ──[FAT12 書き込み]──> .xdf ──[WebNP2]──> PC-98 で実行
@@ -35,7 +35,35 @@ toolchain/
 samples/             テスト用 .asm
 docs/
   masm-to-nasm.md    MASM→NASM 変換規則（自動変換ツールの仕様書を兼ねる）
+ide/                WebNP2 embedを使う最小IDE実証
 ```
+
+## 最小IDE実証
+
+`ide/` は `samples/hello.asm` をブラウザのwasm NASMでアセンブルし、行マップとFAT12 FDを
+その場で生成して、IDEが用意したcanvas上のNP2kaiへ渡す。ソース行クリックBP、現在行強調、
+「次の行まで実行」を備える。レジスタはembedのUIを使わないIDE独自表示、逆アセンブルはembed部品である。
+
+`.COM` のCSは固定しない。IDEビルドでは `PC98DEV_IDE` を定義し、冒頭のDOS入力待ち中にRAMを走査する。
+生成したCOMの全バイトが物理アドレス `segment*16+100h` に一致し、同じsegmentのPSP先頭が
+`CD 20`（INT 20h）であることを確認してCSを決める。これはDOSのCOMロード規約
+（PSPとCSが同一、開始IP=100h）と実際のロード済み内容の両方を根拠にする。
+通常のCLIビルドでは定義しないため、従来のhello.comは28バイトのまま変わらない。
+
+WebNP2から埋め込み成果物とコアを同期してから、実ブラウザ検証を実行する。
+
+```bash
+../WebNP2/scripts/export-embed.sh
+node ide/verify-ide.mjs
+```
+
+検証は、helloのTVRAM出力、クリックしたBP行と停止・強調行の一致、次行への遷移、IDE独自レジスタの
+表示値とAPI実値の一致を確認する。停止行検証へ意図的に+1した値が同じ検証関数で拒否されることも
+確認し、「要素が存在するだけ」の空回りを防ぐ。`PC98DEV_URL` と `CHROME_PATH` で起動先を上書きできる。
+
+同期物の `ide/vendor/webnp2/LICENSE.WebNP2` はWebNP2由来コードの出所を、
+`ide/core/LICENSE.NP2kai` はNP2kaiの利用条件を示す。FreeDOS起動FDには同じディレクトリの
+`README.txt`（GPLv2+とソース情報）が対応するため、配布時は各バイナリとライセンス表示を分離しない。
 
 ## 使い方
 
@@ -103,7 +131,6 @@ node verify-listing.mjs     # listingマップと.COM実バイト、行/offset�
 
 ## 次のステップ
 
-3. `exec_1step()` を wasm export してステップ実行（NP2kai の `i386c/ia32` に部品が揃っている）
 4. SmallerC を wasm 化して C 対応
 5. CodeMirror 6 でブラウザ UI
 
