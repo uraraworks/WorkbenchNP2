@@ -17,6 +17,8 @@ const BASE_URL = process.env.PC98DEV_EXEC_URL ?? 'http://127.0.0.1:5185/ide/exec
 const CHROME = process.env.CHROME_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
 const RESULT_PATTERN = /E0 (?:4A ERROR AX=[0-9A-F]{4}|4B01 ERROR AX=[0-9A-F]{4}|4B01 OK CS:IP=[0-9A-F]{4}:[0-9A-F]{4} SS:SP=[0-9A-F]{4}:[0-9A-F]{4})/i;
+// PC-98のDOSは版・設定により A> / A:> / A:\> のいずれも使う。
+const DOS_PROMPT_PATTERN = /(?:^|\n)\s*[A-Z]:?\\?>\s*(?:\n|$)/i;
 
 async function loadPuppeteer() {
   try {
@@ -55,7 +57,7 @@ async function externalCase(id, label, envName, imageName) {
   try {
     const info = await stat(path);
     if (!info.isFile()) return { id, label, envName, skip: '指定先が通常ファイルではありません' };
-    return { id, label, envName, path, imageName, size: info.size, promptTimeout: 180_000 };
+    return { id, label, envName, path, imageName, size: info.size, promptTimeout: 300_000 };
   } catch (error) {
     if (error && typeof error === 'object' && error.code === 'ENOENT') {
       return { id, label, envName, skip: '指定ファイルが存在しません' };
@@ -185,11 +187,14 @@ async function withTimeout(promise, timeout, message) {
 
 async function waitForText(page, pattern, timeout, message) {
   const limit = Date.now() + timeout;
+  let lastText = '';
   while (Date.now() < limit) {
-    const text = await page.evaluate(() => window.execLoadProbe.engine.getScreenText().text);
-    if (pattern.test(text)) return text;
+    lastText = await page.evaluate(() => window.execLoadProbe.engine.getScreenText().text);
+    if (pattern.test(lastText)) return lastText;
     await sleep(200);
   }
+  // 推測で起動失敗扱いにせず、停止画面をそのまま診断材料として残す。
+  console.error(`[TVRAM DUMP] ${message}\n${lastText}\n[/TVRAM DUMP]`);
   throw new Error(message);
 }
 
@@ -246,7 +251,7 @@ async function runScenario(browser, scenario, hello) {
     assert.deepEqual(pageErrors, []);
     await waitForText(
       page,
-      /[A-Z]:\\?>/i,
+      DOS_PROMPT_PATTERN,
       scenario.promptTimeout,
       `${scenario.label}のDOSプロンプト待機がタイムアウトしました`,
     );
