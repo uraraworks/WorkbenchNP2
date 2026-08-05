@@ -185,7 +185,8 @@ try {
     await page.setViewport({ width: 1200, height: 850, deviceScaleFactor: 1 });
     const pageErrors = [];
     page.on('pageerror', (error) => pageErrors.push(error.message));
-    await page.goto(BASE_URL, { waitUntil: 'networkidle2' });
+    // index.htmlは実用workbench。既存9項目は専用debug.htmlで同じ強度を維持する。
+    await page.goto(new URL('debug.html', BASE_URL).href, { waitUntil: 'networkidle2' });
     await page.evaluate(() => window.pc98ide.ready);
     assert.deepEqual(pageErrors, []);
     const state = await page.evaluate(() => window.pc98ide.getState());

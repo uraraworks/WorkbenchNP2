@@ -6,7 +6,7 @@
 
 ## 現状（2026-08-05）
 
-**Step 4 の C→16-bit DOS EXE生成と、ASM/C双方のソース行デバッグまで到達。**
+**ASM/Cのビルド・実行・ソース行デバッグに加え、IDE UI第1段（編集・保存・ビルド・実行）まで到達。**
 
 ```
 .asm ──[wasm NASM]──> .COM ──[FAT12 書き込み]──> .xdf ──[WebNP2]──> PC-98 で実行
@@ -39,7 +39,11 @@ toolchain/
 samples/             テスト用 .asm
 docs/
   masm-to-nasm.md    MASM→NASM 変換規則（自動変換ツールの仕様書を兼ねる）
-ide/                WebNP2 embedを使う最小IDE実証
+ide/                CodeMirrorエディタ＋WebNP2実行画面
+  index.html          実用workbench（編集・IndexedDB保存・ビルド・実行）
+  debug.html          CPU／ソース行デバッガ実証（第2段統合前の独立画面）
+  project-fs.mjs      保存先を差し替え可能にするProjectFS抽象
+  vendor/codemirror/  固定版bundle・17パッケージのLICENSE・再現build.sh
 ```
 
 C側はBSD 2-ClauseのSmallerCをpin検証後、一時ツリーへ1件だけ再現パッチを適用してwasm化し、
@@ -63,12 +67,33 @@ addressは近傍行へ寄せず`null`を返す。誤った行を示さないこ�
 再現・ホスト版一致検証は [docs/smallerc-wasm.md](docs/smallerc-wasm.md)、
 実在コードの詳細は [docs/kensyuu-smallerc.md](docs/kensyuu-smallerc.md) を参照する。
 
-## 最小IDE実証
+## IDE UI
+
+`ide/index.html`はCodeMirror 6の行番号・gutter付きエディタで、同梱サンプルまたは
+IndexedDBプロジェクトを開き、新規作成・編集・保存できる。保存APIは`ProjectFS`として切り離し、
+現状は`IndexedDbProjectFS`だけを実装する。File System Accessバックエンドは後続段階で追加する。
+
+拡張子から`.asm`／`.c`を判別し、Node CLIと共有する`assemble-core.mjs`／`compile-core.mjs`へ渡す。
+成功時はFAT12 FDを生成してWebNP2上のFreeDOSで実行する。失敗時は構造化エラーのstage・行・本文を
+一覧とCodeMirror gutterへ表示する。デスクトップはエディタとPC-98画面の左右分割、375px幅では
+縦積みと行折返しになり、両方を同じviewport内で操作できることをDOMとスクリーンショットで確認済み。
+
+CodeMirrorは`codemirror@6.0.2`、`@codemirror/lang-cpp@6.0.3`を入口に、直接・間接依存17件を
+全て固定して`ide/vendor/codemirror/codemirror.js`へvendoringした。17件の一次`LICENSE`本文は
+全てMITで、`LICENSE.CodeMirror`へpackage名・版ごとに同梱する。bundleは458,489 bytes
+（gzip -9で148,837 bytes）。`ide/vendor/codemirror/build.sh`がnpm installからbundle・
+ライセンス収集までを再現する。CDNは使用しない。
+
+デバッガ実証UIは`ide/debug.html`へ分離し、既存`verify-ide.mjs`の9項目はURLだけ追従して
+アサーションを維持する。workbenchへのデバッガ統合はUI第2段であり、未着手である。
+
+## デバッガ実証
 
 > **現在の制約:** デバッガローダが使うDOS EXEC 4B01hは、同梱FreeDOS(98)・NEC日本語MS-DOS 3.3C・
 > 1996年当時のHDD環境の3つで実地確認済み（下表）。ただしこれは手元にあるイメージの範囲であり、
 > すべてのDOSでの対応を保証するものではない。非対応DOSではこの方式を利用できない。
-> また現時点のIDE実証UIはHELLO.COM固定で、任意ファイル選択UIはまだない。
+> `debug.html`自体は回帰検証を安定させるためHELLO.COM固定である。任意ファイルの編集・実行は
+> `index.html`のworkbenchが担当し、デバッガ統合は第2段で行う。
 
 > **終了復帰:** 4B01h load-only後に対象へfar jumpしても、対象のAH=4Ch終了後に
 > ローダ自身をAH=4Chで終了してFreeDOSのプロンプトへ戻る。同一セッションで
@@ -96,6 +121,7 @@ WebNP2から埋め込み成果物とコアを同期してから、実ブラウ�
 
 ```bash
 ../WebNP2/scripts/export-embed.sh
+node ide/verify-workbench.mjs
 node ide/verify-ide.mjs
 ```
 
@@ -112,6 +138,7 @@ TVRAM出力、EXEC復帰2回、AH=4Dhの`0025h`、COMMAND.COMの`ERRORLEVEL 37`�
 同期物の `ide/vendor/webnp2/LICENSE.WebNP2` はWebNP2由来コードの出所を、
 `ide/core/LICENSE.NP2kai` はNP2kaiの利用条件を示す。FreeDOS起動FDには同じディレクトリの
 `README.txt`（GPLv2+とソース情報）が対応するため、配布時は各バイナリとライセンス表示を分離しない。
+同様に`ide/vendor/codemirror/codemirror.js`は17件分の`LICENSE.CodeMirror`と分離しない。
 
 ### デバッガローダ方式
 
@@ -338,11 +365,11 @@ node verify-saka-build.mjs  # SAKA変換版のwasm NASM・MZヘッダ・EXE行�
 |---|---|---|
 | アセンブラ | **NASM 2.16.03** | BSD 2-clause。SmallerC のバックエンドでもあるため必須 |
 | C コンパイラ | **SmallerC** | BSD 2-clause・依存極小。wasm化し、NASM出力へ行コメントを加える最小パッチ1件 |
-| エディタ | **CodeMirror 6**（未着手） | モバイル対応と軽さ。Monaco は 2〜5MB でモバイルが弱い |
+| エディタ | **CodeMirror 6** | contentEditableによるモバイル編集、行番号・gutter。固定版をローカルbundle化 |
 
 ## 次のステップ
 
-5. CodeMirror 6 でブラウザ UI
+6. workbenchへASM/Cソース行デバッガを統合（UI第2段）
 
 ## 注意
 

@@ -3,41 +3,39 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>PC98Dev IDE 実証</title>
+  <title>PC98Dev</title>
   <link rel="stylesheet" href="./vendor/webnp2/style.css">
-  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./workbench.css">
 </head>
 <body>
-  <header>
-    <h1>PC98Dev IDE 実証</h1>
-    <div id="status" role="status">初期化中…</div>
+  <header class="app-header">
+    <div><h1>PC98Dev</h1><p>ブラウザだけで書いて、ビルドして、PC-98で動かす。</p></div>
+    <a href="./debug.html">デバッガ実証</a>
   </header>
-  <main>
-    <section class="source-pane">
-      <h2>samples/hello.asm</h2>
-      <div class="controls">
-        <button id="pause">Pause</button>
-        <button id="step" disabled>Step</button>
-        <button id="next-line" disabled>次の行まで実行</button>
-        <button id="continue" disabled>BPまで実行</button>
-        <button id="run" disabled>通常実行</button>
-      </div>
-      <div id="source" aria-label="アセンブリソース"></div>
+  <nav class="file-bar" aria-label="ファイル操作">
+    <label>ファイル<select id="file-select" aria-label="ファイルを開く"></select></label>
+    <input id="new-path" aria-label="新規ファイル名" placeholder="project/main.asm">
+    <button id="new-file">新規</button><button id="save-file">保存</button>
+    <span id="save-state">未保存の変更なし</span>
+  </nav>
+  <main class="workspace-grid">
+    <section class="editor-card" aria-labelledby="editor-heading">
+      <div class="panel-heading"><div><h2 id="editor-heading">エディタ</h2><span id="current-path"></span></div>
+        <div class="build-actions"><button id="build">ビルド</button><button id="run">実行</button></div></div>
+      <div id="editor" aria-label="ソースエディタ"></div>
+      <div id="build-status" role="status">準備中…</div>
+      <ul id="build-errors" aria-label="ビルドエラー"></ul>
     </section>
-    <section class="runtime-pane">
-      <div class="screen-card">
-        <canvas id="screen" width="640" height="400" tabindex="0"></canvas>
-      </div>
-      <div class="debug-card">
-        <h2>レジスタ（IDE独自表示）</h2>
-        <div id="registers" class="ide-registers"></div>
-        <h2>逆アセンブル（embed部品）</h2>
-        <div id="disassembly"></div>
-      </div>
+    <section class="machine-card" aria-labelledby="machine-heading">
+      <div class="panel-heading"><h2 id="machine-heading">PC-98</h2><span id="runtime-status">未実行</span></div>
+      <div class="screen-shell"><canvas id="screen" width="640" height="400" tabindex="0"></canvas></div>
+      <pre id="screen-text" aria-label="PC-98テキスト画面"></pre>
     </section>
   </main>
-  <pre id="screen-text" aria-label="PC-98テキスト画面"></pre>
   <script src="../toolchain/nasm-wasm/nasm.js"></script>
-  <script type="module" src="./app.js"></script>
+  <script src="../toolchain/smlrc-wasm/smlrpp.js"></script>
+  <script src="../toolchain/smlrc-wasm/smlrc.js"></script>
+  <script src="../toolchain/smlrc-wasm/smlrl.js"></script>
+  <script type="module" src="./workbench.js"></script>
 </body>
 </html>
