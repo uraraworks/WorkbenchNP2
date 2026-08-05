@@ -7,6 +7,7 @@ SOURCE_DIR="$SCRIPT_DIR/../smallerc-src"
 NASM_SOURCE_DIR="$SCRIPT_DIR/../nasm-src"
 EMSDK_DIR="$ROOT_DIR/emsdk"
 VERIFY_TREE="$SCRIPT_DIR/../verify-upstream-tree.sh"
+LINE_INFO_PATCH="$SCRIPT_DIR/patches/0001-pc98dev-c-line-comments.patch"
 BUILD_JOBS="${BUILD_JOBS:-3}"
 REVISION="1865d79ce7a5ad3f8a9515a571437cee084b8b1d"
 NASM_REVISION="cd37b81b320ead83ca5a6bbce5da0a6456663bc6"
@@ -39,6 +40,8 @@ cleanup() {
 trap cleanup EXIT
 
 cp -R "$SOURCE_DIR"/. "$BUILD_DIR"/
+git -C "$BUILD_DIR" apply --check "$LINE_INFO_PATCH"
+git -C "$BUILD_DIR" apply "$LINE_INFO_PATCH"
 mkdir -p "$SCRIPT_DIR/host"
 
 # lcds.aもpin済みNASM 2.16.03で再生成する。ホストに入っている別版NASMへは依存しない。

@@ -5,7 +5,8 @@ import { readFile, readdir, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assemble } from './assemble.mjs';
-import { normalizeDosTextSource } from './dos-text.mjs';
+import { normalizeCrLfForPreprocessor, normalizeDosTextSource } from './dos-text.mjs';
+import { composeCSourceMap } from './c-source-map.mjs';
 import { makeFd } from './makefd.mjs';
 import { parseMzHeader } from './mz.mjs';
 
@@ -130,14 +131,18 @@ export async function compile(source, opts = {}) {
   if (!(source instanceof Uint8Array)) throw new TypeError('source must be a Uint8Array; strings are not accepted');
   validateOptions(opts);
   const normalized = normalizeDosTextSource(source);
-  const sourceNormalization = { dosEofBytesRemoved: normalized.dosEofBytesRemoved };
+  const lineEndings = normalizeCrLfForPreprocessor(normalized.source);
+  const sourceNormalization = {
+    dosEofBytesRemoved: normalized.dosEofBytesRemoved,
+    crlfSequencesNormalized: lineEndings.crlfSequencesNormalized,
+  };
   const previousExitCode = process.exitCode;
   try {
-    const preprocessed = await preprocess(normalized.source, opts.includeFiles ?? {});
+    const preprocessed = await preprocess(lineEndings.source, opts.includeFiles ?? {});
     if (!preprocessed.ok) return { ...preprocessed, sourceNormalization };
     const compiled = await compilePreprocessed(preprocessed.output);
     if (!compiled.ok) return { ...compiled, sourceNormalization };
-    const assembled = await assemble(compiled.output, { format: 'elf' });
+    const assembled = await assemble(compiled.output, { format: 'elf', listing: true });
     if (!assembled.ok) {
       return {
         ok: false,
@@ -148,9 +153,15 @@ export async function compile(source, opts = {}) {
     const linked = await linkSmall(assembled.output, opts.library);
     if (!linked.ok) return { ...linked, sourceNormalization };
     const header = parseMzHeader(linked.output);
+    const sourceMap = composeCSourceMap({
+      assembly: compiled.output,
+      object: assembled.output,
+      listing: assembled.listing,
+      linkerMap: linked.map,
+    });
     return {
       ok: true, output: linked.output, preprocessed: preprocessed.output,
-      assembly: compiled.output, object: assembled.output, linkerMap: linked.map, header,
+      assembly: compiled.output, object: assembled.output, linkerMap: linked.map, header, sourceMap,
       sourceNormalization,
     };
   } catch (error) {

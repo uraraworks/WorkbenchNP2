@@ -13,11 +13,22 @@
 
 ## upstream パッチ
 
-なし。SmallerC と同梱 ucpp の C ソースは変更せずビルドしている。
-`build.sh` は完全なgit cloneだけを受理し、HEADが上記revisionと一致すること、
-tracked・staged・untrackedを含めworktreeがcleanであることをビルド前に検証する。
+SmallerC は1件、NASMは0件。
 
-ソースの改行やファイル末尾はcloneしたupstreamのバイト列をそのまま使い、
+- `patches/0001-pc98dev-c-line-comments.patch`
+  - `v0100/smlrc.c`の`GetToken()`で行・ファイルを保存し、`ParseStatement()`から
+    `; @pc98dev-c-line`コメントとして出力する処理を追加する。
+  - 各文の開始で行をpublishし、文の終了では行0を出して対応範囲を閉じる。
+    prologue/epilogueや制御文後の補助ジャンプを直前のC行へ誤帰属させないためである。
+  - NASMの`%line`は生成バイトを変えない一方、listingの物理ASM行と構造化エラー行を
+    変更することを実測したため使わない。通常コメントは両方を維持する。
+
+`build.sh` は完全なgit cloneだけを受理し、HEADが上記revisionと一致すること、
+tracked・staged・untrackedを含めworktreeがcleanであることをパッチ適用前に検証する。
+検証済みupstreamを一時ツリーへコピーした後、`git apply --check`を通して上記1件を適用し、
+ホスト版とwasm版の両方を同じパッチ適用済みソースからビルドする。
+
+パッチ以外では、ソースの改行やファイル末尾はcloneしたupstreamのバイト列をそのまま使い、
 正規化も空行追加も行わない。以前のGitHub読取APIによる24ファイル部分コピーは、
 取得時に改行を正規化して末尾空行差分を作っていたため削除した。
 検証器へ期待revisionを全ゼロで渡す破壊テストが、revision mismatchの終了1に

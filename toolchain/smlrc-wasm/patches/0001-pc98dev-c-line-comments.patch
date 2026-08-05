@@ -1,0 +1,44 @@
+diff --git a/v0100/smlrc.c b/v0100/smlrc.c
+index 36f8ad8..33b5ef1 100644
+--- a/v0100/smlrc.c
++++ b/v0100/smlrc.c
+@@ -542,6 +542,8 @@ char TokenValueString[MAX_STRING_LEN + 1];
+ unsigned TokenStringLen = 0;
+ unsigned TokenStringSize = 0; // TokenStringLen * sizeof(char/wchar_t)
+ int LineNo = 1;
++int TokenLineNo = 1;
++int TokenFileNo = 0;
+ int LinePos = 1;
+ char CharQueue[MAX_CHAR_QUEUE_LEN];
+ int CharQueueLen = 0;
+@@ -1985,6 +1987,9 @@ int GetToken(void)
+       continue;
+     }
+-
++
++    TokenLineNo = LineNo;
++    TokenFileNo = FileCnt - 1;
++
+     if ((tok = GetTokenInner()) != tokEof)
+     {
+       if (PrepDontSkipTokens)
+@@ -8774,6 +8779,9 @@ int ParseStatement(int tok, int BrkCntTarget[2], int casesIdx)
+   {
+     statementNeeded = 0;
+-
++
++    GenStartCommentLine();
++    printf2("@pc98dev-c-line\t%d\t%s\n", TokenLineNo, FileNames[TokenFileNo]);
++
+     if (tok == ';')
+     {
+       tok = GetToken();
+@@ -9665,5 +9673,7 @@ int ParseStatement(int tok, int BrkCntTarget[2], int casesIdx)
+     }
+   } while (statementNeeded);
+-
++
++  GenStartCommentLine();
++  printf2("@pc98dev-c-line\t0\n");
+   return tok;
+ }

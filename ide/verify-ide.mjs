@@ -8,6 +8,7 @@ import { dirname, extname, join, resolve, sep } from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { compile, loadDefaultHeaders } from '../toolchain/compile.mjs';
+import { assemble } from '../toolchain/assemble.mjs';
 import { makeFd } from '../toolchain/makefd.mjs';
 
 const IDE_DIR = dirname(fileURLToPath(import.meta.url));
@@ -96,6 +97,13 @@ function assertLoaderExited(diagnostic, expectedCode) {
     `AH=4Dhの返却AXが期待値${expectedCode.toString(16)}ではありません`);
 }
 
+function assertCStopped(actual, sourceLines, expectedLine, expectedText) {
+  assert.deepEqual(actual.location, { file: 'in.c', line: expectedLine }, '停止addressのC行が不一致です');
+  assert.equal(sourceLines[expectedLine - 1].trim(), expectedText, '停止C行の原文が不一致です');
+  assert.equal(actual.registers.cs, actual.control.cs, 'C行停止時のCSが対象CSではありません');
+  assert.equal(hasExactTvramLine(actual.screen, '3'), false, 'C行BPより前に最終出力が出ています');
+}
+
 async function dumpTvram(page, label, harness = 'pc98ide') {
   const screen = await page.evaluate((name) => window[name].getScreenText(), harness);
   console.error(`[ERROR] ${label}: TVRAM ${screen.lines.length} lines, cursor=${JSON.stringify(screen.cursor)}`);
@@ -105,9 +113,10 @@ async function dumpTvram(page, label, harness = 'pc98ide') {
 }
 
 async function buildCProgramFd() {
-  const [helloSource, strlenSource, library, includeFiles] = await Promise.all([
+  const [helloSource, strlenSource, loaderSource, library, includeFiles] = await Promise.all([
     readFile(join(ROOT, 'samples', 'hello-c.c')),
     readFile(join(ROOT, 'samples', 'legacy', 'kensyuu', 'STRLEN.C')),
+    readFile(join(ROOT, 'ide', 'debug-loader.asm')),
     readFile(join(ROOT, 'toolchain', 'smlrc-wasm', 'lcds.a')),
     loadDefaultHeaders(),
   ]);
@@ -119,17 +128,22 @@ async function buildCProgramFd() {
     assert.equal(result.output[0] | (result.output[1] << 8), 0x5a4d, `${label}出力がMZ EXEではありません`);
     assert.equal(result.sourceNormalization.dosEofBytesRemoved, expectedDosEofBytesRemoved,
       `${label}のDOS EOF正規化件数が不一致です`);
-    return result.output;
+    return result;
   };
-  const helloExe = await compileOne(helloSource, 'HELLOC', 0);
-  const strlenExe = await compileOne(strlenSource, 'STRLEN', 1);
+  const hello = await compileOne(helloSource, 'HELLOC', 0);
+  const strlen = await compileOne(strlenSource, 'STRLEN', 1);
+  const loader = await assemble(new Uint8Array(loaderSource));
+  if (!loader.ok) throw new Error(`E0LOAD/NASM: ${JSON.stringify(loader.errors)}`);
   return {
     fd: makeFd([
-      { name: 'HELLOC', ext: 'EXE', data: helloExe },
-      { name: 'STRLEN', ext: 'EXE', data: strlenExe },
+      { name: 'E0LOAD', ext: 'COM', data: loader.output },
+      { name: 'HELLOC', ext: 'EXE', data: hello.output },
+      { name: 'STRLEN', ext: 'EXE', data: strlen.output },
     ]),
-    helloSize: helloExe.byteLength,
-    strlenSize: strlenExe.byteLength,
+    helloSize: hello.output.byteLength,
+    strlenSize: strlen.output.byteLength,
+    strlenMap: strlen.sourceMap,
+    strlenLines: new TextDecoder('shift_jis').decode(strlenSource).split(/\r?\n/),
   };
 }
 
@@ -341,7 +355,7 @@ try {
     }, 0x0025));
   });
 
-  await check(9, 'C small-model EXE（hello・1997年STRLEN）をFAT12 FDから実行', async () => {
+  await check(9, '1997年STRLENをC行BPで停止し、FAT12 FDから実行', async () => {
     cPage = await browser.newPage();
     await cPage.setViewport({ width: 800, height: 500, deviceScaleFactor: 1 });
     await cPage.goto(new URL('c-runner.html', BASE_URL).href, { waitUntil: 'networkidle2' });
@@ -393,7 +407,15 @@ try {
     assert.throws(() => assertTvramContains(screen, 'Hello from C on PC-99!'));
     const afterHello = await cPage.evaluate((baseline) => window.pc98c.waitForPrompt(baseline), beforeHello);
 
-    await cPage.evaluate(() => window.pc98c.pasteDosCommand('B:\\STRLEN'));
+    const cLine = 22;
+    const cText = 'Len++;';
+    console.log(`[INFO] check 9 C BP: line=${cLine} text=${JSON.stringify(cText)} reason=自作StrLenのループ本体で文字数を加算する実処理`);
+    const stopped = await cPage.evaluate(({ map, line }) => (
+      window.pc98c.debugExeToCLine('B:\\E0LOAD B:\\STRLEN.EXE', map, line)
+    ), { map: cProgramFd.strlenMap, line: cLine });
+    assertCStopped(stopped, cProgramFd.strlenLines, cLine, cText);
+    assert.throws(() => assertCStopped(stopped, cProgramFd.strlenLines, 23, 'Str++;'));
+    await cPage.evaluate(() => window.pc98c.resumeCpu());
     let strlenScreen;
     try {
       strlenScreen = await cPage.evaluate((baseline) => window.pc98c.waitForPrompt(baseline), afterHello.text);

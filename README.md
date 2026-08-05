@@ -6,7 +6,7 @@
 
 ## 現状（2026-08-05）
 
-**Step 4 の C→16-bit DOS EXE生成まで到達。アセンブラ側はソース行デバッグまで通っている。**
+**Step 4 の C→16-bit DOS EXE生成と、ASM/C双方のソース行デバッグまで到達。**
 
 ```
 .asm ──[wasm NASM]──> .COM ──[FAT12 書き込み]──> .xdf ──[WebNP2]──> PC-98 で実行
@@ -23,7 +23,7 @@ toolchain/
   nasm-wasm/         emscripten ビルド成果物
     nasm.js/.wasm      wasm 版 NASM
     build.sh           再現用ビルドスクリプト
-    PATCHES.md         ビルド調整の記録（C ソースへのパッチは 0 件）
+    PATCHES.md         ビルド調整の記録（NASM upstreamパッチは0件）
     verify.mjs         ホスト版 NASM との出力バイト一致検証
   assemble.mjs       アセンブル API（エラーを行番号付きで構造化して返す）
   listing.mjs        NASMリスティング→ソース行/セグメント内offsetマップ
@@ -32,6 +32,8 @@ toolchain/
   build-com.mjs      CLI: .asm → .COM → 新規 FD
   build-exe.mjs      CLI: exebin.mac使用 .asm → MZ EXE → 新規 FD
   compile.mjs        CLI/API: C → small-model MZ EXE → 新規 FD
+  c-source-map.mjs   C行→生成ASM行→実行offsetマップ
+  smlrc-wasm/        SmallerC wasm成果物・再現パッチ（upstreamパッチ1件）
   build-boot-fd.mjs  CLI: .asm → .COM → 起動可能 FD（FreeDOS ベース）
   verify*.mjs        各種検証スクリプト
 samples/             テスト用 .asm
@@ -40,13 +42,24 @@ docs/
 ide/                WebNP2 embedを使う最小IDE実証
 ```
 
-C側はBSD 2-ClauseのSmallerCをupstream無改変でwasm化し、
+C側はBSD 2-ClauseのSmallerCをpin検証後、一時ツリーへ1件だけ再現パッチを適用してwasm化し、
 `toolchain/compile.mjs` で `smlrpp → smlrc -seg16 → NASM -f elf → smlrl -small` を順に呼んで
 16-bit DOS small-model MZ EXEを生成する。標準ライブラリ`lcds.a`もpin済みソースから再生成する。
 C/ASM共通入力層はDOSテキスト末尾から連続するEOF `0x1A`だけを除き、除去件数をAPI結果へ返す。
 compile CLIは同じ件数をログにも表示する。途中の`0x1A`は書き換えず各ツールへ渡し、入力を黙って変更しない。
 1997年の研修コード`STRLEN.C`は原文のままMZ EXE化してPC-98上で実行済みである。
 `StrLen("ABC")`を`printf("%d\n")`へ渡すソースどおり、TVRAMの期待出力`3`を確認した。
+さらに同じ`STRLEN.C`の22行目`Len++;`へBPを張り、実行addressから同じC行と原文へ
+逆引きできることを実機相当ブラウザ検証で確認した。
+
+SmallerCパッチは、各文の開始を`; @pc98dev-c-line`コメント、終了を行0として生成ASMへ出す。
+NASMの`%line`も生成バイト自体はコメントと同一だったが、listingの物理ASM行を13/14へ書き換え、
+構造化エラー行を0へ退化させることを実測したため採用しなかった。通常コメントは物理ASM行と
+エラー行を維持する。NASM upstreamへのパッチは引き続き0件である。
+
+`toolchain/c-source-map.mjs`は`C行 → 物理ASM行 → NASM listing → .text実行offset`を合成する。
+1行に複数の非連続区間があれば全て保持し、prologue/epilogueやライブラリなど対応区間外の
+addressは近傍行へ寄せず`null`を返す。誤った行を示さないことを優先する。
 再現・ホスト版一致検証は [docs/smallerc-wasm.md](docs/smallerc-wasm.md)、
 実在コードの詳細は [docs/kensyuu-smallerc.md](docs/kensyuu-smallerc.md) を参照する。
 
@@ -92,7 +105,8 @@ node ide/verify-ide.mjs
 さらに同一セッションでプロンプト復帰後に`SECOND.COM`を再びローダ経由でエントリ停止・実行し、
 TVRAM出力、EXEC復帰2回、AH=4Dhの`0025h`、COMMAND.COMの`ERRORLEVEL 37`を確認する。
 独立したFreeDOS/WebNP2セッションへC生成物のFAT12 FDを挿入し、`HELLOC.EXE`の
-`Hello from C on PC-98!`をTVRAMから読む第9チェックも含む。
+`Hello from C on PC-98!`をTVRAMから読む。続けて`STRLEN.EXE`をローダ経由で開始し、
+22行目`Len++;`でのBP停止・原文一致、再開後の出力行`3`を確認する第9チェックも含む。
 `PC98DEV_URL` と `CHROME_PATH` で起動先を上書きできる。
 
 同期物の `ide/vendor/webnp2/LICENSE.WebNP2` はWebNP2由来コードの出所を、
@@ -314,6 +328,7 @@ node verify-fd.mjs          # FD 生成 → 独立コードで読み戻して ro
 node verify-fdadd.mjs       # 既存イメージへの追加で元ファイルを壊していないか
 node verify-listing.mjs     # listingマップと.COM実バイト、行/offset逆引きの一致
 node verify-dos-text.mjs    # 末尾DOS EOF許容、途中0x1A保持、無改変STRLEN.C
+node verify-c-source-map.mjs # STRLEN.CのC行/実行offset合成、対応なし、故障注入
 node verify-saka-build.mjs  # SAKA変換版のwasm NASM・MZヘッダ・EXE行マップ
 ```
 
@@ -322,12 +337,11 @@ node verify-saka-build.mjs  # SAKA変換版のwasm NASM・MZヘッダ・EXE行�
 | 領域 | 選択 | 理由 |
 |---|---|---|
 | アセンブラ | **NASM 2.16.03** | BSD 2-clause。SmallerC のバックエンドでもあるため必須 |
-| C コンパイラ | **SmallerC**（未着手） | BSD 2-clause・セルフホスティング・依存極小。出力が NASM 形式 |
+| C コンパイラ | **SmallerC** | BSD 2-clause・依存極小。wasm化し、NASM出力へ行コメントを加える最小パッチ1件 |
 | エディタ | **CodeMirror 6**（未着手） | モバイル対応と軽さ。Monaco は 2〜5MB でモバイルが弱い |
 
 ## 次のステップ
 
-4. SmallerC を wasm 化して C 対応
 5. CodeMirror 6 でブラウザ UI
 
 ## 注意

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { assemble } from './assemble.mjs';
 import { compile, loadDefaultHeaders } from './compile.mjs';
-import { normalizeDosTextSource } from './dos-text.mjs';
+import { normalizeCrLfForPreprocessor, normalizeDosTextSource } from './dos-text.mjs';
 
 const encoder = new TextEncoder();
 
@@ -26,6 +26,12 @@ assert.throws(() => assertNormalization(
   { ...mixed, source: Uint8Array.from([0x41, 0x42]), interiorDosEofOffset: -1 },
   Uint8Array.from([0x41, 0x1a, 0x42]), 1, 1,
 ));
+
+const crlfFixture = Uint8Array.from([0x41, 0x0d, 0x0a, 0x42, 0x0d]);
+const crlf = normalizeCrLfForPreprocessor(crlfFixture);
+assert.deepEqual(Array.from(crlf.source), [0x41, 0x0a, 0x42, 0x0d]);
+assert.equal(crlf.crlfSequencesNormalized, 1);
+assert.deepEqual(Array.from(crlfFixture), [0x41, 0x0d, 0x0a, 0x42, 0x0d]);
 
 const asmText = encoder.encode('CPU 8086\nBITS 16\nORG 100h\nnop\nint3\n');
 const asmTrailing = await assemble(Uint8Array.from([...asmText, 0x1a, 0x1a]));
@@ -50,6 +56,7 @@ const strlen = await compile(new Uint8Array(strlenSource), {
 });
 assert.equal(strlen.ok, true, '無改変STRLEN.Cをコンパイルできません');
 assert.equal(strlen.sourceNormalization.dosEofBytesRemoved, 1);
+assert.ok(strlen.sourceNormalization.crlfSequencesNormalized > 0);
 assert.equal(strlen.output[0] | (strlen.output[1] << 8), 0x5a4d, 'STRLEN出力がMZ EXEではありません');
 
 const cMiddle = encoder.encode('int main(void)\n{\n\x1a\nreturn 0;\n}\n');
@@ -64,3 +71,4 @@ console.log(`PASS DOS EOF: ASM trailing=2, C STRLEN trailing=1 (${strlen.output.
 console.log('PASS DOS EOF: middle byte preserved; ASM accepted with following instruction intact');
 console.log('PASS DOS EOF: middle byte passed unchanged to SmallerC');
 console.log('PASS DOS EOF: normalization fault injection rejected');
+console.log(`PASS DOS text: CRLF normalized=${strlen.sourceNormalization.crlfSequencesNormalized}, line count preserved`);

@@ -105,6 +105,7 @@ let failed = false;
 const [source, library] = await Promise.all([
   readFile(new URL('../../samples/minimal.c', import.meta.url)), readFile(new URL('./lcds.a', import.meta.url)),
 ]);
+const upstreamCompiler = await readFile(new URL('../smallerc-src/v0100/smlrc.c', import.meta.url), 'utf8');
 const sourceBytes = new Uint8Array(source);
 const libraryBytes = new Uint8Array(library);
 const hostCompiler = await buildHostCompiler(sourceBytes);
@@ -134,6 +135,11 @@ if (wasmRuns.some((result) => !result.ok)) {
     && sameBytes(first.output, result.output));
   console.log(`${stable ? 'PASS' : 'FAIL'} fresh-instance repeat: 3 identical four-stage runs`);
   failed ||= !stable;
+
+  const marker = new TextDecoder().decode(first.assembly).includes('; @pc98dev-c-line\t');
+  const patchNecessary = marker && !upstreamCompiler.includes('@pc98dev-c-line');
+  console.log(`${patchNecessary ? 'PASS' : 'FAIL'} line-comment patch: patched output has marker, pinned upstream has none`);
+  failed ||= !patchNecessary;
 
   const corrupted = new Uint8Array(first.output);
   corrupted[Math.floor(corrupted.byteLength / 2)] ^= 1;
