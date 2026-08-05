@@ -6,8 +6,9 @@
 	BITS	16
 	ORG	100h
 
-CONTROL_VERSION	equ	2
+CONTROL_VERSION	equ	3
 STATE_READY	equ	1
+STATE_EXITING	equ	2
 STATE_ERROR	equ	0FFFFh
 RELEASE_VALUE	equ	0A5h
 
@@ -91,11 +92,22 @@ prepare_exec:
 	mov	[cs:saved_ds],ax
 	mov	ax,es
 	mov	[cs:saved_es],ax
+	mov	byte [cs:control_exec_returns],0
+	mov	ax,[cs:saved_sp]
+	mov	[cs:control_parent_sp],ax
+	mov	ax,[cs:saved_ss]
+	mov	[cs:control_parent_ss],ax
 	mov	dx,target_path
 	mov	bx,exec_params
 	mov	ax,4B01h
 	int	21h
+exec_return:
+	inc	byte [cs:control_exec_returns]
 	mov	[cs:exec_ax],ax
+	mov	ax,sp
+	mov	[cs:control_return_sp],ax
+	mov	ax,ss
+	mov	[cs:control_return_ss],ax
 	lahf
 	mov	[cs:exec_flags],ah
 	cli
@@ -107,6 +119,8 @@ prepare_exec:
 	mov	ds,ax
 	mov	ax,[cs:saved_es]
 	mov	es,ax
+	cmp	byte [cs:control_exec_returns],1
+	jne	child_returned
 	test	byte [cs:exec_flags],1
 	jnz	exec_failed
 
@@ -156,6 +170,18 @@ wait_for_host:
 	; CS:IP immediately after that jump, before the target's first instruction.
 	sti
 	jmp	far [cs:control_initial_ip]
+
+child_returned:
+	; DOS has restored the parent loader's SS:SP before following the child's
+	; INT 22h vector here. Consume the child's status and return the same code
+	; from the loader so COMMAND.COM observes the debug target's result.
+	mov	ah,4Dh
+	int	21h
+	mov	[cs:control_child_return],ax
+	mov	word [cs:control_state],STATE_EXITING
+exit_ready:
+	mov	ah,4Ch
+	int	21h
 
 read_failed:
 	push	ax
@@ -210,6 +236,16 @@ control_current_psp	dw	0
 control_error_ax	dw	0
 control_release	db	0
 	db	0
+control_exec_returns	db	0
+	db	0
+control_parent_sp	dw	0
+control_parent_ss	dw	0
+control_return_sp	dw	0
+control_return_ss	dw	0
+control_exec_return_ip	dw	exec_return
+control_wait_ip	dw	wait_for_host
+control_child_return	dw	0
+control_exit_ready_ip	dw	exit_ready
 
 	align	16, db 0
 	times	512 db 0

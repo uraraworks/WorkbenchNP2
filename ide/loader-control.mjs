@@ -1,9 +1,11 @@
 const CONTROL_SIGNATURE = new TextEncoder().encode('PC98DEV1');
 export const CONTROL = {
   version: 8, state: 10, loaderPsp: 12, targetPsp: 14, kind: 16,
-  sp: 18, ss: 20, ip: 22, cs: 24, currentPsp: 26, errorAx: 28, release: 30, size: 32,
+  sp: 18, ss: 20, ip: 22, cs: 24, currentPsp: 26, errorAx: 28, release: 30,
+  execReturns: 32, parentSp: 34, parentSs: 36, returnSp: 38, returnSs: 40,
+  execReturnIp: 42, waitIp: 44, childReturn: 46, exitReadyIp: 48, size: 50,
 };
-const CONTROL_VERSION = 2;
+const CONTROL_VERSION = 3;
 
 const sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
 const readWord = (memory, offset) => memory[offset] | (memory[offset + 1] << 8);
@@ -26,6 +28,15 @@ export function parseLoaderControl(memory, address) {
     cs: readWord(memory, address + CONTROL.cs),
     currentPsp: readWord(memory, address + CONTROL.currentPsp),
     errorAx: readWord(memory, address + CONTROL.errorAx),
+    execReturns: memory[address + CONTROL.execReturns],
+    parentSp: readWord(memory, address + CONTROL.parentSp),
+    parentSs: readWord(memory, address + CONTROL.parentSs),
+    returnSp: readWord(memory, address + CONTROL.returnSp),
+    returnSs: readWord(memory, address + CONTROL.returnSs),
+    execReturnIp: readWord(memory, address + CONTROL.execReturnIp),
+    waitIp: readWord(memory, address + CONTROL.waitIp),
+    childReturn: readWord(memory, address + CONTROL.childReturn),
+    exitReadyIp: readWord(memory, address + CONTROL.exitReadyIp),
   };
 }
 

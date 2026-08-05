@@ -4,11 +4,11 @@ import {
   mountDisassemblyView,
 } from './vendor/webnp2/webnp2-embed.js';
 import { lineToOffset } from '../toolchain/listing.mjs';
-import { assembleDebugLoader, assembleHello, makeProgramFd } from './toolchain.js';
-import { releaseLoaderAtEntry, waitForLoaderControl } from './loader-control.mjs';
+import { assembleDebugLoader, assembleHello, assembleSecondRun, makeProgramFd } from './toolchain.js';
+import { CONTROL, parseLoaderControl, releaseLoaderAtEntry, waitForLoaderControl } from './loader-control.mjs';
 import { nextSourceEntry, sourceLineForRegisters } from './source-debug.mjs';
 import { renderSourceLines } from './source-view.mjs';
-import { bootFreeDos } from './freedos-session.mjs';
+import { bootFreeDos, waitForCurrentDosPrompt } from './freedos-session.mjs';
 
 const statusNode = document.querySelector('#status');
 const sourceNode = document.querySelector('#source');
@@ -25,6 +25,7 @@ let debug;
 let sourceMap = [];
 let sourceLines = [];
 let programBytes;
+let secondRunBytes;
 let programCs;
 let currentLine;
 let selectedLine;
@@ -122,33 +123,81 @@ function runToNextSourceLine() {
   setStatus(`次のソース ${currentLine} 行へ進みました`);
 }
 
-function validateLoaderControl(control) {
+function validateLoaderControl(control, expectedBytes) {
   if (control.kind !== 0) throw new Error(`HELLOの種別がCOMではありません: ${control.kind}`);
   if (control.ip !== 0x0100) throw new Error(`COM初期IPが0100hではありません: ${hex(control.ip, 4)}`);
   if (control.cs !== control.targetPsp || control.ss !== control.targetPsp) {
     throw new Error('COM初期CS/SSが対象PSPと一致しません');
   }
   if (control.loaderPsp >= control.targetPsp) throw new Error('ローダが対象より下位メモリにありません');
-  const pspAndTarget = debug.readMemory(control.targetPsp * 16, 0x100 + programBytes.length);
+  const pspAndTarget = debug.readMemory(control.targetPsp * 16, 0x100 + expectedBytes.length);
   if (pspAndTarget[0] !== 0xcd || pspAndTarget[1] !== 0x20) {
     throw new Error('ローダ通知PSPの先頭にINT 20hがありません');
   }
-  targetBytesMatched = programBytes.every((byte, index) => pspAndTarget[0x100 + index] === byte);
-  if (!targetBytesMatched) throw new Error('ロード済み対象が無改変HELLO.COMと一致しません');
+  targetBytesMatched = expectedBytes.every((byte, index) => pspAndTarget[0x100 + index] === byte);
+  if (!targetBytesMatched) throw new Error('ロード済み対象が期待バイト列と一致しません');
+}
+
+async function startDebugTarget(command, expectedBytes) {
+  if (selectedLine !== undefined && programCs !== undefined) {
+    const oldOffset = lineToOffset(sourceMap, selectedLine);
+    if (oldOffset !== null) debug.setBreakpoint(0, programCs, oldOffset, false);
+    selectedLine = undefined;
+    continueButton.disabled = true;
+  }
+  await engine.pasteText(`${command}\r`);
+  loaderControl = await waitForLoaderControl(debug);
+  if (!loaderControl) throw new Error('デバッガローダのREADY制御ブロックを検出できません');
+  validateLoaderControl(loaderControl, expectedBytes);
+  const int22 = debug.readMemory(loaderControl.targetPsp * 16 + 0x0a, 4);
+  loaderControl = {
+    ...loaderControl,
+    int22: { ip: int22[0] | (int22[1] << 8), cs: int22[2] | (int22[3] << 8) },
+  };
+  programCs = loaderControl.cs;
+  const registers = releaseLoaderAtEntry(debug, loaderControl);
+  entryStopped = true;
+  document.body.dataset.programCs = String(programCs);
+  return { control: loaderControl, registers };
+}
+
+function captureLoaderDiagnostic() {
+  const registers = debug.readRegisters();
+  const currentControl = parseLoaderControl(debug.readMemory(loaderControl.address, CONTROL.size), 0);
+  return {
+    registers,
+    loaderControl: { ...currentControl, address: loaderControl.address },
+    int22: loaderControl.int22,
+    screen: engine.getScreenText(),
+    disassembly: debug.disassemble(registers.cs, registers.eip, 4),
+    waitDisassembly: debug.disassemble(currentControl.loaderPsp, currentControl.waitIp, 2),
+  };
+}
+
+function runTargetToLoaderExit() {
+  const breakpointIndex = 6;
+  debug.setBreakpoint(breakpointIndex, loaderControl.loaderPsp, loaderControl.exitReadyIp, true);
+  const hit = debug.runUntilBreakpoint(5_000_000);
+  debug.setBreakpoint(breakpointIndex, loaderControl.loaderPsp, loaderControl.exitReadyIp, false);
+  if (hit !== breakpointIndex) throw new Error(`ローダ終了直前へ到達できませんでした (hit=${hit})`);
+  return captureLoaderDiagnostic();
 }
 
 async function initialize() {
-  const [assembled, loader] = await Promise.all([assembleHello(), assembleDebugLoader()]);
+  const [assembled, loader, secondRun] = await Promise.all([
+    assembleHello(), assembleDebugLoader(), assembleSecondRun(),
+  ]);
   sourceMap = assembled.map;
   sourceLines = assembled.sourceText.split(/\r?\n/);
   programBytes = assembled.output;
+  secondRunBytes = secondRun.output;
   renderSource();
   setStatus(`NASM完了: ${programBytes.length} bytes / ${sourceMap.length} mapped lines`);
 
   const [freeDosResponse] = await Promise.all([fetch('./freedos/fd98_2hd.xdf')]);
   if (!freeDosResponse.ok) throw new Error(`FreeDOS: HTTP ${freeDosResponse.status}`);
   const freeDos = new Uint8Array(await freeDosResponse.arrayBuffer());
-  const programFd = makeProgramFd(programBytes, loader.output);
+  const programFd = makeProgramFd(programBytes, loader.output, secondRunBytes);
   engine = createWebNP2(document.querySelector('#screen'));
   debug = createDebugger(engine);
   disassemblyView = mountDisassemblyView(document.querySelector('#disassembly'), {
@@ -161,14 +210,7 @@ async function initialize() {
     programFd, programName: 'hello.xdf', programKey: 'ide:hello',
     onScreen: (screen) => { screenTextNode.textContent = screen.text; },
   });
-  await engine.pasteText('B:\\E0LOAD\r');
-  loaderControl = await waitForLoaderControl(debug);
-  if (!loaderControl) throw new Error('デバッガローダのREADY制御ブロックを検出できません');
-  validateLoaderControl(loaderControl);
-  programCs = loaderControl.cs;
-  releaseLoaderAtEntry(debug, loaderControl);
-  entryStopped = true;
-  document.body.dataset.programCs = String(programCs);
+  await startDebugTarget('B:\\E0LOAD', programBytes);
   pauseButton.textContent = 'Resume';
   stepButton.disabled = false;
   nextButton.disabled = false;
@@ -224,14 +266,8 @@ window.pc98ide = {
   pasteDosCommand: async (command) => {
     await engine.pasteText(`${command}\r`);
   },
-  capturePostExit: () => {
-    const wasPaused = debug.isPaused();
-    debug.setPaused(true);
-    const registers = debug.readRegisters();
-    return {
-      wasPaused, registers, loaderControl,
-      disassembly: debug.disassemble(registers.cs, registers.eip, 4),
-    };
-  },
+  waitForPrompt: (baseline) => waitForCurrentDosPrompt(engine, { baseline, timeout: 60_000 }),
+  startSecondDebugRun: () => startDebugTarget('B:\\E0LOAD B:\\SECOND.COM', secondRunBytes),
+  runTargetToLoaderExit,
 };
 window.pc98ide.ready.catch((error) => setStatus(error instanceof Error ? error.message : String(error), true));

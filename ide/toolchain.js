@@ -43,9 +43,14 @@ export function assembleDebugLoader() {
   return assembleFile('./debug-loader.asm');
 }
 
-export function makeProgramFd(output, loader) {
+export function assembleSecondRun() {
+  return assembleFile('../samples/second-run.asm');
+}
+
+export function makeProgramFd(output, loader, secondRun) {
   return makeFd([
     { name: 'E0LOAD', ext: 'COM', data: loader },
     { name: 'TARGET', ext: 'COM', data: output },
+    { name: 'SECOND', ext: 'COM', data: secondRun },
   ]);
 }

@@ -15,8 +15,6 @@ const ROOT = dirname(IDE_DIR);
 const BASE_URL = process.env.PC98DEV_URL ?? 'http://127.0.0.1:5184/ide/';
 const CHROME = process.env.CHROME_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const SHOT = '/private/tmp/claude-501/-Users-haruurara-MyProject--emulator-PC98/ebf3c7ad-2505-4d39-9ee7-ff750b61b82a/scratchpad/pc98dev-ide.png';
-const sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
-
 async function loadPuppeteer() {
   try {
     return (await import('puppeteer-core')).default;
@@ -80,6 +78,24 @@ function assertTvramContains(screen, expected) {
   assert.ok(screen.includes(expected), `TVRAMに期待文字列がありません: ${expected}`);
 }
 
+function hasExactTvramLine(screen, expected) {
+  return screen.lines.some((line) => line.trim() === expected);
+}
+
+function assertLoaderExited(diagnostic, expectedCode) {
+  assert.equal(diagnostic.loaderControl.execReturns, 2, 'EXEC直後へ2回戻っていません');
+  assert.deepEqual(diagnostic.int22, {
+    ip: diagnostic.loaderControl.execReturnIp,
+    cs: diagnostic.loaderControl.loaderPsp,
+  }, '子PSPのINT 22hがEXEC直後を指していません');
+  assert.deepEqual({ sp: diagnostic.loaderControl.returnSp, ss: diagnostic.loaderControl.returnSs }, {
+    sp: diagnostic.loaderControl.parentSp, ss: diagnostic.loaderControl.parentSs,
+  }, '子終了時にDOSが復元したSS:SPが親スタックと一致しません');
+  assert.deepEqual(diagnostic.waitDisassembly[1]?.bytes, [0x75, 0xf8], '待機ループ末尾が75 F8ではありません');
+  assert.equal(diagnostic.loaderControl.childReturn, expectedCode,
+    `AH=4Dhの返却AXが期待値${expectedCode.toString(16)}ではありません`);
+}
+
 async function dumpTvram(page, label, harness = 'pc98ide') {
   const screen = await page.evaluate((name) => window[name].getScreenText(), harness);
   console.error(`[ERROR] ${label}: TVRAM ${screen.lines.length} lines, cursor=${JSON.stringify(screen.cursor)}`);
@@ -122,6 +138,7 @@ let cPage;
 let targetLine;
 let nextLine;
 let cProgramFd;
+let lastLoaderExitDiagnostic;
 
 try {
   await check(1, '静的IDE・Chrome・wasm NASM・NP2kai起動', async () => {
@@ -214,22 +231,46 @@ try {
   });
 
   await check(6, '通常実行でHello, PC-98!をTVRAMから確認', async () => {
-    await page.click('#run');
-    await page.waitForFunction(
-      () => window.pc98ide.getScreenText()?.text.includes('Hello, PC-98!'),
-      { timeout: 15_000 },
-    );
-    assert.ok((await page.evaluate(() => window.pc98ide.getScreenText().text)).includes('Hello, PC-98!'));
-    await sleep(1_000);
-    const diagnostic = await page.evaluate(() => window.pc98ide.capturePostExit());
+    const beforeRun = await page.evaluate(() => window.pc98ide.getScreenText().text);
+    const diagnostic = await page.evaluate(() => window.pc98ide.runTargetToLoaderExit());
     const regs = diagnostic.registers;
-    console.log(`[INFO] post-exit CPU: wasPaused=${diagnostic.wasPaused} `
-      + `CS:IP=${regs.cs.toString(16).padStart(4, '0')}:${regs.eip.toString(16).padStart(4, '0')} `
+    assertTvramContains(diagnostic.screen.text, 'Hello, PC-98!');
+    assertLoaderExited(diagnostic, 0x0000);
+    console.log(`[INFO] loader-exit CPU: CS:IP=${regs.cs.toString(16).padStart(4, '0')}:${regs.eip.toString(16).padStart(4, '0')} `
       + `SS:SP=${regs.ss.toString(16).padStart(4, '0')}:${(regs.esp & 0xffff).toString(16).padStart(4, '0')} `
       + `instruction=${JSON.stringify(diagnostic.disassembly[0] ?? null)}`);
     console.log(`[INFO] loader PSP: loader=${diagnostic.loaderControl.loaderPsp.toString(16)} `
       + `target=${diagnostic.loaderControl.targetPsp.toString(16)} `
       + `DOS-current-after-4B01=${diagnostic.loaderControl.currentPsp.toString(16)}`);
+    console.log(`[INFO] exit return: count=${diagnostic.loaderControl.execReturns} `
+      + `INT22=${diagnostic.int22.cs.toString(16)}:${diagnostic.int22.ip.toString(16)} `
+      + `EXEC-return=${diagnostic.loaderControl.loaderPsp.toString(16)}:${diagnostic.loaderControl.execReturnIp.toString(16)} `
+      + `SS:SP=${diagnostic.loaderControl.returnSs.toString(16)}:${diagnostic.loaderControl.returnSp.toString(16)} `
+      + `parent=${diagnostic.loaderControl.parentSs.toString(16)}:${diagnostic.loaderControl.parentSp.toString(16)} `
+      + `wait=${JSON.stringify(diagnostic.waitDisassembly)}`);
+    await page.click('#run');
+    await page.evaluate((baseline) => window.pc98ide.waitForPrompt(baseline), beforeRun);
+
+    const secondEntry = await page.evaluate(() => window.pc98ide.startSecondDebugRun());
+    assert.equal(secondEntry.registers.cs, secondEntry.control.cs, '2本目のエントリCSが不一致です');
+    assert.equal(secondEntry.registers.eip, secondEntry.control.ip, '2本目のエントリIPが不一致です');
+    const beforeSecondRun = await page.evaluate(() => window.pc98ide.getScreenText().text);
+    assert.equal(beforeSecondRun.includes('Second debug run!'), false, '2本目がエントリ停止前に実行されています');
+    const secondDiagnostic = await page.evaluate(() => window.pc98ide.runTargetToLoaderExit());
+    assertTvramContains(secondDiagnostic.screen.text, 'Second debug run!');
+    assertLoaderExited(secondDiagnostic, 0x0025);
+    lastLoaderExitDiagnostic = secondDiagnostic;
+    await page.click('#run');
+    await page.evaluate((baseline) => window.pc98ide.waitForPrompt(baseline), beforeSecondRun);
+    const beforeErrorLevel = await page.evaluate(() => window.pc98ide.getScreenText().text);
+    await page.evaluate(() => window.pc98ide.pasteDosCommand('IF ERRORLEVEL 38 ECHO EXIT_CODE_TOO_HIGH'));
+    const below38 = await page.evaluate((baseline) => window.pc98ide.waitForPrompt(baseline), beforeErrorLevel);
+    assert.equal(hasExactTvramLine(below38, 'EXIT_CODE_TOO_HIGH'), false, 'ローダ終了コードが38以上です');
+    await page.evaluate(() => window.pc98ide.pasteDosCommand('IF ERRORLEVEL 37 ECHO EXIT37_PROPAGATED'));
+    const propagated = await page.evaluate((baseline) => window.pc98ide.waitForPrompt(baseline), below38.text);
+    assert.equal(hasExactTvramLine(propagated, 'EXIT37_PROPAGATED'), true, 'ローダ終了コード37がCOMMAND.COMへ伝播していません');
+    console.log(`[INFO] second run: output=true prompt=true exit-return-count=${secondDiagnostic.loaderControl.execReturns} `
+      + `AH4D=${secondDiagnostic.loaderControl.childReturn.toString(16).padStart(4, '0')} ERRORLEVEL=37`);
   });
 
   await check(7, '意図したIDE状態を可視化してスクリーンショット保存', async () => {
@@ -273,6 +314,16 @@ try {
       ...entryEvidence, regs: { ...entryEvidence.regs, eip: entryEvidence.regs.eip + 1 },
     }));
     assert.throws(() => assertEntryStopped({ ...entryEvidence, screen: 'Hello, PC-98!' }));
+    assert.ok(lastLoaderExitDiagnostic, 'チェック6のローダ終了直前スナップショットがありません');
+    assertLoaderExited(lastLoaderExitDiagnostic, 0x0025);
+    assert.throws(() => assertLoaderExited({
+      ...lastLoaderExitDiagnostic,
+      loaderControl: { ...lastLoaderExitDiagnostic.loaderControl, execReturns: 1 },
+    }, 0x0025));
+    assert.throws(() => assertLoaderExited({
+      ...lastLoaderExitDiagnostic,
+      loaderControl: { ...lastLoaderExitDiagnostic.loaderControl, childReturn: 0 },
+    }, 0x0025));
   });
 
   await check(9, 'C small-model EXEをFAT12 FDから実行しTVRAM出力を確認', async () => {
