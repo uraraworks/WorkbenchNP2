@@ -20,6 +20,8 @@ wasm成果物と2つのライセンスファイルは配布物から分離しな
 `toolchain/compile.mjs` は入力バイト列を
 `smlrpp → smlrc -seg16 → NASM 2.16.03 -f elf → smlrl -small`へ渡し、
 16-bit DOS small-model MZ EXEを返す。`smlrcc`による子プロセス起動は使わない。
+入力末尾から連続するDOS EOF `0x1A`は共通入力層で除き、件数を結果へ返す。
+途中の`0x1A`は除去せず、そのまま下流ツールへ渡す。
 各ビルドは段ごとに新規wasmインスタンスを生成する。
 `smlrc` は同一インスタンスの2回目で失敗することを検証済み。
 `smlrpp`は再利用可。`smlrl`は同一入力2回だけなら一致するが、異なる2入力を
@@ -40,3 +42,5 @@ upstreamツリー自体は変更しない。`verify.mjs`はsmlrpp/smlrc/smlrlの
 ブラウザ実行は`ide/verify-ide.mjs`の既存FreeDOS/WebNP2経路を流用し、FAT12 FD上の
 `HELLOC.EXE`を実行してTVRAMの`Hello from C on PC-98!`を確認する。生成assemblyから
 Cソース行へのデバッグマップは今回の範囲外で未検証である。
+
+実在コードでの最初の検証は[1997年研修コードとSmallerC](kensyuu-smallerc.md)を参照する。

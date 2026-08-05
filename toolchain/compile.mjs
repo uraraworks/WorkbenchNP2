@@ -5,6 +5,7 @@ import { readFile, readdir, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assemble } from './assemble.mjs';
+import { normalizeDosTextSource } from './dos-text.mjs';
 import { makeFd } from './makefd.mjs';
 import { parseMzHeader } from './mz.mjs';
 
@@ -128,25 +129,36 @@ async function linkSmall(object, library) {
 export async function compile(source, opts = {}) {
   if (!(source instanceof Uint8Array)) throw new TypeError('source must be a Uint8Array; strings are not accepted');
   validateOptions(opts);
+  const normalized = normalizeDosTextSource(source);
+  const sourceNormalization = { dosEofBytesRemoved: normalized.dosEofBytesRemoved };
   const previousExitCode = process.exitCode;
   try {
-    const preprocessed = await preprocess(source, opts.includeFiles ?? {});
-    if (!preprocessed.ok) return preprocessed;
+    const preprocessed = await preprocess(normalized.source, opts.includeFiles ?? {});
+    if (!preprocessed.ok) return { ...preprocessed, sourceNormalization };
     const compiled = await compilePreprocessed(preprocessed.output);
-    if (!compiled.ok) return compiled;
+    if (!compiled.ok) return { ...compiled, sourceNormalization };
     const assembled = await assemble(compiled.output, { format: 'elf' });
     if (!assembled.ok) {
-      return { ok: false, errors: assembled.errors.map((error) => ({ ...error, stage: 'nasm' })) };
+      return {
+        ok: false,
+        errors: assembled.errors.map((error) => ({ ...error, stage: 'nasm' })),
+        sourceNormalization,
+      };
     }
     const linked = await linkSmall(assembled.output, opts.library);
-    if (!linked.ok) return linked;
+    if (!linked.ok) return { ...linked, sourceNormalization };
     const header = parseMzHeader(linked.output);
     return {
       ok: true, output: linked.output, preprocessed: preprocessed.output,
       assembly: compiled.output, object: assembled.output, linkerMap: linked.map, header,
+      sourceNormalization,
     };
   } catch (error) {
-    return { ok: false, errors: [{ stage: 'wasm', line: 0, message: error instanceof Error ? error.message : String(error) }] };
+    return {
+      ok: false,
+      errors: [{ stage: 'wasm', line: 0, message: error instanceof Error ? error.message : String(error) }],
+      sourceNormalization,
+    };
   } finally {
     process.exitCode = previousExitCode;
   }
@@ -179,7 +191,7 @@ function dosBaseName(path) {
   return normalized;
 }
 
-async function loadHeaders() {
+export async function loadDefaultHeaders() {
   const includeFiles = {};
   for (const directory of [
     join(TOOLCHAIN_DIR, 'smallerc-src', 'v0100', 'include'),
@@ -200,11 +212,14 @@ async function main() {
   catch (error) { usage(); console.error(error.message); process.exitCode = 2; return; }
   try {
     const [source, library, includeFiles] = await Promise.all([
-      readFile(options.input), readFile(join(TOOLCHAIN_DIR, 'smlrc-wasm', 'lcds.a')), loadHeaders(),
+      readFile(options.input), readFile(join(TOOLCHAIN_DIR, 'smlrc-wasm', 'lcds.a')), loadDefaultHeaders(),
     ]);
     const result = await compile(new Uint8Array(source), {
       library: new Uint8Array(library), includeFiles,
     });
+    if (result.sourceNormalization.dosEofBytesRemoved > 0) {
+      console.log(`normalized DOS text EOF: removed ${result.sourceNormalization.dosEofBytesRemoved} trailing 0x1A byte(s)`);
+    }
     if (!result.ok) {
       for (const error of result.errors) {
         const location = error.line > 0 ? `${options.input}:${error.line}` : options.input;

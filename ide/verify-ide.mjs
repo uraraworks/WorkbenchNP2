@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { dirname, extname, join, resolve, sep } from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { compile } from '../toolchain/compile.mjs';
+import { compile, loadDefaultHeaders } from '../toolchain/compile.mjs';
 import { makeFd } from '../toolchain/makefd.mjs';
 
 const IDE_DIR = dirname(fileURLToPath(import.meta.url));
@@ -105,16 +105,31 @@ async function dumpTvram(page, label, harness = 'pc98ide') {
 }
 
 async function buildCProgramFd() {
-  const [source, library] = await Promise.all([
+  const [helloSource, strlenSource, library, includeFiles] = await Promise.all([
     readFile(join(ROOT, 'samples', 'hello-c.c')),
+    readFile(join(ROOT, 'samples', 'legacy', 'kensyuu', 'STRLEN.C')),
     readFile(join(ROOT, 'toolchain', 'smlrc-wasm', 'lcds.a')),
+    loadDefaultHeaders(),
   ]);
-  const result = await compile(new Uint8Array(source), { library: new Uint8Array(library) });
-  if (!result.ok) throw new Error(result.errors.map((error) => `${error.stage}: ${error.message}`).join('\n'));
-  assert.equal(result.output[0] | (result.output[1] << 8), 0x5a4d, 'C出力がMZ EXEではありません');
+  const compileOne = async (source, label, expectedDosEofBytesRemoved) => {
+    const result = await compile(new Uint8Array(source), {
+      library: new Uint8Array(library), includeFiles,
+    });
+    if (!result.ok) throw new Error(result.errors.map((error) => `${label}/${error.stage}: ${error.message}`).join('\n'));
+    assert.equal(result.output[0] | (result.output[1] << 8), 0x5a4d, `${label}出力がMZ EXEではありません`);
+    assert.equal(result.sourceNormalization.dosEofBytesRemoved, expectedDosEofBytesRemoved,
+      `${label}のDOS EOF正規化件数が不一致です`);
+    return result.output;
+  };
+  const helloExe = await compileOne(helloSource, 'HELLOC', 0);
+  const strlenExe = await compileOne(strlenSource, 'STRLEN', 1);
   return {
-    fd: makeFd([{ name: 'HELLOC', ext: 'EXE', data: result.output }]),
-    exeSize: result.output.byteLength,
+    fd: makeFd([
+      { name: 'HELLOC', ext: 'EXE', data: helloExe },
+      { name: 'STRLEN', ext: 'EXE', data: strlenExe },
+    ]),
+    helloSize: helloExe.byteLength,
+    strlenSize: strlenExe.byteLength,
   };
 }
 
@@ -326,7 +341,7 @@ try {
     }, 0x0025));
   });
 
-  await check(9, 'C small-model EXEをFAT12 FDから実行しTVRAM出力を確認', async () => {
+  await check(9, 'C small-model EXE（hello・1997年STRLEN）をFAT12 FDから実行', async () => {
     cPage = await browser.newPage();
     await cPage.setViewport({ width: 800, height: 500, deviceScaleFactor: 1 });
     await cPage.goto(new URL('c-runner.html', BASE_URL).href, { waitUntil: 'networkidle2' });
@@ -356,10 +371,13 @@ try {
       await dumpTvram(cPage, 'check 9 timeout after DIR B: (HELLOC not executed)', 'pc98c');
       throw error;
     }
-    const listed = new RegExp(`HELLOC\\s+EXE\\s+${cProgramFd.exeSize.toLocaleString('en-US').replace(',', ',?')}`, 'i');
+    const listed = new RegExp(`HELLOC\\s+EXE\\s+${cProgramFd.helloSize.toLocaleString('en-US').replace(',', ',?')}`, 'i');
     assert.match(directory.text, listed, 'DIR B:に生成したHELLOC.EXEと期待サイズがありません');
-    console.log(`[INFO] check 9 FD: HELLOC.EXE ${cProgramFd.exeSize} bytes`);
+    const strlenListed = new RegExp(`STRLEN\\s+EXE\\s+${cProgramFd.strlenSize.toLocaleString('en-US').replace(',', ',?')}`, 'i');
+    assert.match(directory.text, strlenListed, 'DIR B:に生成したSTRLEN.EXEと期待サイズがありません');
+    console.log(`[INFO] check 9 FD: HELLOC.EXE ${cProgramFd.helloSize} bytes, STRLEN.EXE ${cProgramFd.strlenSize} bytes`);
 
+    const beforeHello = await cPage.evaluate(() => window.pc98c.getScreenText().text);
     await cPage.evaluate(() => window.pc98c.pasteDosCommand('B:\\HELLOC'));
     try {
       await cPage.waitForFunction(
@@ -373,6 +391,19 @@ try {
     const screen = await cPage.evaluate(() => window.pc98c.getScreenText().text);
     assertTvramContains(screen, 'Hello from C on PC-98!');
     assert.throws(() => assertTvramContains(screen, 'Hello from C on PC-99!'));
+    const afterHello = await cPage.evaluate((baseline) => window.pc98c.waitForPrompt(baseline), beforeHello);
+
+    await cPage.evaluate(() => window.pc98c.pasteDosCommand('B:\\STRLEN'));
+    let strlenScreen;
+    try {
+      strlenScreen = await cPage.evaluate((baseline) => window.pc98c.waitForPrompt(baseline), afterHello.text);
+    } catch (error) {
+      await dumpTvram(cPage, 'check 9 timeout after B:\\STRLEN', 'pc98c');
+      throw error;
+    }
+    assert.equal(hasExactTvramLine(strlenScreen, '3'), true, '1997年STRLEN.Cの期待出力行「3」がありません');
+    assert.equal(hasExactTvramLine(strlenScreen, '4'), false, 'STRLEN検証ガード用の誤出力行「4」があります');
+    console.log('[INFO] check 9 STRLEN: source=STRLEN.C dos-eof-removed=1 output-line="3" prompt=true');
   });
 } finally {
   if (browser) await browser.close();

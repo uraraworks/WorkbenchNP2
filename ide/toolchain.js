@@ -1,5 +1,6 @@
 import { parseListing } from '../toolchain/listing.mjs';
 import { makeFd } from '../toolchain/makefd.mjs';
+import { normalizeDosTextSource } from '../toolchain/dos-text.mjs';
 
 function decodeListing(bytes) {
   try {
@@ -14,7 +15,8 @@ async function assembleFile(url, listing = false) {
   const sourceResponse = await fetch(url);
   if (!sourceResponse.ok) throw new Error(`${url}: HTTP ${sourceResponse.status}`);
   const sourceBytes = new Uint8Array(await sourceResponse.arrayBuffer());
-  const sourceText = new TextDecoder('utf-8').decode(sourceBytes);
+  const normalized = normalizeDosTextSource(sourceBytes);
+  const sourceText = new TextDecoder('utf-8').decode(normalized.source);
   const createNasm = window.createNasm;
   if (typeof createNasm !== 'function') throw new Error('wasm NASMがロードされていません');
   const errors = [];
@@ -23,16 +25,17 @@ async function assembleFile(url, listing = false) {
     printErr: (line) => errors.push(String(line)),
     locateFile: (name) => new URL(`../toolchain/nasm-wasm/${name}`, location.href).href,
   });
-  module.FS.writeFile('/in.asm', sourceBytes);
+  module.FS.writeFile('/in.asm', normalized.source);
   const args = ['-f', 'bin'];
   if (listing) args.push('-l', '/out.lst');
   args.push('-o', '/out.bin', '/in.asm');
   const exitCode = module.callMain(args) ?? 0;
   if (exitCode !== 0) throw new Error(errors.join('\n') || `NASM exited with status ${exitCode}`);
   const output = new Uint8Array(module.FS.readFile('/out.bin'));
-  if (!listing) return { sourceText, output };
+  const sourceNormalization = { dosEofBytesRemoved: normalized.dosEofBytesRemoved };
+  if (!listing) return { sourceText, output, sourceNormalization };
   const listingText = decodeListing(new Uint8Array(module.FS.readFile('/out.lst')));
-  return { sourceText, output, map: parseListing(listingText, output) };
+  return { sourceText, output, map: parseListing(listingText, output), sourceNormalization };
 }
 
 export function assembleHello() {
