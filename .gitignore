@@ -1,6 +1,10 @@
 # NASM の upstream ソース（無改変・13MB）。build.sh が必要時に clone する
 toolchain/nasm-src/
 
+# SmallerC upstream source (build.sh が必要時に clone する)
+toolchain/smallerc-src/
+toolchain/smlrc-wasm/host/
+
 # ビルド中間物
 *.o
 *.obj

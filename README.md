@@ -6,7 +6,7 @@
 
 ## 現状（2026-08-05）
 
-**Step 3 まで到達。ビルドからソース行デバッグまでの縦一本が通っている。**
+**Step 4 の C コンパイラ基盤まで到達。アセンブラ側はソース行デバッグまで通っている。**
 
 ```
 .asm ──[wasm NASM]──> .COM ──[FAT12 書き込み]──> .xdf ──[WebNP2]──> PC-98 で実行
@@ -38,6 +38,11 @@ docs/
   masm-to-nasm.md    MASM→NASM 変換規則（自動変換ツールの仕様書を兼ねる）
 ide/                WebNP2 embedを使う最小IDE実証
 ```
+
+C側はBSD 2-ClauseのSmallerCをupstream無改変でwasm化し、
+`toolchain/compile.mjs` で `smlrpp → smlrc -seg16` を順に呼んで
+NASM形式assemblyを生成する。リンカとDOS実行ファイル生成は次フェーズである。
+再現・ホスト版一致検証は [docs/smallerc-wasm.md](docs/smallerc-wasm.md) を参照する。
 
 ## 最小IDE実証
 
