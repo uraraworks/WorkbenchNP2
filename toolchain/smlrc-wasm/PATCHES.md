@@ -14,6 +14,14 @@
 ## upstream パッチ
 
 なし。SmallerC と同梱 ucpp の C ソースは変更せずビルドしている。
+`build.sh` は完全なgit cloneだけを受理し、HEADが上記revisionと一致すること、
+tracked・staged・untrackedを含めworktreeがcleanであることをビルド前に検証する。
+
+ソースの改行やファイル末尾はcloneしたupstreamのバイト列をそのまま使い、
+正規化も空行追加も行わない。以前のGitHub読取APIによる24ファイル部分コピーは、
+取得時に改行を正規化して末尾空行差分を作っていたため削除した。
+検証器へ期待revisionを全ゼロで渡す破壊テストが、revision mismatchの終了1に
+なることも確認している。
 
 ## ビルド調整
 

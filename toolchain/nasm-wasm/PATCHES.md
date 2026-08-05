@@ -3,6 +3,9 @@
 ## upstream パッチ
 
 なし。NASM の C ソースは無変更でビルドしている。
+`build.sh` は完全なgit cloneだけを受理し、HEADが
+`cd37b81b320ead83ca5a6bbce5da0a6456663bc6`と一致すること、
+tracked・staged・untrackedを含めworktreeがcleanであることをビルド前に検証する。
 
 ## ビルドシステムの調整
 

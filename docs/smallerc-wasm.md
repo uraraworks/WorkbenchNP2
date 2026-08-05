@@ -12,7 +12,9 @@ node toolchain/smlrc-wasm/verify.mjs
 ```
 
 `build.sh` は upstream がなければ `toolchain/smallerc-src/` へ clone し、
-固定revisionをcheckoutする。同ディレクトリとホスト版実行物はgit管理しない。
+固定revisionをcheckoutする。`.git`のない部分コピー、revision不一致、
+local変更やuntrackedファイルのあるツリーはビルドしない。
+同ディレクトリとホスト版実行物はgit管理しない。
 wasm成果物と2つのライセンスファイルは配布物から分離しない。
 
 `toolchain/compile.mjs` は入力バイト列を `smlrpp → smlrc -seg16` に渡して

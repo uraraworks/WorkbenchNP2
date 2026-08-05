@@ -5,21 +5,18 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 SOURCE_DIR="$SCRIPT_DIR/../smallerc-src"
 EMSDK_DIR="$ROOT_DIR/emsdk"
+VERIFY_TREE="$SCRIPT_DIR/../verify-upstream-tree.sh"
 REVISION="1865d79ce7a5ad3f8a9515a571437cee084b8b1d"
 
-if [[ ! -f "$SOURCE_DIR/license.txt" || ! -f "$SOURCE_DIR/v0100/smlrc.c"
-    || ! -f "$SOURCE_DIR/v0100/ucpp/LICENSE" ]]; then
+if [[ ! -e "$SOURCE_DIR" ]]; then
     echo "SmallerC source tree not found; cloning revision $REVISION into $SOURCE_DIR" >&2
     git clone https://github.com/alexfru/SmallerC.git "$SOURCE_DIR"
     git -C "$SOURCE_DIR" checkout --detach "$REVISION"
 fi
+"$VERIFY_TREE" "$SOURCE_DIR" "$REVISION" "SmallerC"
 if [[ ! -f "$SOURCE_DIR/license.txt" || ! -f "$SOURCE_DIR/v0100/smlrc.c"
     || ! -f "$SOURCE_DIR/v0100/ucpp/LICENSE" ]]; then
     echo "SmallerC source tree still not usable: $SOURCE_DIR" >&2
-    exit 1
-fi
-if [[ -d "$SOURCE_DIR/.git" ]] && [[ "$(git -C "$SOURCE_DIR" rev-parse HEAD)" != "$REVISION" ]]; then
-    echo "Expected SmallerC revision $REVISION in $SOURCE_DIR" >&2
     exit 1
 fi
 if [[ ! -f "$EMSDK_DIR/emsdk_env.sh" ]]; then

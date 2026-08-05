@@ -5,14 +5,17 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 SOURCE_DIR="$SCRIPT_DIR/../nasm-src"
 EMSDK_DIR="$ROOT_DIR/emsdk"
+VERIFY_TREE="$SCRIPT_DIR/../verify-upstream-tree.sh"
 BUILD_JOBS="${BUILD_JOBS:-3}"
+REVISION="cd37b81b320ead83ca5a6bbce5da0a6456663bc6"
 
 # NASM のソースは upstream 無改変なので git 管理外（.gitignore）。無ければ取得する。
-if [[ ! -f "$SOURCE_DIR/configure.ac" || ! -f "$SOURCE_DIR/version" ]]; then
+if [[ ! -e "$SOURCE_DIR" ]]; then
     echo "NASM source tree not found; cloning nasm-2.16.03 into $SOURCE_DIR" >&2
     git clone --depth 1 --branch nasm-2.16.03 \
         https://github.com/netwide-assembler/nasm.git "$SOURCE_DIR"
 fi
+"$VERIFY_TREE" "$SOURCE_DIR" "$REVISION" "NASM"
 if [[ ! -f "$SOURCE_DIR/configure.ac" || ! -f "$SOURCE_DIR/version" ]]; then
     echo "NASM source tree still not usable: $SOURCE_DIR" >&2
     exit 1
