@@ -27,13 +27,28 @@ assert.equal(
   'memory-error',
 );
 
+// exebin.mac型: FFF0hを-16 paragraphとして加減算し、16bitでPSPへ折り返す。
+const wrapped = [
+  'E2 TARGET=\\A-GAMES\\SAKA\\SAKA.EXE',
+  'E2 MZ20 SS=FFF0 SP=26BC IP=0100 CS=FFF0',
+  'E0 4B01 OK CS:IP=111A:0100 SS:SP=111A:26BA',
+].join('\n');
+const wrappedHeader = { ss: 0xFFF0, sp: 0x26BC, ip: 0x0100, cs: 0xFFF0 };
+assert.equal(
+  validateMzExecLoad(wrapped, [0xCD, 0x20], expectedTarget, wrappedHeader, ZERO_WORD).psp,
+  0x111A,
+);
+// 故意に & 0xFFFF を外した旧式は負値となり、正しいPSPと一致しないことも固定する。
+const unwrappedPsp = 0x111A - 0xFFF0 - 0x10;
+assert.throws(() => assert.equal(unwrappedPsp, 0x111A));
+
 // 画面表示を1箇所ずつ壊すと必ずFAILすること(検査が空回りしていないことの確認)。
 const brokenScreens = [
   good.replace('IP=0000 CS=0002', 'IP=0001 CS=0002'),      // IP != e_ip
   good.replace('SS:SP=4200:FEFE', 'SS:SP=4200:FF00'),      // SPがe_spそのまま(-2でない)
   good.replace('SS:SP=4200:FEFE', 'SS:SP=4200:FEFD'),      // -2以外のずれ
   good.replace('SS:SP=4200:FEFE', 'SS:SP=4201:FEFE'),      // CS側とSS側でPSPが割れる
-  good.replace('CS:IP=3002:0000', 'CS:IP=2FF0:0000').replace('CS=0002', 'CS=FFF0'), // CS==PSP
+  good.replace('CS:IP=3002:0000', 'CS:IP=3003:0000'),      // CSから求めるPSPが1ずれる
 ];
 for (const broken of brokenScreens) {
   assert.throws(() => validateMzExecLoad(broken, [0xCD, 0x20], expectedTarget, expectedHeader, ZERO_WORD));
@@ -43,4 +58,4 @@ assert.throws(() => validateMzExecLoad(good, [0x00, 0x00], expectedTarget, expec
 assert.throws(() => validateMzExecLoad(good, [0xCD, 0x20], expectedTarget, expectedHeader, [0x34, 0x12]));
 assert.throws(() => validateMzExecLoad(good, [0xCD, 0x20], expectedTarget, expectedHeader, []));
 
-console.log('MZ EXEC照合: 正常fixtureはPASS、意図的破壊8件はすべてFAIL');
+console.log('MZ EXEC照合: 通常/FFF0折り返しfixtureはPASS、折り返しなしを含む意図的破壊9件はすべてFAIL');

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { pspFromLoadedSegment, segment16 } from './segment-arithmetic.mjs';
 
 function word(value) {
   return Number.parseInt(value, 16);
@@ -48,15 +49,13 @@ export function validateMzExecLoad(screen, pspPrefix, expectedTarget, expectedHe
   // DOSは子のスタックへゼロワードを1つ積んでから返すため、返却SPはe_spちょうどではなく
   // 必ず2小さい(.COMでも規定のFFFEhに対しFFFChが返る)。定数2を根拠なく引かないよう、
   // 積まれた値が0000であること自体をstackTopで検証する。
-  assert.equal(result.loaded.sp, result.mz.sp - 2, '4B01hのSPがMZ e_sp-2と一致しません');
+  assert.equal(result.loaded.sp, segment16(result.mz.sp - 2), '4B01hのSPがMZ e_sp-2と一致しません');
   assert.deepEqual(Array.from(stackTop ?? []), [0x00, 0x00], 'SS:SPに積まれているワードが0000ではありません');
 
-  const pspFromCs = result.loaded.cs - result.mz.cs - 0x10;
-  const pspFromSs = result.loaded.ss - result.mz.ss - 0x10;
+  const pspFromCs = pspFromLoadedSegment(result.loaded.cs, result.mz.cs);
+  const pspFromSs = pspFromLoadedSegment(result.loaded.ss, result.mz.ss);
   assert.ok(pspFromCs >= 0x0050 && pspFromCs < 0xA000, `CSから求めたPSPが不正です: ${pspFromCs}`);
   assert.equal(pspFromSs, pspFromCs, 'CS/e_csとSS/e_ssから求めたPSPが一致しません');
   assert.deepEqual(Array.from(pspPrefix), [0xCD, 0x20], '算出PSP先頭にINT 20hがありません');
-  assert.notEqual(result.loaded.ip, 0x0100, 'EXEなのに初期IPがCOMの0100hです');
-  assert.notEqual(result.loaded.cs, pspFromCs, 'EXEなのに初期CSがCOM同様PSPを指しています');
   return { kind: 'loaded', psp: pspFromCs, header: result.mz, loaded: result.loaded };
 }

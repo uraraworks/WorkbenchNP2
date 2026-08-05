@@ -15,6 +15,7 @@ import {
   DOS_PROMPT_PATTERN, PROMPT_OR_MENU_PATTERN, externalCase, findHddProbeDrive,
   prepareHddForProbe, waitForText,
 } from './legacy-hdd-runner.mjs';
+import { pspFromLoadedSegment } from './segment-arithmetic.mjs';
 
 const IDE_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = dirname(IDE_DIR);
@@ -215,7 +216,7 @@ async function evaluateResult(page, scenario, screen, hello) {
     let pspPrefix = [];
     let stackTop = [];
     if (parsed.loaded && parsed.mz) {
-      const psp = parsed.loaded.cs - parsed.mz.cs - 0x10;
+      const psp = pspFromLoadedSegment(parsed.loaded.cs, parsed.mz.cs);
       if (psp >= 0 && psp < 0xA000) {
         pspPrefix = await page.evaluate(
           ({ address }) => window.execLoadProbe.readMemory(address, 2),

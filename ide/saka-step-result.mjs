@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { linear20, loadedSegmentFromPsp } from './segment-arithmetic.mjs';
 
 const word = (bytes, offset) => bytes[offset] | (bytes[offset + 1] << 8);
 
@@ -32,8 +33,10 @@ export function validateSakaEntry({
   assert.equal(control.kind, 1, 'ローダ通知の対象種別がMZ EXEではありません');
   assert.equal(control.ip, mz.ip, '4B01h返却IPがMZ e_ipと一致しません');
   assert.equal(control.sp, (mz.sp - 2) & 0xffff, '4B01h返却SPがMZ e_sp-2と一致しません');
-  assert.equal(control.cs, control.targetPsp + 0x10 + mz.cs, '4B01h返却CSとPSP/e_csの関係が不正です');
-  assert.equal(control.ss, control.targetPsp + 0x10 + mz.ss, '4B01h返却SSとPSP/e_ssの関係が不正です');
+  assert.equal(control.cs, loadedSegmentFromPsp(control.targetPsp, mz.cs),
+    '4B01h返却CSとPSP/e_csの関係が不正です');
+  assert.equal(control.ss, loadedSegmentFromPsp(control.targetPsp, mz.ss),
+    '4B01h返却SSとPSP/e_ssの関係が不正です');
   assert.deepEqual(Array.from(pspPrefix), [0xcd, 0x20], '対象PSP先頭にINT 20hがありません');
   assert.equal(regs.cs, control.cs, '停止CSが4B01h返却CSと一致しません');
   assert.equal(regs.eip, control.ip, '停止IPが4B01h返却IPと一致しません');
@@ -46,7 +49,7 @@ export function validateSakaEntry({
   assert.ok(stoppedGvram?.sha256, 'エントリ停止時のGVRAMハッシュがありません');
   assert.equal(stoppedGvram.sha256, beforeGvram.sha256, 'エントリ停止までにGVRAMが変化しました');
 
-  const moduleEntry = mz.cs * 16 + mz.ip;
+  const moduleEntry = linear20(mz.cs, mz.ip);
   const fileEntry = mz.headerBytes + moduleEntry;
   assert.ok(fileEntry + guest.length <= exe.length, '照合範囲がEXEファイルを超えています');
   const excluded = new Set();

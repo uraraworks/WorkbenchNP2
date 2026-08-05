@@ -24,6 +24,22 @@ assert.equal(checked.excludedBytes, 2);
 assert.equal(checked.excludedRelocations, 1);
 assert.equal(checked.comparedBytes, 4);
 
+// exebin.mac型のFFF0:0100は20bit線形位置0、ロード後CS/SSは16bitでPSPへ折り返す。
+const wrappedExe = new Uint8Array(exe);
+wrappedExe[0x0e] = 0xf0; wrappedExe[0x0f] = 0xff;
+wrappedExe[0x14] = 0x00; wrappedExe[0x15] = 0x01;
+wrappedExe[0x16] = 0xf0; wrappedExe[0x17] = 0xff;
+const wrappedGood = {
+  ...good,
+  exeBytes: wrappedExe,
+  control: { kind: 1, targetPsp: 0x111a, cs: 0x111a, ip: 0x0100, ss: 0x111a, sp: 0x03fe },
+  regs: { cs: 0x111a, eip: 0x0100, ss: 0x111a, esp: 0x03fe, ds: 0x111a, es: 0x111a },
+};
+assert.equal(validateSakaEntry(wrappedGood).fileEntry, 0x20);
+// 故意に & 0xFFFF を外した旧式の期待値は10000h超となり、実際のCSと一致しない。
+const unwrappedCs = wrappedGood.control.targetPsp + 0x10 + 0xfff0;
+assert.throws(() => assert.equal(wrappedGood.control.cs, unwrappedCs));
+
 // 最重要ガード: 停止IPを1バイトずらすと必ずFAILする。
 assert.throws(() => validateSakaEntry({ ...good, regs: { ...good.regs, eip: 1 } }));
 assert.throws(() => validateSakaEntry({ ...good, guestEntryBytes: [0x91, ...good.guestEntryBytes.slice(1)] }));
@@ -36,4 +52,4 @@ const steps = [{
 }];
 assert.deepEqual(validateInstructionSteps(steps), { instructions: 1, branchSkips: 0 });
 assert.throws(() => validateInstructionSteps([{ ...steps[0], after: { cs: 0x1010, eip: 3 } }]));
-console.log('SAKAステップ照合: 正常fixtureはPASS、エントリ+1/GVRAM変更を含む意図的破壊5件はすべてFAIL');
+console.log('SAKAステップ照合: 通常/FFF0折り返しfixtureはPASS、折り返しなしを含む意図的破壊6件はすべてFAIL');
