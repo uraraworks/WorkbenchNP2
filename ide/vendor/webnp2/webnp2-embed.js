@@ -28,7 +28,7 @@ let Z = !1;
 function Je(r) {
   var n;
   const e = ["[NekoProject21kai]", ((n = r.roms) == null ? void 0 : n.some((o) => o.name.toLowerCase() === "font.rom")) ?? !1 ? "fontfile=/font.rom" : "fontfile=/font.bmp"];
-  r.hdd && e.push(`HDD1FILE=/disk/${r.hdd.name}`), e.push(`Latencys=${r.latencyMs ?? 40}`), e.push("keyrepeat_enable=true"), e.push("keyrepeat_delay=500"), e.push("keyrepeat_interval=50"), e.push("USEFMGEN=true");
+  r.hdd && e.push(`HDD1FILE=/disk/${r.hdd.name}`), e.push(`Latencys=${r.latencyMs ?? 40}`), e.push("keyrepeat_enable=true"), e.push("keyrepeat_delay=500"), e.push("keyrepeat_interval=50"), e.push("USEFMGEN=true"), e.push("PEGCPLNE=true");
   const t = Math.max(0, Math.min(230, Math.floor(r.extMemMB ?? 1)));
   if (e.push(`ExMemory=${t}`), r.clkMult !== void 0) {
     const o = Math.max(1, Math.min(32, Math.floor(r.clkMult)));
