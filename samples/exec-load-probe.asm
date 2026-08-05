@@ -11,6 +11,7 @@ start:
 	pop	ds
 	push	cs
 	pop	es
+	call	parse_target_path
 
 	; 縮小後も自前領域に収まるスタックへ先に切り替える。
 	mov	ax,cs
@@ -29,6 +30,58 @@ start:
 	mov	ah,4Ah
 	int	21h
 	jc	shrink_error
+
+	; EXECとは独立に対象の先頭20hバイトを読む。MZヘッダのword配置は
+	; NASM upstream misc/exebin.mac と照合済み（e_ss=0Eh, e_sp=10h,
+	; e_ip=14h, e_cs=16h）。EXEなら読み取った値をEXEC前に表示する。
+	mov	dx,msg_target
+	call	print_string
+	mov	si,target_path
+	call	print_zstring
+	mov	dx,msg_crlf
+	call	print_string
+	mov	dx,target_path
+	mov	ax,3D00h
+	int	21h
+	jc	header_error
+	mov	bx,ax
+	mov	dx,mz_header
+	mov	cx,20h
+	mov	ah,3Fh
+	int	21h
+	jc	header_read_error
+	mov	[header_bytes],ax
+	mov	ah,3Eh
+	int	21h
+	jc	header_error
+
+	cmp	word [header_bytes],20h
+	jb	header_done
+	mov	ax,[mz_header]
+	cmp	ax,5A4Dh
+	je	print_mz_header
+	cmp	ax,4D5Ah
+	jne	header_done
+print_mz_header:
+	mov	dx,msg_mz_ss
+	call	print_string
+	mov	ax,[mz_header + 0Eh]
+	call	print_hex_word
+	mov	dx,msg_mz_sp
+	call	print_string
+	mov	ax,[mz_header + 10h]
+	call	print_hex_word
+	mov	dx,msg_mz_ip
+	call	print_string
+	mov	ax,[mz_header + 14h]
+	call	print_hex_word
+	mov	dx,msg_mz_cs
+	call	print_string
+	mov	ax,[mz_header + 16h]
+	call	print_hex_word
+	mov	dx,msg_crlf
+	call	print_string
+header_done:
 
 	; EXECパラメータブロック内のfar pointerのsegmentを実行時CSで埋める。
 	mov	ax,cs
@@ -98,6 +151,21 @@ shrink_error:
 	call	print_string
 	jmp	wait_key
 
+header_read_error:
+	push	ax
+	mov	ah,3Eh
+	int	21h
+	pop	ax
+header_error:
+	mov	bx,ax
+	mov	dx,msg_header_error
+	call	print_string
+	mov	ax,bx
+	call	print_hex_word
+	mov	dx,msg_crlf
+	call	print_string
+	jmp	wait_key
+
 exec_error:
 	mov	dx,msg_exec_error
 	call	print_string
@@ -115,6 +183,45 @@ wait_key:
 print_string:
 	mov	ah,09h
 	int	21h
+	ret
+
+print_zstring:
+	lodsb
+	test	al,al
+	jz	.done
+	mov	dl,al
+	call	print_char
+	jmp	print_zstring
+.done:
+	ret
+
+; PSP:80hのコマンドテールから空白を含まないDOSパスを1個受け取る。
+; 無指定時は従来どおりB:\HELLO.COMを使い、既存3環境のCOM検証を保つ。
+parse_target_path:
+	xor	cx,cx
+	mov	cl,[80h]
+	mov	si,81h
+.skip_space:
+	jcxz	.done
+	cmp	byte [si],' '
+	jne	.copy_start
+	inc	si
+	dec	cx
+	jmp	.skip_space
+.copy_start:
+	mov	di,target_path
+.copy:
+	jcxz	.terminate
+	lodsb
+	dec	cx
+	cmp	al,' '
+	jbe	.terminate
+	stosb
+	jmp	.copy
+.terminate:
+	mov	al,0
+	stosb
+.done:
 	ret
 
 print_char:
@@ -154,9 +261,18 @@ msg_ok_csip	db	'E0 4B01 OK CS:IP=', '$'
 msg_sssp	db	' SS:SP=', '$'
 msg_4a_error	db	'E0 4A ERROR AX=', '$'
 msg_exec_error	db	'E0 4B01 ERROR AX=', '$'
+msg_header_error db	'E2 HEADER ERROR AX=', '$'
+msg_target	db	'E2 TARGET=', '$'
+msg_mz_ss	db	'E2 MZ20 SS=', '$'
+msg_mz_sp	db	' SP=', '$'
+msg_mz_ip	db	' IP=', '$'
+msg_mz_cs	db	' CS=', '$'
 msg_crlf	db	0Dh, 0Ah, '$'
 target_path	db	'B:\HELLO.COM', 0
+	times	116 db 0
 command_tail	db	0, 0Dh
+mz_header	times	20h db 0
+header_bytes	dw	0
 
 ; DOS EXEC parameter block (AL=01h): far pointerはoffset,segmentの順。
 exec_params:

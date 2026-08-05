@@ -125,6 +125,42 @@ MS-DOS環境は再配布できないためリポジトリへ置かず、`PC98DEV
 
 いずれもIP=0100h・SS=CS・SP=FFFCで、`.COM`のDOS規約どおりの値である。
 
+### 当時MZ EXEのload-only検証（Phase E-2）
+
+`verify-exec-load.mjs` は同じHDD起動・ランチャ離脱・FDドライブ探索を再利用し、1996年HDD環境の
+`\A-GAMES\SAKA\SAKA.EXE`（ASM版、9149B、再配置4件）と
+`\C-GAMES\SAKA\1014\SAKA.EXE`（C版、437130B、再配置566件）も個別起動で検証する。
+パスと値はHDDの対象ファイルだけをホスト側FATリーダで読み、ASM版は
+`e_ss=021Ch/e_sp=0400h/e_ip=0000h/e_cs=0000h`、C版は
+`e_ss=6D1Dh/e_sp=0800h/e_ip=48D8h/e_cs=0000h`と確認済みである。イメージや抽出物は保存しない。
+
+プローブローダはコマンド引数の対象を開き、先頭20hバイトからMZ値を表示してから4B01hを呼ぶ。
+MZのword順は同梱NASM upstream `toolchain/nasm-src/misc/exebin.mac` と照合し、
+`e_ss=0Eh`、`e_sp=10h`、`e_ip=14h`、`e_cs=16h`と確定した。ホストは表示値が事前読取り値と
+一致することに加え、`IP=e_ip`、`SP=e_sp-2`、CS側とSS側から算出したPSP一致、PSP先頭`CD 20`、
+EXEがCOM同様の`IP=0100h`/`CS=PSP`でないことを検査する。対象エントリへの制御移行は行わない。
+純粋関数のfixtureを意図的に8通り壊してFAILすることは `node ide/verify-exec-load-result.mjs`
+で確認できる。
+
+**実測結果（1996年HDD環境、ASM版・C版とも load-only 成功）:**
+
+| 対象 | MZ e_CS:IP | MZ e_SS:SP | 4B01h返却 CS:IP | PSP |
+|---|---|---|---|---|
+| ASM版 `\A-GAMES\SAKA\SAKA.EXE` | 0000:0000 | 021C:0400 | 113C:0000 | 112C |
+| C版 `\C-GAMES\SAKA\1014\SAKA.EXE` | 0000:48D8 | 6D1D:0800 | 113C:48D8 | 112C |
+
+いずれも `CS = PSP + 10h + e_cs` / `SS = PSP + 10h + e_ss` が成立し、`IP != 0100h` かつ
+`CS != PSP` でCOMとは別経路になっている。**C版は437,130B・常駐438KBだがメモリ不足`0008h`に
+ならず、当時環境の空きメモリに載る**。無改変のビルド済みバイナリでも入口を確定できることを示す。
+
+#### 返却SPがe_spより2小さい理由
+
+DOSは子プロセスのスタックへゼロワードを1つ積んでから返す（`RET`でPSP:0000のINT 20hへ
+戻れるようにするDOSの規約）。このため返却SPは常に `e_sp - 2` になる。`.COM`で
+`SS:SP=xxxx:FFFC`が返るのも同じ理由で、規定のFFFEhから2引かれた値である。
+定数2を根拠なく引かないよう、検証では返却`SS:SP`が指すワードをホストがRAMから直読みし、
+**その値が`0000`であること自体**も確認している。
+
 ### HDD起動ケースで踏んだ落とし穴
 
 - **起動不能なFDを挿したままHDD起動しない。** PC-98はFDをHDDより先に起動対象として試すため、

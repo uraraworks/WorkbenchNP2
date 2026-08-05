@@ -10,13 +10,14 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { assemble } from '../toolchain/assemble.mjs';
 import { makeFd } from '../toolchain/makefd.mjs';
+import { parseExecLoadScreen, validateMzExecLoad } from './exec-load-result.mjs';
 
 const IDE_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = dirname(IDE_DIR);
 const BASE_URL = process.env.PC98DEV_EXEC_URL ?? 'http://127.0.0.1:5185/ide/exec-load-probe.html';
 const CHROME = process.env.CHROME_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
-const RESULT_PATTERN = /E0 (?:4A ERROR AX=[0-9A-F]{4}|4B01 ERROR AX=[0-9A-F]{4}|4B01 OK CS:IP=[0-9A-F]{4}:[0-9A-F]{4} SS:SP=[0-9A-F]{4}:[0-9A-F]{4})/i;
+const RESULT_PATTERN = /(?:E0 (?:4A ERROR AX=[0-9A-F]{4}|4B01 ERROR AX=[0-9A-F]{4}|4B01 OK CS:IP=[0-9A-F]{4}:[0-9A-F]{4} SS:SP=[0-9A-F]{4}:[0-9A-F]{4})|E2 HEADER ERROR AX=[0-9A-F]{4})/i;
 // PC-98のDOSは版・設定により A> / A:> / A:\> のいずれも使う。
 const DOS_PROMPT_PATTERN = /(?:^|\n)\s*[A-Z]:?\\?>\s*(?:\n|$)/i;
 // 当時のHDDはAUTOEXECからメニューやファイラーを起動する構成が普通で、素のプロンプトが出ない。
@@ -244,7 +245,8 @@ async function runProbeOnHdd(page, scenario) {
   await sleep(1000);
   const tried = [];
   for (const letter of HDD_FD_DRIVE_CANDIDATES) {
-    await page.evaluate((cmd) => window.execLoadProbe.engine.pasteText(cmd), `${letter}:\\E0LOAD\r`);
+    const target = scenario.target ?? `${letter}:\\HELLO.COM`;
+    await page.evaluate((cmd) => window.execLoadProbe.engine.pasteText(cmd), `${letter}:\\E0LOAD ${target}\r`);
     const limit = Date.now() + 15_000;
     while (Date.now() < limit) {
       const text = await page.evaluate(() => window.execLoadProbe.engine.getScreenText().text);
@@ -264,6 +266,33 @@ async function runProbeOnHdd(page, scenario) {
 async function evaluateResult(page, scenario, screen, hello) {
   const shrinkError = screen.match(/E0 4A ERROR AX=([0-9A-F]{4})/i);
   if (shrinkError) throw new Error(`4Ahメモリ縮小失敗 AX=${shrinkError[1].toUpperCase()}`);
+
+  if (scenario.kind === 'mz') {
+    const parsed = parseExecLoadScreen(screen);
+    let pspPrefix = [];
+    let stackTop = [];
+    if (parsed.loaded && parsed.mz) {
+      const psp = parsed.loaded.cs - parsed.mz.cs - 0x10;
+      if (psp >= 0 && psp < 0xA000) {
+        pspPrefix = await page.evaluate(
+          ({ address }) => window.execLoadProbe.readMemory(address, 2),
+          { address: psp * 16 },
+        );
+      }
+      // 返却SPがe_spより2小さい理由を実測で確定するため、SS:SPが指すワードを読む。
+      stackTop = await page.evaluate(
+        ({ address }) => window.execLoadProbe.readMemory(address, 2),
+        { address: parsed.loaded.ss * 16 + parsed.loaded.sp },
+      );
+      console.error(`[INFO] ${scenario.label}: SS:SP=${parsed.loaded.ss.toString(16)}:${parsed.loaded.sp.toString(16)} が指すワード = ${stackTop.map((b) => b.toString(16).padStart(2, '0')).join(' ')} (e_sp=${parsed.mz.sp.toString(16)})`);
+    }
+    const checked = validateMzExecLoad(screen, pspPrefix, scenario.target, scenario.expectedHeader, stackTop);
+    if (checked.kind === 'memory-error') {
+      return `[RESULT] ${scenario.label}: 対象パス/MZ20確認、4B01h CF=1 AX=0008（メモリ不足）`;
+    }
+    const { loaded: regs, header, psp } = checked;
+    return `[RESULT] ${scenario.label}: MZ整合 PASS e_CS:IP=${header.cs.toString(16).toUpperCase().padStart(4, '0')}:${header.ip.toString(16).toUpperCase().padStart(4, '0')} e_SS:SP=${header.ss.toString(16).toUpperCase().padStart(4, '0')}:${header.sp.toString(16).toUpperCase().padStart(4, '0')} loaded=${regs.cs.toString(16).toUpperCase().padStart(4, '0')}:${regs.ip.toString(16).toUpperCase().padStart(4, '0')} PSP=${psp.toString(16).toUpperCase().padStart(4, '0')}`;
+  }
 
   const execError = screen.match(/E0 4B01 ERROR AX=([0-9A-F]{4})/i);
   if (execError) {
@@ -321,7 +350,7 @@ async function runScenario(browser, scenario, hello) {
     let screen;
     if (scenario.id === 'freedos') {
       // FreeDOSケースはプローブが起動時からFD2=B:に載っている。
-      await page.evaluate(() => window.execLoadProbe.engine.pasteText('B:\\E0LOAD\r'));
+      await page.evaluate(() => window.execLoadProbe.engine.pasteText('B:\\E0LOAD B:\\HELLO.COM\r'));
       screen = await waitForText(
         page, RESULT_PATTERN, 60_000, `${scenario.label}の4B01h結果がTVRAMへ表示されませんでした`,
       );
@@ -346,6 +375,17 @@ try {
     await externalCase('msdos33', 'MS-DOS 3.3', 'PC98DEV_MSDOS33_HDI', 'msdos33.hdi'),
     await externalCase('legacy', '1996年HDD環境', 'PC98DEV_LEGACY_THD', 'legacy.thd'),
   ];
+  const legacy = cases[2];
+  cases.push(
+    {
+      ...legacy, id: 'legacy-saka-asm', label: '1996年HDD ASM版 SAKA.EXE', kind: 'mz',
+      target: '\\A-GAMES\\SAKA\\SAKA.EXE', expectedHeader: { ss: 0x021c, sp: 0x0400, ip: 0x0000, cs: 0x0000 },
+    },
+    {
+      ...legacy, id: 'legacy-saka-c', label: '1996年HDD C版 SAKA.EXE', kind: 'mz',
+      target: '\\C-GAMES\\SAKA\\1014\\SAKA.EXE', expectedHeader: { ss: 0x6d1d, sp: 0x0800, ip: 0x48d8, cs: 0x0000 },
+    },
+  );
   if (process.env.PC98DEV_EXEC_URL) {
     throw new Error('この検証は外部資産をno-store配信するためPC98DEV_EXEC_URLを使用できません');
   }
