@@ -1,6 +1,5 @@
-// NASM -l リスティングを、ソース行と.COM内オフセットの対応へ変換する。
-// 実行時CSはDOSローダが決めるため保持しない。.COMのORG 100hだけを加えた
-// セグメント内オフセットを返し、CSとの組合せはデバッガ側の責務とする。
+// NASM -l リスティングを、ソース行とセグメント内offsetの対応へ変換する。
+// 実行時CSはDOSローダが決めるため保持せず、CSとの組合せはデバッガ側の責務とする。
 
 function parseNumber(text) {
   const value = text.trim();
@@ -38,7 +37,7 @@ function detectOrigin(lines) {
  *
  * @param {string} listing NASM -l の文字列
  * @param {Uint8Array} output NASMが生成した実バイナリ
- * @param {{origin?: number}} opts
+ * @param {{origin?: number, startAddress?: number, endAddress?: number}} opts
  * @returns {ListingEntry[]}
  */
 export function parseListing(listing, output, opts = {}) {
@@ -47,6 +46,14 @@ export function parseListing(listing, output, opts = {}) {
   const lines = listing.split(/\r?\n/);
   const origin = opts.origin ?? detectOrigin(lines);
   if (!Number.isInteger(origin) || origin < 0) throw new TypeError('origin must be a non-negative integer');
+  const startAddress = opts.startAddress ?? 0;
+  const endAddress = opts.endAddress ?? output.byteLength;
+  if (!Number.isInteger(startAddress) || startAddress < 0) {
+    throw new TypeError('startAddress must be a non-negative integer');
+  }
+  if (!Number.isInteger(endAddress) || endAddress <= startAddress || endAddress > output.byteLength) {
+    throw new TypeError('endAddress must be after startAddress and within output');
+  }
 
   const records = [];
   let macroInvocation;
@@ -73,8 +80,9 @@ export function parseListing(listing, output, opts = {}) {
   const map = [];
   for (let index = 0; index < records.length; index++) {
     const record = records[index];
-    const end = index + 1 < records.length ? records[index + 1].address : output.byteLength;
-    if (record.address < 0 || end <= record.address || end > output.byteLength) {
+    const end = Math.min(index + 1 < records.length ? records[index + 1].address : endAddress, endAddress);
+    if (record.address < startAddress || record.address >= endAddress) continue;
+    if (end <= record.address) {
       throw new Error(`invalid listing address range: ${record.address}..${end}`);
     }
     const bytes = Array.from(output.subarray(record.address, end));

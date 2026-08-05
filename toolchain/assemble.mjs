@@ -27,7 +27,7 @@ function parseErrors(stderr, exitCode) {
 /**
  * Assemble source bytes with a fresh NASM WebAssembly instance.
  * @param {Uint8Array} source Source bytes. They are copied verbatim into NASM's FS.
- * @param {{ format?: string, listing?: boolean }} opts
+ * @param {{ format?: string, listing?: boolean, includeFiles?: Record<string, Uint8Array> }} opts
  * @returns {Promise<
  *   {ok: true, output: Uint8Array, listing?: string} |
  *   {ok: false, errors: {line: number, message: string}[]}
@@ -45,6 +45,10 @@ export async function assemble(source, opts = {}) {
   if (opts.listing !== undefined && typeof opts.listing !== 'boolean') {
     throw new TypeError('opts.listing must be a boolean');
   }
+  if (opts.includeFiles !== undefined && (opts.includeFiles === null || Array.isArray(opts.includeFiles)
+      || typeof opts.includeFiles !== 'object')) {
+    throw new TypeError('opts.includeFiles must be an object');
+  }
 
   const stderr = [];
   const previousExitCode = process.exitCode;
@@ -56,6 +60,12 @@ export async function assemble(source, opts = {}) {
       printErr: (line) => stderr.push(String(line)),
     });
     module.FS.writeFile('/in.asm', source);
+    for (const [name, bytes] of Object.entries(opts.includeFiles ?? {})) {
+      if (!/^[A-Za-z0-9_.-]+$/.test(name) || !(bytes instanceof Uint8Array)) {
+        throw new TypeError('includeFiles entries must have simple names and Uint8Array values');
+      }
+      module.FS.writeFile(`/${name}`, bytes);
+    }
     const args = ['-f', format];
     if (opts.listing) args.push('-l', '/out.lst');
     args.push('-o', '/out.bin', '/in.asm');

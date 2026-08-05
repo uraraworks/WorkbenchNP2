@@ -30,6 +30,7 @@ toolchain/
   makefd.mjs         PC-98 2HD 1232KB FAT12 イメージを新規生成
   fdadd.mjs          既存 FAT12 イメージへファイル追加（BPB 自動判別）
   build-com.mjs      CLI: .asm → .COM → 新規 FD
+  build-exe.mjs      CLI: exebin.mac使用 .asm → MZ EXE → 新規 FD
   build-boot-fd.mjs  CLI: .asm → .COM → 起動可能 FD（FreeDOS ベース）
   verify*.mjs        各種検証スクリプト
 samples/             テスト用 .asm
@@ -278,6 +279,7 @@ node nasm-wasm/verify.mjs   # wasm NASM の出力がホスト版と sha256 一�
 node verify-fd.mjs          # FD 生成 → 独立コードで読み戻して round-trip 一致
 node verify-fdadd.mjs       # 既存イメージへの追加で元ファイルを壊していないか
 node verify-listing.mjs     # listingマップと.COM実バイト、行/offset逆引きの一致
+node verify-saka-build.mjs  # SAKA変換版のwasm NASM・MZヘッダ・EXE行マップ
 ```
 
 ## 技術選定

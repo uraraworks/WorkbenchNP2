@@ -14,6 +14,7 @@
 
 `SAKA.ASM` の変換前実測値、全重複ラベル、MZ生成方針は
 [saka-masm-inventory.md](saka-masm-inventory.md) に分離した。
+変換結果と再生成・検証手順は [saka-nasm.md](saka-nasm.md) に記録した。
 
 ---
 
