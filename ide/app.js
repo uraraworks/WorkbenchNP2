@@ -5,6 +5,7 @@ import {
 } from './vendor/webnp2/webnp2-embed.js';
 import { lineToOffset, offsetToLine } from '../toolchain/listing.mjs';
 import { assembleDebugLoader, assembleHello, makeProgramFd } from './toolchain.js';
+import { releaseLoaderAtEntry, waitForLoaderControl } from './loader-control.mjs';
 
 const statusNode = document.querySelector('#status');
 const sourceNode = document.querySelector('#source');
@@ -30,12 +31,6 @@ let lastStepCount = 0;
 let loaderControl;
 let entryStopped = false;
 let targetBytesMatched = false;
-
-const CONTROL_SIGNATURE = new TextEncoder().encode('PC98DEV1');
-const CONTROL = {
-  version: 8, state: 10, loaderPsp: 12, targetPsp: 14, kind: 16,
-  sp: 18, ss: 20, ip: 22, cs: 24, errorAx: 26, release: 28, size: 30,
-};
 
 function setStatus(message, error = false) {
   statusNode.textContent = message;
@@ -147,51 +142,6 @@ function runToNextSourceLine() {
   setStatus(`次のソース ${currentLine} 行へ進みました`);
 }
 
-function readWord(memory, offset) {
-  return memory[offset] | (memory[offset + 1] << 8);
-}
-
-function signatureMatches(memory, offset) {
-  return CONTROL_SIGNATURE.every((byte, index) => memory[offset + index] === byte);
-}
-
-function parseLoaderControl(memory, address) {
-  return {
-    address,
-    version: readWord(memory, address + CONTROL.version),
-    state: readWord(memory, address + CONTROL.state),
-    loaderPsp: readWord(memory, address + CONTROL.loaderPsp),
-    targetPsp: readWord(memory, address + CONTROL.targetPsp),
-    kind: memory[address + CONTROL.kind],
-    sp: readWord(memory, address + CONTROL.sp),
-    ss: readWord(memory, address + CONTROL.ss),
-    ip: readWord(memory, address + CONTROL.ip),
-    cs: readWord(memory, address + CONTROL.cs),
-    errorAx: readWord(memory, address + CONTROL.errorAx),
-  };
-}
-
-async function waitForLoaderControl() {
-  // webnp2_mem_ptrのRAMビューは書込み可能だが、embedの公開境界を保つため
-  // DebuggerControllerの範囲検査付きread/writeを使う。対象本体を探すのではなく、
-  // stateを最後にpublishする専用署名だけを探すのでディスクキャッシュ像は一致しない。
-  const limit = Date.now() + 20_000;
-  while (Date.now() < limit) {
-    const memory = debug.readMemory(0, 0xa0000);
-    for (let address = 0; address + CONTROL.size <= memory.length; address++) {
-      if (!signatureMatches(memory, address)) continue;
-      const control = parseLoaderControl(memory, address);
-      if (control.version !== 1 || (control.state !== 1 && control.state !== 0xffff)) continue;
-      if (control.state === 0xffff) {
-        throw new Error(`デバッガローダが失敗しました (AX=${hex(control.errorAx, 4)})`);
-      }
-      return control;
-    }
-    await sleep(100);
-  }
-  throw new Error('デバッガローダのREADY制御ブロックを検出できません');
-}
-
 function validateLoaderControl(control) {
   if (control.kind !== 0) throw new Error(`HELLOの種別がCOMではありません: ${control.kind}`);
   if (control.ip !== 0x0100) throw new Error(`COM初期IPが0100hではありません: ${hex(control.ip, 4)}`);
@@ -205,26 +155,6 @@ function validateLoaderControl(control) {
   }
   targetBytesMatched = programBytes.every((byte, index) => pspAndTarget[0x100 + index] === byte);
   if (!targetBytesMatched) throw new Error('ロード済み対象が無改変HELLO.COMと一致しません');
-}
-
-function releaseLoaderAtEntry(control) {
-  debug.setPaused(true);
-  const frozenBytes = debug.readMemory(control.address, CONTROL.size);
-  const frozen = parseLoaderControl(frozenBytes, 0);
-  if (!signatureMatches(frozenBytes, 0) || frozen.version !== 1 || frozen.state !== 1) {
-    throw new Error('pause前にローダ制御状態が変化しました');
-  }
-  debug.setBreakpoint(7, control.cs, control.ip, true);
-  debug.writeMemory(control.address + CONTROL.release, new Uint8Array([0xa5]));
-  const hit = debug.runUntilBreakpoint(100_000);
-  debug.setBreakpoint(7, control.cs, control.ip, false);
-  if (hit !== 7) throw new Error(`対象エントリへ到達できませんでした (hit=${hit})`);
-  const regs = debug.readRegisters();
-  if (regs.cs !== control.cs || regs.eip !== control.ip || regs.ss !== control.ss ||
-      (regs.esp & 0xffff) !== control.sp || regs.ds !== control.targetPsp || regs.es !== control.targetPsp) {
-    throw new Error('対象エントリの初期レジスタがローダ通知値と一致しません');
-  }
-  entryStopped = true;
 }
 
 async function waitForPrompt() {
@@ -265,10 +195,12 @@ async function initialize() {
   });
   await waitForPrompt();
   await engine.pasteText('B:\\E0LOAD\r');
-  loaderControl = await waitForLoaderControl();
+  loaderControl = await waitForLoaderControl(debug);
+  if (!loaderControl) throw new Error('デバッガローダのREADY制御ブロックを検出できません');
   validateLoaderControl(loaderControl);
   programCs = loaderControl.cs;
-  releaseLoaderAtEntry(loaderControl);
+  releaseLoaderAtEntry(debug, loaderControl);
+  entryStopped = true;
   document.body.dataset.programCs = String(programCs);
   pauseButton.textContent = 'Resume';
   stepButton.disabled = false;

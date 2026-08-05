@@ -19,6 +19,26 @@ start:
 	mov	ax,cs
 	mov	[control_loader_psp],ax
 
+	; PSP command tailの先頭引数を対象パスとして使う。引数なしはIDE互換の
+	; B:\TARGET.COM。これにより同じローダをCOM/MZや別ドライブへ使い回せる。
+	xor	cx,cx
+	mov	cl,[80h]
+	mov	si,81h
+.skip_arg_spaces:
+	jcxz	.arg_ready
+	cmp	byte [si],' '
+	jne	.copy_arg
+	inc	si
+	dec	cx
+	jmp	.skip_arg_spaces
+.copy_arg:
+	mov	di,target_path
+.copy_arg_byte:
+	movsb
+	loop	.copy_arg_byte
+	mov	byte [es:di],0
+.arg_ready:
+
 	; The default COM stack is at the top of the original allocation. Move it into
 	; the retained loader block before AH=4Ah releases the remainder.
 	mov	ss,ax
@@ -147,6 +167,7 @@ publish_error:
 	jmp	.error_wait
 
 target_path	db	'B:\TARGET.COM',0
+	times	128-($-target_path) db 0
 command_tail	db	0,0Dh
 mz_header	times	1Ch db 0
 header_bytes	dw	0

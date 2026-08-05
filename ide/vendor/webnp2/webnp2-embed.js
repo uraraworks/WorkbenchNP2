@@ -2250,8 +2250,10 @@ export {
   Yt as breakpointKey,
   er as createDebugger,
   Qt as createWebNP2,
+  Ce as fatReadFile,
   tr as mountDebuggerToolbar,
   nr as mountDisassemblyView,
   sr as mountMemoryDump,
-  rr as mountRegisterView
+  rr as mountRegisterView,
+  ke as openDiskImage
 };

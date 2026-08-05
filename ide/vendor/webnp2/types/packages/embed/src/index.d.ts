@@ -5,3 +5,5 @@ export type { BreakpointEvent, PauseEvent } from './debugger.ts';
 export type { DisasmLine, Registers } from './types.ts';
 export { breakpointKey, mountDebuggerToolbar, mountDisassemblyView, mountMemoryDump, mountRegisterView, } from './ui.ts';
 export type { ComponentHandle, DebuggerToolbarHandle, DebuggerToolbarLabels, DisassemblyViewHandle, MemoryDumpHandle, MemoryDumpLabels, RegisterViewHandle, } from './ui.ts';
+export { fatReadFile, openDiskImage } from '../../../src/api/fat.ts';
+export type { FatVolume } from '../../../src/api/fat.ts';

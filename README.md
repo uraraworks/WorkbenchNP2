@@ -161,6 +161,52 @@ DOSは子プロセスのスタックへゼロワードを1つ積んでから返�
 定数2を根拠なく引かないよう、検証では返却`SS:SP`が指すワードをホストがRAMから直読みし、
 **その値が`0000`であること自体**も確認している。
 
+### 当時ASM版SAKA.EXEのエントリ停止・命令ステップ（Phase E-3）
+
+`verify-saka-step.mjs` はE-2から共通化したHDD起動・ランチャ離脱・FDドライブ探索を使い、
+`\A-GAMES\SAKA\SAKA.EXE`を汎用デバッガローダで4B01hロードして返却CS:IPへ制御を移す。
+ローダはPSP command tailの対象パスを受け付け、引数なしの場合だけ従来どおり`B:\TARGET.COM`を使う。
+
+エントリ停止時は、CPUのCS:IPと4B01h返却値、PSP/初期レジスタ、実行前後のTVRAM不変を検査する。
+さらにNP2kaiの2MB RAMビュー内にあるGVRAM両ページ・B/R/G/E各32KBもSHA-256照合し、
+テキストプレーンだけが不変でもグラフィックが変化したケースをPASSにしない。
+さらにホスト側FATリーダがHDD像から固定パスのSAKA.EXEだけをメモリ上へ読み、
+`e_cparhdr*16 + e_cs*16 + e_ip`のファイル実体とゲストRAMを32 bytes照合する。
+再配置表のwordに重なるバイトは比較から除外し、除外バイト数をPASS行へ明示する。
+その後は既定8命令（`PC98DEV_SAKA_STEPS`で1〜12）だけを逆アセンブル順にstepし、
+非分岐命令では次IPが命令長どおりかを検査する。分岐・CALL・INT等は件数を明示して連続IP検査を省略する。
+表示状態の切り分けでは、HDD起動直後、ランチャ離脱後、各ドライブ試行前、4B01h READY/release前、
+エントリBP、各step後を個別撮影し、canvas画素・生GVRAM・PNGそれぞれのハッシュをログへ出す。
+
+#### 1996年HDD環境に残るGVRAM画像
+
+初期のengine-ready画面は黒だが、最初の運用上の観測点であるファイラーFD v3.13表示時には、
+背景の人物CGが第0 GVRAMページに入っている。FDを終了してDOSプロンプトへ戻った後も消去されず、
+E0LOADの4B01h READY/release前、対象エントリ、先頭8命令後までcanvasとGVRAMのSHA-256は不変だった。
+従ってこの画像はSAKAやデバッガローダの出力ではなく、HDD起動中のFD表示までに作られた既存内容である。
+ただし現検証はAUTOEXEC内を命令追跡していないため、FD自身とそれ以前の起動処理のどちらが書いたかまでは
+区別しない。IDEは当時環境のGVRAMが開始時に空とは仮定せず、対象による出力は開始前スナップショットとの差で判定する。
+
+ハッシュ対象はNP2kaiの`VRAM_B=0A8000h`、`VRAM_R=0B0000h`、`VRAM_G=0B8000h`、
+`VRAM_E=0E0000h`と、それぞれに`VRAM_STEP=100000h`を足した第1ページである。
+`makegrph.mcr`はB/R/G/Eを色indexのbit 0/1/2/3として合成するため、E0000hは16色時の
+上位色ビット（輝度に相当）を保持する第4プレーンであり、4プレーンの選択はNP2kai実装と一致する。
+
+今回の診断では最初にrelease前だけを観測したため、既存画像の発生区間を確定できなかった。
+「変化していない」と主張する検証は、変化し得る最も早い時点から連続して観測点を置く。
+
+```bash
+PC98DEV_LEGACY_THD=/path/to/HDDimage.thd \
+CHROME_PATH='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' \
+node ide/verify-saka-step.mjs
+```
+
+純粋関数の空回り防止fixture（停止IPを+1した破壊を含む）は次で確認できる。
+
+```bash
+node ide/verify-saka-step-result.mjs
+```
+
 ### HDD起動ケースで踏んだ落とし穴
 
 - **起動不能なFDを挿したままHDD起動しない。** PC-98はFDをHDDより先に起動対象として試すため、

@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { createReadStream } from 'node:fs';
 import { createServer } from 'node:http';
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, extname, join, resolve, sep } from 'node:path';
 import { createRequire } from 'node:module';
@@ -11,6 +11,10 @@ import { fileURLToPath } from 'node:url';
 import { assemble } from '../toolchain/assemble.mjs';
 import { makeFd } from '../toolchain/makefd.mjs';
 import { parseExecLoadScreen, validateMzExecLoad } from './exec-load-result.mjs';
+import {
+  DOS_PROMPT_PATTERN, PROMPT_OR_MENU_PATTERN, externalCase, findHddProbeDrive,
+  prepareHddForProbe, waitForText,
+} from './legacy-hdd-runner.mjs';
 
 const IDE_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = dirname(IDE_DIR);
@@ -18,19 +22,6 @@ const BASE_URL = process.env.PC98DEV_EXEC_URL ?? 'http://127.0.0.1:5185/ide/exec
 const CHROME = process.env.CHROME_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
 const RESULT_PATTERN = /(?:E0 (?:4A ERROR AX=[0-9A-F]{4}|4B01 ERROR AX=[0-9A-F]{4}|4B01 OK CS:IP=[0-9A-F]{4}:[0-9A-F]{4} SS:SP=[0-9A-F]{4}:[0-9A-F]{4})|E2 HEADER ERROR AX=[0-9A-F]{4})/i;
-// PC-98のDOSは版・設定により A> / A:> / A:\> のいずれも使う。
-const DOS_PROMPT_PATTERN = /(?:^|\n)\s*[A-Z]:?\\?>\s*(?:\n|$)/i;
-// 当時のHDDはAUTOEXECからメニューやファイラーを起動する構成が普通で、素のプロンプトが出ない。
-// 検出したランチャごとに離脱キーを送ってDOSプロンプトまで抜ける。
-const LAUNCHER_ESCAPES = [
-  { name: 'NEC コマンドメニュー', pattern: /(?:コマンド[　 ]*メニュー|メニューの終了|Menu v)/, keys: ['F9'] },
-  // FDは Q で「FD を終了しますか ?」の確認が出るので Y まで送る。
-  { name: 'ファイラー FD', pattern: /(?:FD Version|by A\.Idei)/i, keys: ['Q', 'Y'] },
-];
-const MENU_PATTERN = new RegExp(LAUNCHER_ESCAPES.map((e) => e.pattern.source).join('|'), 'i');
-const PROMPT_OR_MENU_PATTERN = new RegExp(`${DOS_PROMPT_PATTERN.source}|${MENU_PATTERN.source}`, 'i');
-// HDD起動ではFDのドライブレターがパーティション構成で変わるので決め打ちしない。
-const HDD_FD_DRIVE_CANDIDATES = ['B', 'C', 'D', 'E', 'F'];
 
 async function loadPuppeteer() {
   try {
@@ -61,21 +52,6 @@ async function makeProbeFd() {
       { name: 'HELLO', ext: 'COM', data: hello },
     ]),
   };
-}
-
-async function externalCase(id, label, envName, imageName) {
-  const path = process.env[envName];
-  if (!path) return { id, label, envName, skip: `${envName}未指定` };
-  try {
-    const info = await stat(path);
-    if (!info.isFile()) return { id, label, envName, skip: '指定先が通常ファイルではありません' };
-    return { id, label, envName, path, imageName, size: info.size, promptTimeout: 300_000 };
-  } catch (error) {
-    if (error && typeof error === 'object' && error.code === 'ENOENT') {
-      return { id, label, envName, skip: '指定ファイルが存在しません' };
-    }
-    throw error;
-  }
 }
 
 const contentTypes = {
@@ -207,19 +183,6 @@ async function withTimeout(promise, timeout, message) {
   }
 }
 
-async function waitForText(page, pattern, timeout, message) {
-  const limit = Date.now() + timeout;
-  let lastText = '';
-  while (Date.now() < limit) {
-    lastText = await page.evaluate(() => window.execLoadProbe.engine.getScreenText().text);
-    if (pattern.test(lastText)) return lastText;
-    await sleep(200);
-  }
-  // 推測で起動失敗扱いにせず、停止画面をそのまま診断材料として残す。
-  console.error(`[TVRAM DUMP] ${message}\n${lastText}\n[/TVRAM DUMP]`);
-  throw new Error(message);
-}
-
 /**
  * HDD起動ケースのプローブ実行。
  * 起動直後の状態はイメージによって「素のDOSプロンプト」とも限らず、MSDOS33.hdiは
@@ -228,39 +191,19 @@ async function waitForText(page, pattern, timeout, message) {
  * 決め打ちせず候補を順に試して実際に起動できたものを採用する。
  */
 async function runProbeOnHdd(page, scenario) {
-  const first = await page.evaluate(() => window.execLoadProbe.engine.getScreenText().text);
-  const launcher = LAUNCHER_ESCAPES.find((entry) => entry.pattern.test(first));
-  if (launcher && !DOS_PROMPT_PATTERN.test(first)) {
-    console.error(`[INFO] ${scenario.label}: ${launcher.name} を検出、${launcher.keys.join('→')} で離脱します`);
-    for (const key of launcher.keys) {
-      await page.evaluate((k) => window.execLoadProbe.engine.sendKeys(k), key);
-      await sleep(500);
-    }
-    await waitForText(
-      page, DOS_PROMPT_PATTERN, 60_000,
-      `${scenario.label}の${launcher.name}からDOSプロンプトへ抜けられませんでした`,
-    );
-  }
-  await page.evaluate(() => window.execLoadProbe.insertProbeFd());
-  await sleep(1000);
-  const tried = [];
-  for (const letter of HDD_FD_DRIVE_CANDIDATES) {
+  await prepareHddForProbe(page, scenario, 'execLoadProbe');
+  const found = await findHddProbeDrive(page, scenario, 'execLoadProbe', async (letter) => {
     const target = scenario.target ?? `${letter}:\\HELLO.COM`;
     await page.evaluate((cmd) => window.execLoadProbe.engine.pasteText(cmd), `${letter}:\\E0LOAD ${target}\r`);
     const limit = Date.now() + 15_000;
     while (Date.now() < limit) {
       const text = await page.evaluate(() => window.execLoadProbe.engine.getScreenText().text);
-      if (RESULT_PATTERN.test(text)) {
-        console.error(`[INFO] ${scenario.label}: プローブFDは ${letter}: に割り当てられました`);
-        return text;
-      }
+      if (RESULT_PATTERN.test(text)) return text;
       await sleep(200);
     }
-    tried.push(letter);
-  }
-  const last = await page.evaluate(() => window.execLoadProbe.engine.getScreenText().text);
-  console.error(`[TVRAM DUMP] ${scenario.label} ドライブ探索失敗(試行: ${tried.join(', ')})\n${last}\n[/TVRAM DUMP]`);
-  throw new Error(`${scenario.label}: プローブFDのドライブレターを特定できませんでした`);
+    return null;
+  });
+  return found.result;
 }
 
 async function evaluateResult(page, scenario, screen, hello) {
@@ -342,7 +285,7 @@ async function runScenario(browser, scenario, hello) {
     );
     assert.deepEqual(pageErrors, []);
     await waitForText(
-      page,
+      page, 'execLoadProbe',
       scenario.id === 'freedos' ? DOS_PROMPT_PATTERN : PROMPT_OR_MENU_PATTERN,
       scenario.promptTimeout,
       `${scenario.label}のDOSプロンプト待機がタイムアウトしました`,
@@ -352,7 +295,7 @@ async function runScenario(browser, scenario, hello) {
       // FreeDOSケースはプローブが起動時からFD2=B:に載っている。
       await page.evaluate(() => window.execLoadProbe.engine.pasteText('B:\\E0LOAD B:\\HELLO.COM\r'));
       screen = await waitForText(
-        page, RESULT_PATTERN, 60_000, `${scenario.label}の4B01h結果がTVRAMへ表示されませんでした`,
+        page, 'execLoadProbe', RESULT_PATTERN, 60_000, `${scenario.label}の4B01h結果がTVRAMへ表示されませんでした`,
       );
     } else {
       screen = await runProbeOnHdd(page, scenario);
