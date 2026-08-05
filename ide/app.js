@@ -230,10 +230,11 @@ window.pc98ide = {
   }),
   getRegisters: () => debug?.readRegisters(),
   getScreenText: () => engine?.getScreenText(),
-  runFdProgram: async (name, bytes, command) => {
+  isCpuPaused: () => engine?.dbgIsPaused() ?? true,
+  insertGeneratedFd: async (name, bytes) => {
     await engine.insertFd(1, { name, bytes: new Uint8Array(bytes) }, `ide:generated:${name}`);
-    entryStopped = false;
-    debug.setPaused(false);
+  },
+  pasteDosCommand: async (command) => {
     await engine.pasteText(`${command}\r`);
   },
 };

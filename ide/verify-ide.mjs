@@ -9,6 +9,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { compile } from '../toolchain/compile.mjs';
 import { makeFd } from '../toolchain/makefd.mjs';
+import { DOS_PROMPT_PATTERN } from './legacy-hdd-runner.mjs';
 
 const IDE_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = dirname(IDE_DIR);
@@ -88,6 +89,21 @@ async function dumpTvram(page, label) {
   });
 }
 
+async function waitForCurrentDosPrompt(page, baseline = undefined, timeout = 15_000) {
+  const limit = Date.now() + timeout;
+  let screen;
+  while (Date.now() < limit) {
+    screen = await page.evaluate(() => window.pc98ide.getScreenText());
+    const cursorLine = screen.cursor ? screen.lines[screen.cursor.row] : undefined;
+    if (screen.text !== baseline && cursorLine !== undefined && DOS_PROMPT_PATTERN.test(cursorLine)) {
+      return { ...screen, cursorLine };
+    }
+    await sleep(100);
+  }
+  await dumpTvram(page, 'active DOS prompt timeout');
+  throw new Error('カーソル位置のDOSプロンプトを待機中にタイムアウトしました');
+}
+
 async function buildCProgramFd() {
   const [source, library] = await Promise.all([
     readFile(join(ROOT, 'samples', 'hello-c.c')),
@@ -96,7 +112,10 @@ async function buildCProgramFd() {
   const result = await compile(new Uint8Array(source), { library: new Uint8Array(library) });
   if (!result.ok) throw new Error(result.errors.map((error) => `${error.stage}: ${error.message}`).join('\n'));
   assert.equal(result.output[0] | (result.output[1] << 8), 0x5a4d, 'C出力がMZ EXEではありません');
-  return makeFd([{ name: 'HELLOC', ext: 'EXE', data: result.output }]);
+  return {
+    fd: makeFd([{ name: 'HELLOC', ext: 'EXE', data: result.output }]),
+    exeSize: result.output.byteLength,
+  };
 }
 
 const results = [];
@@ -262,10 +281,25 @@ try {
   });
 
   await check(9, 'C small-model EXEをFAT12 FDから実行しTVRAM出力を確認', async () => {
-    await page.waitForFunction(() => /A:\\?>/i.test(window.pc98ide.getScreenText()?.text), { timeout: 15_000 });
+    const paused = await page.evaluate(() => window.pc98ide.isCpuPaused());
+    console.log(`[INFO] check 9 precondition: dbgIsPaused=${paused}`);
+    assert.equal(paused, false, 'チェック9開始時にCPUがpauseしています');
+
+    const prompt = await waitForCurrentDosPrompt(page);
+    console.log(`[INFO] check 9 active prompt: row=${prompt.cursor.row} line=${JSON.stringify(prompt.cursorLine)}`);
+
     await page.evaluate(async (bytes) => {
-      await window.pc98ide.runFdProgram('smallerc.xdf', bytes, 'B:\\HELLOC');
-    }, Array.from(cProgramFd));
+      await window.pc98ide.insertGeneratedFd('smallerc.xdf', bytes);
+    }, Array.from(cProgramFd.fd));
+    await sleep(1_000);
+    const beforeDir = await page.evaluate(() => window.pc98ide.getScreenText().text);
+    await page.evaluate(() => window.pc98ide.pasteDosCommand('DIR B:'));
+    const directory = await waitForCurrentDosPrompt(page, beforeDir);
+    const listed = new RegExp(`HELLOC\\s+EXE\\s+${cProgramFd.exeSize.toLocaleString('en-US').replace(',', ',?')}`, 'i');
+    assert.match(directory.text, listed, 'DIR B:に生成したHELLOC.EXEと期待サイズがありません');
+    console.log(`[INFO] check 9 FD: HELLOC.EXE ${cProgramFd.exeSize} bytes`);
+
+    await page.evaluate(() => window.pc98ide.pasteDosCommand('B:\\HELLOC'));
     try {
       await page.waitForFunction(
         () => window.pc98ide.getScreenText()?.text.includes('Hello from C on PC-98!'),
