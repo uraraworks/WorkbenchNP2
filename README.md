@@ -52,6 +52,12 @@ C側はBSD 2-ClauseのSmallerCをupstream無改変でwasm化し、
 > すべてのDOSでの対応を保証するものではない。非対応DOSではこの方式を利用できない。
 > また現時点のIDE実証UIはHELLO.COM固定で、任意ファイル選択UIはまだない。
 
+> **既知の制約:** 4B01h load-only後にローダが対象へfar jumpする現方式では、対象が
+> INT 21h/AH=4Chで終了してもFreeDOSのプロンプトへ戻らないことを実測している。
+> このため同一セッションでの「実行→再実行」は未対応。C実行検証は影響を分離するため
+> 独立したFreeDOS/NP2セッションを使う。ローダは4B01h直後のINT 21h/AH=51h結果と、
+> 終了後CPUのCS:IP・逆アセンブルを診断ログへ記録する。
+
 `ide/` は `samples/hello.asm` をブラウザのwasm NASMでアセンブルし、行マップとFAT12 FDを
 その場で生成して、IDEが用意したcanvas上のNP2kaiへ渡す。ソース行クリックBP、現在行強調、
 「次の行まで実行」を備える。レジスタはembedのUIを使わないIDE独自表示、逆アセンブルはembed部品である。
@@ -77,7 +83,7 @@ node ide/verify-ide.mjs
 検証は、28-byteの無改変hello、対象1命令目での初期レジスタ一致と未出力、クリックBPと停止・強調行、
 次行への遷移、IDE独自レジスタ表示、実行後のTVRAM出力を確認する。停止IPを+1した値や、実行済みの
 画面文字列を同じエントリ検証関数へ渡すとFAILすることも確認し、空回りを防ぐ。
-同じFreeDOS/WebNP2セッションへC生成物のFAT12 FDを差し替え、`HELLOC.EXE`の
+独立したFreeDOS/WebNP2セッションへC生成物のFAT12 FDを挿入し、`HELLOC.EXE`の
 `Hello from C on PC-98!`をTVRAMから読む第9チェックも含む。
 `PC98DEV_URL` と `CHROME_PATH` で起動先を上書きできる。
 
@@ -102,6 +108,12 @@ NP2kaiは実装しない。`ENABLE_TRAP` 時だけINT実行直前に `softinttra
 CD imm8とAX条件をC内で効率よく監視する。これはAH=4Bh入口の捕捉APIであり、単独ではロード完了を
 意味しない。OS非依存性を保つには、併せて汎用メモリwatch/mailbox通知を提供してゲストローダと協調する。
 NP2kai内へDOSバージョン依存のPSP/MCB解析を直接組み込む `run_until_exec_entry` は最終手段とする。
+
+4B01h方式の終了復帰を直す場合、AH=50hで現在PSPを子へ切り替えるだけでは、親ローダの
+メモリ解放と復帰先が保証できない。候補設計は、子PSPのINT 22h終了ベクタをローダ内の
+復帰トランポリンへ設定し、子終了後にローダ用SS:SPとPSPを復元してローダ自身もAH=4Chで
+終了する方式である。別案は4B00hの通常EXECを維持したまま、ゲスト通知またはCPU側フックで
+子の1命令目を停止する方式。現在PSPと終了後CPU位置の実測後に選定する。
 
 ### DOS EXEC 4B01h 実地確認（Phase E-0）
 

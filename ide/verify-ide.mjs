@@ -9,7 +9,6 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { compile } from '../toolchain/compile.mjs';
 import { makeFd } from '../toolchain/makefd.mjs';
-import { DOS_PROMPT_PATTERN } from './legacy-hdd-runner.mjs';
 
 const IDE_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = dirname(IDE_DIR);
@@ -81,27 +80,12 @@ function assertTvramContains(screen, expected) {
   assert.ok(screen.includes(expected), `TVRAMに期待文字列がありません: ${expected}`);
 }
 
-async function dumpTvram(page, label) {
-  const screen = await page.evaluate(() => window.pc98ide.getScreenText());
+async function dumpTvram(page, label, harness = 'pc98ide') {
+  const screen = await page.evaluate((name) => window[name].getScreenText(), harness);
   console.error(`[ERROR] ${label}: TVRAM ${screen.lines.length} lines, cursor=${JSON.stringify(screen.cursor)}`);
   screen.lines.forEach((line, index) => {
     console.error(`[ERROR] TVRAM ${String(index).padStart(2, '0')}: ${JSON.stringify(line)}`);
   });
-}
-
-async function waitForCurrentDosPrompt(page, baseline = undefined, timeout = 15_000) {
-  const limit = Date.now() + timeout;
-  let screen;
-  while (Date.now() < limit) {
-    screen = await page.evaluate(() => window.pc98ide.getScreenText());
-    const cursorLine = screen.cursor ? screen.lines[screen.cursor.row] : undefined;
-    if (screen.text !== baseline && cursorLine !== undefined && DOS_PROMPT_PATTERN.test(cursorLine)) {
-      return { ...screen, cursorLine };
-    }
-    await sleep(100);
-  }
-  await dumpTvram(page, 'active DOS prompt timeout');
-  throw new Error('カーソル位置のDOSプロンプトを待機中にタイムアウトしました');
 }
 
 async function buildCProgramFd() {
@@ -134,6 +118,7 @@ let server;
 let browser;
 let profile;
 let page;
+let cPage;
 let targetLine;
 let nextLine;
 let cProgramFd;
@@ -235,6 +220,16 @@ try {
       { timeout: 15_000 },
     );
     assert.ok((await page.evaluate(() => window.pc98ide.getScreenText().text)).includes('Hello, PC-98!'));
+    await sleep(1_000);
+    const diagnostic = await page.evaluate(() => window.pc98ide.capturePostExit());
+    const regs = diagnostic.registers;
+    console.log(`[INFO] post-exit CPU: wasPaused=${diagnostic.wasPaused} `
+      + `CS:IP=${regs.cs.toString(16).padStart(4, '0')}:${regs.eip.toString(16).padStart(4, '0')} `
+      + `SS:SP=${regs.ss.toString(16).padStart(4, '0')}:${(regs.esp & 0xffff).toString(16).padStart(4, '0')} `
+      + `instruction=${JSON.stringify(diagnostic.disassembly[0] ?? null)}`);
+    console.log(`[INFO] loader PSP: loader=${diagnostic.loaderControl.loaderPsp.toString(16)} `
+      + `target=${diagnostic.loaderControl.targetPsp.toString(16)} `
+      + `DOS-current-after-4B01=${diagnostic.loaderControl.currentPsp.toString(16)}`);
   });
 
   await check(7, '意図したIDE状態を可視化してスクリーンショット保存', async () => {
@@ -281,35 +276,39 @@ try {
   });
 
   await check(9, 'C small-model EXEをFAT12 FDから実行しTVRAM出力を確認', async () => {
-    const paused = await page.evaluate(() => window.pc98ide.isCpuPaused());
+    cPage = await browser.newPage();
+    await cPage.setViewport({ width: 800, height: 500, deviceScaleFactor: 1 });
+    await cPage.goto(new URL('c-runner.html', BASE_URL).href, { waitUntil: 'networkidle2' });
+    await cPage.evaluate(() => window.pc98c.ready);
+    const paused = await cPage.evaluate(() => window.pc98c.isCpuPaused());
     console.log(`[INFO] check 9 precondition: dbgIsPaused=${paused}`);
     assert.equal(paused, false, 'チェック9開始時にCPUがpauseしています');
 
-    const prompt = await waitForCurrentDosPrompt(page);
+    const prompt = await cPage.evaluate(() => window.pc98c.waitForPrompt());
     console.log(`[INFO] check 9 active prompt: row=${prompt.cursor.row} line=${JSON.stringify(prompt.cursorLine)}`);
 
-    await page.evaluate(async (bytes) => {
-      await window.pc98ide.insertGeneratedFd('smallerc.xdf', bytes);
+    await cPage.evaluate(async (bytes) => {
+      await window.pc98c.insertProgramFd('smallerc.xdf', bytes);
     }, Array.from(cProgramFd.fd));
     await sleep(1_000);
-    const beforeDir = await page.evaluate(() => window.pc98ide.getScreenText().text);
-    await page.evaluate(() => window.pc98ide.pasteDosCommand('DIR B:'));
-    const directory = await waitForCurrentDosPrompt(page, beforeDir);
+    const beforeDir = await cPage.evaluate(() => window.pc98c.getScreenText().text);
+    await cPage.evaluate(() => window.pc98c.pasteDosCommand('DIR B:'));
+    const directory = await cPage.evaluate((baseline) => window.pc98c.waitForPrompt(baseline), beforeDir);
     const listed = new RegExp(`HELLOC\\s+EXE\\s+${cProgramFd.exeSize.toLocaleString('en-US').replace(',', ',?')}`, 'i');
     assert.match(directory.text, listed, 'DIR B:に生成したHELLOC.EXEと期待サイズがありません');
     console.log(`[INFO] check 9 FD: HELLOC.EXE ${cProgramFd.exeSize} bytes`);
 
-    await page.evaluate(() => window.pc98ide.pasteDosCommand('B:\\HELLOC'));
+    await cPage.evaluate(() => window.pc98c.pasteDosCommand('B:\\HELLOC'));
     try {
-      await page.waitForFunction(
-        () => window.pc98ide.getScreenText()?.text.includes('Hello from C on PC-98!'),
+      await cPage.waitForFunction(
+        () => window.pc98c.getScreenText()?.text.includes('Hello from C on PC-98!'),
         { timeout: 15_000 },
       );
     } catch (error) {
-      await dumpTvram(page, 'check 9 timeout after B:\\HELLOC');
+      await dumpTvram(cPage, 'check 9 timeout after B:\\HELLOC', 'pc98c');
       throw error;
     }
-    const screen = await page.evaluate(() => window.pc98ide.getScreenText().text);
+    const screen = await cPage.evaluate(() => window.pc98c.getScreenText().text);
     assertTvramContains(screen, 'Hello from C on PC-98!');
     assert.throws(() => assertTvramContains(screen, 'Hello from C on PC-99!'));
   });

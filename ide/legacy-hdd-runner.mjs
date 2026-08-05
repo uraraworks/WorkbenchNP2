@@ -1,6 +1,7 @@
 import { stat } from 'node:fs/promises';
+import { DOS_PROMPT_PATTERN } from './dos-prompt.mjs';
 
-export const DOS_PROMPT_PATTERN = /(?:^|\n)\s*[A-Z]:?\\?>\s*(?:\n|$)/i;
+export { DOS_PROMPT_PATTERN } from './dos-prompt.mjs';
 export const LAUNCHER_ESCAPES = [
   { name: 'NEC コマンドメニュー', pattern: /(?:コマンド[　 ]*メニュー|メニューの終了|Menu v)/, keys: ['F9'] },
   { name: 'ファイラー FD', pattern: /(?:FD Version|by A\.Idei)/i, keys: ['Q', 'Y'] },

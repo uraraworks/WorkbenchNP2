@@ -1,8 +1,9 @@
 const CONTROL_SIGNATURE = new TextEncoder().encode('PC98DEV1');
 export const CONTROL = {
   version: 8, state: 10, loaderPsp: 12, targetPsp: 14, kind: 16,
-  sp: 18, ss: 20, ip: 22, cs: 24, errorAx: 26, release: 28, size: 30,
+  sp: 18, ss: 20, ip: 22, cs: 24, currentPsp: 26, errorAx: 28, release: 30, size: 32,
 };
+const CONTROL_VERSION = 2;
 
 const sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
 const readWord = (memory, offset) => memory[offset] | (memory[offset + 1] << 8);
@@ -23,6 +24,7 @@ export function parseLoaderControl(memory, address) {
     ss: readWord(memory, address + CONTROL.ss),
     ip: readWord(memory, address + CONTROL.ip),
     cs: readWord(memory, address + CONTROL.cs),
+    currentPsp: readWord(memory, address + CONTROL.currentPsp),
     errorAx: readWord(memory, address + CONTROL.errorAx),
   };
 }
@@ -34,7 +36,7 @@ export async function waitForLoaderControl(debug, timeout = 20_000) {
     for (let address = 0; address + CONTROL.size <= memory.length; address++) {
       if (!signatureMatches(memory, address)) continue;
       const control = parseLoaderControl(memory, address);
-      if (control.version !== 1 || (control.state !== 1 && control.state !== 0xffff)) continue;
+      if (control.version !== CONTROL_VERSION || (control.state !== 1 && control.state !== 0xffff)) continue;
       if (control.state === 0xffff) {
         throw new Error(`デバッガローダが失敗しました (AX=${control.errorAx.toString(16).toUpperCase().padStart(4, '0')})`);
       }
@@ -50,7 +52,7 @@ export function freezeLoaderControl(debug, control) {
   debug.setPaused(true);
   const frozenBytes = debug.readMemory(control.address, CONTROL.size);
   const frozen = parseLoaderControl(frozenBytes, 0);
-  if (!signatureMatches(frozenBytes, 0) || frozen.version !== 1 || frozen.state !== 1) {
+  if (!signatureMatches(frozenBytes, 0) || frozen.version !== CONTROL_VERSION || frozen.state !== 1) {
     throw new Error('pause時にローダ制御状態がREADYではありません');
   }
   const release = frozenBytes[CONTROL.release];
@@ -63,7 +65,7 @@ export function releaseLoaderAtEntry(debug, control, breakpointIndex = 7) {
   debug.setPaused(true);
   const frozenBytes = debug.readMemory(control.address, CONTROL.size);
   const frozen = parseLoaderControl(frozenBytes, 0);
-  if (!signatureMatches(frozenBytes, 0) || frozen.version !== 1 || frozen.state !== 1) {
+  if (!signatureMatches(frozenBytes, 0) || frozen.version !== CONTROL_VERSION || frozen.state !== 1) {
     throw new Error('pause前にローダ制御状態が変化しました');
   }
   debug.setBreakpoint(breakpointIndex, control.cs, control.ip, true);

@@ -6,7 +6,7 @@
 	BITS	16
 	ORG	100h
 
-CONTROL_VERSION	equ	1
+CONTROL_VERSION	equ	2
 STATE_READY	equ	1
 STATE_ERROR	equ	0FFFFh
 RELEASE_VALUE	equ	0A5h
@@ -110,6 +110,12 @@ prepare_exec:
 	test	byte [cs:exec_flags],1
 	jnz	exec_failed
 
+	; 4B01hのload-only後にDOSが認識する現在PSPを記録する。制御移譲前の
+	; 観測専用であり、AH=50hによる切替はまだ行わない。
+	mov	ah,51h
+	int	21h
+	mov	[control_current_psp],bx
+
 	mov	ax,[exec_params + 0Eh]
 	mov	[control_initial_sp],ax
 	mov	ax,[exec_params + 10h]
@@ -200,6 +206,7 @@ control_initial_sp	dw	0
 control_initial_ss	dw	0
 control_initial_ip	dw	0
 control_initial_cs	dw	0
+control_current_psp	dw	0
 control_error_ax	dw	0
 control_release	db	0
 	db	0

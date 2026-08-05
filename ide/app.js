@@ -8,6 +8,7 @@ import { assembleDebugLoader, assembleHello, makeProgramFd } from './toolchain.j
 import { releaseLoaderAtEntry, waitForLoaderControl } from './loader-control.mjs';
 import { nextSourceEntry, sourceLineForRegisters } from './source-debug.mjs';
 import { renderSourceLines } from './source-view.mjs';
+import { bootFreeDos } from './freedos-session.mjs';
 
 const statusNode = document.querySelector('#status');
 const sourceNode = document.querySelector('#source');
@@ -18,7 +19,6 @@ const stepButton = document.querySelector('#step');
 const nextButton = document.querySelector('#next-line');
 const continueButton = document.querySelector('#continue');
 const runButton = document.querySelector('#run');
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 let engine;
 let debug;
@@ -137,17 +137,6 @@ function validateLoaderControl(control) {
   if (!targetBytesMatched) throw new Error('ロード済み対象が無改変HELLO.COMと一致しません');
 }
 
-async function waitForPrompt() {
-  const limit = Date.now() + 60_000;
-  while (Date.now() < limit) {
-    const screen = engine.getScreenText().text;
-    screenTextNode.textContent = screen;
-    if (/A:\\?>/i.test(screen)) return;
-    await sleep(200);
-  }
-  throw new Error('FreeDOSプロンプトを待機中にタイムアウトしました');
-}
-
 async function initialize() {
   const [assembled, loader] = await Promise.all([assembleHello(), assembleDebugLoader()]);
   sourceMap = assembled.map;
@@ -167,13 +156,11 @@ async function initialize() {
     removeBreakpointLabel: 'ブレークポイントを解除',
     onToggleBreakpoint: () => {},
   });
-  await engine.boot({
-    fd1: { file: { name: 'freedos.xdf', bytes: freeDos }, sourceKey: 'ide:freedos' },
-    fd2: { file: { name: 'hello.xdf', bytes: programFd }, sourceKey: 'ide:hello' },
-    latencyMs: 40,
-    extMemMB: 1,
+  await bootFreeDos(engine, {
+    freeDos, freeDosKey: 'ide:freedos',
+    programFd, programName: 'hello.xdf', programKey: 'ide:hello',
+    onScreen: (screen) => { screenTextNode.textContent = screen.text; },
   });
-  await waitForPrompt();
   await engine.pasteText('B:\\E0LOAD\r');
   loaderControl = await waitForLoaderControl(debug);
   if (!loaderControl) throw new Error('デバッガローダのREADY制御ブロックを検出できません');
@@ -236,6 +223,15 @@ window.pc98ide = {
   },
   pasteDosCommand: async (command) => {
     await engine.pasteText(`${command}\r`);
+  },
+  capturePostExit: () => {
+    const wasPaused = debug.isPaused();
+    debug.setPaused(true);
+    const registers = debug.readRegisters();
+    return {
+      wasPaused, registers, loaderControl,
+      disassembly: debug.disassemble(registers.cs, registers.eip, 4),
+    };
   },
 };
 window.pc98ide.ready.catch((error) => setStatus(error instanceof Error ? error.message : String(error), true));
