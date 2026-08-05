@@ -293,7 +293,14 @@ try {
     await sleep(1_000);
     const beforeDir = await cPage.evaluate(() => window.pc98c.getScreenText().text);
     await cPage.evaluate(() => window.pc98c.pasteDosCommand('DIR B:'));
-    const directory = await cPage.evaluate((baseline) => window.pc98c.waitForPrompt(baseline), beforeDir);
+    console.log('[INFO] check 9 command sent: DIR B:');
+    let directory;
+    try {
+      directory = await cPage.evaluate((baseline) => window.pc98c.waitForPrompt(baseline), beforeDir);
+    } catch (error) {
+      await dumpTvram(cPage, 'check 9 timeout after DIR B: (HELLOC not executed)', 'pc98c');
+      throw error;
+    }
     const listed = new RegExp(`HELLOC\\s+EXE\\s+${cProgramFd.exeSize.toLocaleString('en-US').replace(',', ',?')}`, 'i');
     assert.match(directory.text, listed, 'DIR B:に生成したHELLOC.EXEと期待サイズがありません');
     console.log(`[INFO] check 9 FD: HELLOC.EXE ${cProgramFd.exeSize} bytes`);
