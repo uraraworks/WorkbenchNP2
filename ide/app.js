@@ -230,5 +230,11 @@ window.pc98ide = {
   }),
   getRegisters: () => debug?.readRegisters(),
   getScreenText: () => engine?.getScreenText(),
+  runFdProgram: async (name, bytes, command) => {
+    await engine.insertFd(1, { name, bytes: new Uint8Array(bytes) }, `ide:generated:${name}`);
+    entryStopped = false;
+    debug.setPaused(false);
+    await engine.pasteText(`${command}\r`);
+  },
 };
 window.pc98ide.ready.catch((error) => setStatus(error instanceof Error ? error.message : String(error), true));

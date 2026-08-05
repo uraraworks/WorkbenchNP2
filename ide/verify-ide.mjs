@@ -7,6 +7,8 @@ import { tmpdir } from 'node:os';
 import { dirname, extname, join, resolve, sep } from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { compile } from '../toolchain/compile.mjs';
+import { makeFd } from '../toolchain/makefd.mjs';
 
 const IDE_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = dirname(IDE_DIR);
@@ -74,6 +76,21 @@ function assertEntryStopped(actual) {
   assert.equal(actual.screen.includes('Hello, PC-98!'), false, 'エントリ停止前に対象が実行されています');
 }
 
+function assertTvramContains(screen, expected) {
+  assert.ok(screen.includes(expected), `TVRAMに期待文字列がありません: ${expected}`);
+}
+
+async function buildCProgramFd() {
+  const [source, library] = await Promise.all([
+    readFile(join(ROOT, 'samples', 'hello-c.c')),
+    readFile(join(ROOT, 'toolchain', 'smlrc-wasm', 'lcds.a')),
+  ]);
+  const result = await compile(new Uint8Array(source), { library: new Uint8Array(library) });
+  if (!result.ok) throw new Error(result.errors.map((error) => `${error.stage}: ${error.message}`).join('\n'));
+  assert.equal(result.output[0] | (result.output[1] << 8), 0x5a4d, 'C出力がMZ EXEではありません');
+  return makeFd([{ name: 'HELLOC', ext: 'EXE', data: result.output }]);
+}
+
 const results = [];
 async function check(number, name, action) {
   try {
@@ -92,9 +109,11 @@ let profile;
 let page;
 let targetLine;
 let nextLine;
+let cProgramFd;
 
 try {
   await check(1, '静的IDE・Chrome・wasm NASM・NP2kai起動', async () => {
+    cProgramFd = await buildCProgramFd();
     if (!process.env.PC98DEV_URL) server = await startServer();
     const puppeteer = await loadPuppeteer();
     profile = await mkdtemp(join(tmpdir(), 'pc98dev-ide-'));
@@ -232,6 +251,20 @@ try {
       ...entryEvidence, regs: { ...entryEvidence.regs, eip: entryEvidence.regs.eip + 1 },
     }));
     assert.throws(() => assertEntryStopped({ ...entryEvidence, screen: 'Hello, PC-98!' }));
+  });
+
+  await check(9, 'C small-model EXEをFAT12 FDから実行しTVRAM出力を確認', async () => {
+    await page.waitForFunction(() => /A:\\?>/i.test(window.pc98ide.getScreenText()?.text), { timeout: 15_000 });
+    await page.evaluate(async (bytes) => {
+      await window.pc98ide.runFdProgram('smallerc.xdf', bytes, 'B:\\HELLOC');
+    }, Array.from(cProgramFd));
+    await page.waitForFunction(
+      () => window.pc98ide.getScreenText()?.text.includes('Hello from C on PC-98!'),
+      { timeout: 15_000 },
+    );
+    const screen = await page.evaluate(() => window.pc98ide.getScreenText().text);
+    assertTvramContains(screen, 'Hello from C on PC-98!');
+    assert.throws(() => assertTvramContains(screen, 'Hello from C on PC-99!'));
   });
 } finally {
   if (browser) await browser.close();

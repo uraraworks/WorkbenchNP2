@@ -6,7 +6,7 @@
 
 ## 現状（2026-08-05）
 
-**Step 4 の C コンパイラ基盤まで到達。アセンブラ側はソース行デバッグまで通っている。**
+**Step 4 の C→16-bit DOS EXE生成まで到達。アセンブラ側はソース行デバッグまで通っている。**
 
 ```
 .asm ──[wasm NASM]──> .COM ──[FAT12 書き込み]──> .xdf ──[WebNP2]──> PC-98 で実行
@@ -31,6 +31,7 @@ toolchain/
   fdadd.mjs          既存 FAT12 イメージへファイル追加（BPB 自動判別）
   build-com.mjs      CLI: .asm → .COM → 新規 FD
   build-exe.mjs      CLI: exebin.mac使用 .asm → MZ EXE → 新規 FD
+  compile.mjs        CLI/API: C → small-model MZ EXE → 新規 FD
   build-boot-fd.mjs  CLI: .asm → .COM → 起動可能 FD（FreeDOS ベース）
   verify*.mjs        各種検証スクリプト
 samples/             テスト用 .asm
@@ -40,8 +41,8 @@ ide/                WebNP2 embedを使う最小IDE実証
 ```
 
 C側はBSD 2-ClauseのSmallerCをupstream無改変でwasm化し、
-`toolchain/compile.mjs` で `smlrpp → smlrc -seg16` を順に呼んで
-NASM形式assemblyを生成する。リンカとDOS実行ファイル生成は次フェーズである。
+`toolchain/compile.mjs` で `smlrpp → smlrc -seg16 → NASM -f elf → smlrl -small` を順に呼んで
+16-bit DOS small-model MZ EXEを生成する。標準ライブラリ`lcds.a`もpin済みソースから再生成する。
 再現・ホスト版一致検証は [docs/smallerc-wasm.md](docs/smallerc-wasm.md) を参照する。
 
 ## 最小IDE実証
@@ -76,6 +77,8 @@ node ide/verify-ide.mjs
 検証は、28-byteの無改変hello、対象1命令目での初期レジスタ一致と未出力、クリックBPと停止・強調行、
 次行への遷移、IDE独自レジスタ表示、実行後のTVRAM出力を確認する。停止IPを+1した値や、実行済みの
 画面文字列を同じエントリ検証関数へ渡すとFAILすることも確認し、空回りを防ぐ。
+同じFreeDOS/WebNP2セッションへC生成物のFAT12 FDを差し替え、`HELLOC.EXE`の
+`Hello from C on PC-98!`をTVRAMから読む第9チェックも含む。
 `PC98DEV_URL` と `CHROME_PATH` で起動先を上書きできる。
 
 同期物の `ide/vendor/webnp2/LICENSE.WebNP2` はWebNP2由来コードの出所を、
@@ -238,6 +241,9 @@ node ide/verify-exec-load.mjs
 一切触らないので安全で、`B:` としてゲストから見える。
 
 ```bash
+# Cからsmall-model MZ EXEと成果物FDを作る
+node toolchain/compile.mjs samples/hello-c.c -o /tmp/pc98dev-c.xdf
+
 # 成果物だけの FD を作る
 node toolchain/build-com.mjs samples/hello.asm -o /tmp/pc98dev.xdf
 
