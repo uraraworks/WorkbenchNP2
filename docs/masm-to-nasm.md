@@ -12,6 +12,9 @@
 `TEST.ASM`（455B）の変換版は wasm NASM でアセンブルし、WebNP2 上の FreeDOS(98) で
 実行して **`てすと中だぜぃ` が ESC[10;8H の指定どおり表示されることを確認済み**。
 
+`SAKA.ASM` の変換前実測値、全重複ラベル、MZ生成方針は
+[saka-masm-inventory.md](saka-masm-inventory.md) に分離した。
+
 ---
 
 ## 1. オペランドの意味が逆転する（最頻出・最重要）
@@ -113,11 +116,11 @@ MASM の `.MODEL` にあたるものが無いので、明示的に書く。
 
 ## 7. 未検証・今後の課題
 
-- `SAKA.ASM` は **EMS（INT 67h）** を使う。実行環境に EMS ドライバが要る
-- MASM の `STRUC` / マクロ / 条件アセンブルは未調査（`EDITER.ASM` 等で使われている可能性）
+- `SAKA.ASM` は **EMS（INT 67h）を27件**使う。実行環境に EMS ドライバが要る
+- `SAKA.ASM` には `STRUC` / マクロ / 条件アセンブルはなかった。他資産は未調査
 - `.OBJ`（OMF）を経由するリンクが必要なケース（複数ファイル構成）は未着手
-- **代替案**: JWasm / UASM（オープンソースの MASM 互換アセンブラ）を wasm 化すれば
-  変換自体が不要になる。当時資産の受け入れという観点では価値が高い。**ライセンス要確認**
+- JWasm / UASM は Sybase Open Watcom Public License 1.0 で、BSD-2で揃える方針と
+  合わないため採用しない。BSD系のMASM互換アセンブラも確認できず、一度だけNASM記法へ変換する
 
 ---
 
