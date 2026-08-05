@@ -4,18 +4,20 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { createServer } from 'node:http';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, extname, join, resolve, sep } from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { assemble } from '../toolchain/assemble.mjs';
+import { parseListing } from '../toolchain/listing.mjs';
 import { normalizeMzFileSize, parseMzHeader } from '../toolchain/mz.mjs';
 import {
   PROMPT_OR_MENU_PATTERN, externalCase, findHddProbeDrive, insertProbeFd, leaveHddLauncher, waitForText,
 } from './legacy-hdd-runner.mjs';
 import { parseMz, validateSakaEntry } from './saka-step-result.mjs';
 import { validateSakaVisualStart } from './saka-start-result.mjs';
+import { validateSourceStop } from './source-debug.mjs';
 
 const IDE_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = dirname(IDE_DIR);
@@ -28,6 +30,9 @@ const START_TIMEOUT = Number.parseInt(process.env.PC98DEV_SAKA_START_TIMEOUT ?? 
 const VARIANT = process.env.PC98DEV_SAKA_VARIANT ?? 'converted';
 const CHECKPOINTS = Number.parseInt(process.env.PC98DEV_SAKA_CHECKPOINTS ?? '1', 10);
 const RESULT_PATH = process.env.PC98DEV_SAKA_RESULT;
+const SOURCE_DEBUG = process.env.PC98DEV_SAKA_SOURCE_DEBUG === '1';
+const SOURCE_DEBUG_LINE = 165;
+const SOURCE_DEBUG_SHOT = '/private/tmp/claude-501/-Users-haruurara-MyProject--emulator-PC98/ebf3c7ad-2505-4d39-9ee7-ff750b61b82a/scratchpad/pc98dev-saka-source-debug.png';
 
 assert.ok(Number.isInteger(START_TIMEOUT) && START_TIMEOUT >= 1000,
   'PC98DEV_SAKA_START_TIMEOUTは1000ms以上で指定してください');
@@ -50,7 +55,7 @@ async function buildInputs() {
   ]);
   const [loader, saka] = await Promise.all([
     assemble(new Uint8Array(loaderSource)),
-    assemble(new Uint8Array(sakaSource), { includeFiles: { 'exebin.mac': exebin } }),
+    assemble(new Uint8Array(sakaSource), { listing: true, includeFiles: { 'exebin.mac': exebin } }),
   ]);
   if (!loader.ok) throw new Error(loader.errors.map((error) => `debug-loader.asm:${error.line}: ${error.message}`).join('\n'));
   if (!saka.ok) throw new Error(saka.errors.map((error) => `SAKA_NASM.ASM:${error.line}: ${error.message}`).join('\n'));
@@ -61,16 +66,33 @@ async function buildInputs() {
     { cs: 0xfff0, ip: 0x0100, ss: 0xfff0, sp: 0x26bc, relocations: 0 },
     '変換版SAKA.EXEのMZヘッダが既知のビルド結果と異なります',
   );
-  return { loader: loader.output, exe };
+  const map = parseListing(saka.listing, exe, { startAddress: header.headerBytes });
+  assert.equal(map.length, 2601, '変換版SAKAの行マップ件数が既知値と異なります');
+  // WHATWGのwindows-31jはCP932対応表を使う。0x5Cを円記号へ置換する文字変換は行わない。
+  const sourceLines = new TextDecoder('windows-31j').decode(sakaSource).split(/\r?\n/);
+  return { loader: loader.output, exe, map, sourceLines };
 }
 
 const harness = `<!doctype html>
-<html><body><canvas id="screen" width="640" height="400"></canvas>
+<html><head><style>
+body { margin: 0; background: #101318; color: #e8edf2; font: 14px system-ui; }
+#layout { display: grid; grid-template-columns: 660px 1fr; gap: 16px; padding: 16px; }
+#source-panel { height: 820px; overflow: auto; border: 1px solid #4d5968; background: #171b22; }
+.source-line { display: grid; grid-template-columns: 52px 24px 1fr; width: 100%; border: 0; padding: 2px 8px;
+  text-align: left; color: #cbd5df; background: transparent; font: 13px/1.45 monospace; }
+.source-line.current { background: #634f00; color: #fff4b8; outline: 2px solid #ffd54a; }
+.source-line.breakpoint .line-marker { color: #ff5c6c; }
+.source-line:disabled { opacity: 1; }
+#debug-heading { color: #ffd54a; }
+</style></head><body><div id="layout"><div><canvas id="screen" width="640" height="400"></canvas>
+<h2 id="debug-heading"></h2><pre id="debug-status"></pre></div><div id="source-panel"></div></div>
 <script type="module">
 import { createDebugger, createWebNP2, fatReadFile, openDiskImage } from './vendor/webnp2/webnp2-embed.js';
 import { makeFd } from '../toolchain/makefd.mjs';
 import { freezeLoaderControl, releaseLoaderAtEntry, waitForLoaderControl } from './loader-control.mjs';
 import { createSakaVisualSnapshot } from './saka-visual-state.mjs';
+import { sourceBreakpointOffset, sourceLineForRegisters, validateSourceStop } from './source-debug.mjs';
+import { renderSourceLines } from './source-view.mjs';
 const config = await (await fetch('/saka-config?variant=' + encodeURIComponent('${VARIANT}'))).json();
 const canvas = document.querySelector('#screen');
 const engine = createWebNP2(canvas);
@@ -79,6 +101,8 @@ const snapshotState = createSakaVisualSnapshot(engine, debug, canvas);
 engine.persistNow = async () => {};
 let pendingProbeFd;
 let exeBytes;
+let sourceMap;
+let sourceLines;
 const DATA_EXTENSIONS = ['GDT', 'PDT', 'KDT', 'MDT', 'KYA'];
 const sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
 window.sakaStartProbe = {
@@ -108,6 +132,37 @@ window.sakaStartProbe = {
   },
   resume: () => debug.setPaused(false),
   sendKey: (key) => engine.sendKeys(key),
+  runToSourceLine: (control, expectedLine) => {
+    if (!sourceMap || !sourceLines) throw new Error('source debug data is unavailable');
+    const offset = sourceBreakpointOffset(sourceMap, expectedLine);
+    debug.setBreakpoint(0, control.cs, offset, true);
+    const hit = debug.runUntilBreakpoint(5_000_000);
+    debug.setBreakpoint(0, control.cs, offset, false);
+    if (hit !== 0) throw new Error('ソースBPへ到達できませんでした (hit=' + hit + ')');
+    const registers = debug.readRegisters();
+    const stopped = validateSourceStop(sourceMap, control.cs, registers, expectedLine);
+    renderSourceLines(document.querySelector('#source-panel'), {
+      sourceLines, sourceMap, currentLine: stopped.sourceLine, selectedLine: expectedLine,
+      programCs: control.cs,
+    });
+    document.querySelector('[data-source-line="' + expectedLine + '"]').scrollIntoView({ block: 'center' });
+    document.querySelector('#debug-heading').textContent = '1996 SAKA source breakpoint';
+    document.querySelector('#debug-status').textContent =
+      'BP line=' + expectedLine + ' CS:IP=' + control.cs.toString(16).toUpperCase().padStart(4, '0')
+      + ':' + offset.toString(16).toUpperCase().padStart(4, '0') + '\\n' + sourceLines[expectedLine - 1];
+    return { registers, stopped, sourceText: sourceLines[expectedLine - 1], previousText: sourceLines[expectedLine - 2] };
+  },
+  stepSource: (programCs) => {
+    const before = debug.readRegisters();
+    const instruction = debug.disassemble(before.cs, before.eip, 1)[0];
+    const executed = debug.step(1);
+    const after = debug.readRegisters();
+    const sourceLine = sourceLineForRegisters(sourceMap, programCs, after);
+    renderSourceLines(document.querySelector('#source-panel'), {
+      sourceLines, sourceMap, currentLine: sourceLine, selectedLine: ${SOURCE_DEBUG_LINE}, programCs,
+    });
+    return { before, instruction, executed, after, sourceLine, sourceText: sourceLines[sourceLine - 1] };
+  },
   waitForDraw: async (baselineHash, timeout) => {
     const limit = Date.now() + timeout;
     let last;
@@ -132,10 +187,11 @@ window.sakaStartProbe = {
     return { timeout: true, last, registers, instruction };
   },
   ready: (async () => {
-    const [loaderResponse, exeResponse, hddResponse] = await Promise.all([
-      fetch('/debug-loader.com'), fetch('/converted-saka.exe'), fetch(config.imageUrl),
+    const [loaderResponse, exeResponse, hddResponse, debugResponse] = await Promise.all([
+      fetch('/debug-loader.com'), fetch('/converted-saka.exe'), fetch(config.imageUrl), fetch('/saka-debug-data'),
     ]);
-    if (!loaderResponse.ok || !exeResponse.ok || !hddResponse.ok) throw new Error('input fetch failed');
+    if (!loaderResponse.ok || !exeResponse.ok || !hddResponse.ok || !debugResponse.ok) throw new Error('input fetch failed');
+    ({ map: sourceMap, sourceLines } = await debugResponse.json());
     const loader = new Uint8Array(await loaderResponse.arrayBuffer());
     const convertedExe = new Uint8Array(await exeResponse.arrayBuffer());
     const hddBytes = new Uint8Array(await hddResponse.arrayBuffer());
@@ -188,6 +244,11 @@ function startServer(inputs, scenario) {
             imageName: scenario.imageName, imageUrl: '/external-hdd/legacy', variant,
           })); return;
         }
+        if (url.pathname === '/saka-debug-data') {
+          response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({
+            map: inputs.map, sourceLines: inputs.sourceLines,
+          })); return;
+        }
         if (url.pathname === '/external-hdd/legacy') {
           response.writeHead(200, {
             'Content-Type': 'application/octet-stream', 'Content-Length': scenario.size, 'Cache-Control': 'no-store',
@@ -232,7 +293,9 @@ try {
     args: ['--hide-scrollbars', '--autoplay-policy=no-user-gesture-required'],
   });
   page = await browser.newPage();
-  await page.setViewport({ width: 1000, height: 700, deviceScaleFactor: 1 });
+  await page.setViewport(SOURCE_DEBUG
+    ? { width: 1500, height: 900, deviceScaleFactor: 1 }
+    : { width: 1000, height: 700, deviceScaleFactor: 1 });
   page.setDefaultNavigationTimeout(300_000);
   page.setDefaultTimeout(300_000);
   const pageErrors = [];
@@ -280,6 +343,47 @@ try {
     { ss: mz.ss, sp: mz.sp, ip: mz.ip, cs: mz.cs, relocations: mz.relocations }, expected.header,
     `${VARIANT} SAKA.EXEのMZヘッダが既知値と異なります`,
   );
+  if (SOURCE_DEBUG) {
+    assert.equal(VARIANT, 'converted', 'ソース行デバッグは変換版だけを対象にします');
+    const stopped = await page.evaluate(
+      ({ control, sourceLine }) => window.sakaStartProbe.runToSourceLine(control, sourceLine),
+      { control: preRelease.control, sourceLine: SOURCE_DEBUG_LINE },
+    );
+    const checkedStop = validateSourceStop(inputs.map, preRelease.control.cs, stopped.registers, SOURCE_DEBUG_LINE);
+    // 実測した同じ停止証拠へ別行を期待させ、検査が必ずFAILすることを確認する。
+    assert.throws(() => validateSourceStop(
+      inputs.map, preRelease.control.cs, stopped.registers, SOURCE_DEBUG_LINE - 1,
+    ));
+    assert.match(stopped.previousText, /mov\s+bx,open1/i, 'BP直前がopen1選択行ではありません');
+    assert.match(stopped.sourceText, /call\s+\.put/i, 'BP行がオープニング描画呼出しではありません');
+    const sourceVisual = await page.$eval(`[data-source-line="${SOURCE_DEBUG_LINE}"]`, (row) => {
+      const rect = row.getBoundingClientRect();
+      return {
+        current: row.classList.contains('current'), breakpoint: row.classList.contains('breakpoint'),
+        visible: rect.top >= 0 && rect.bottom <= innerHeight,
+      };
+    });
+    assert.deepEqual(sourceVisual, { current: true, breakpoint: true, visible: true });
+    await mkdir(dirname(SOURCE_DEBUG_SHOT), { recursive: true });
+    await page.screenshot({ path: SOURCE_DEBUG_SHOT });
+    const steps = [];
+    for (let index = 0; index < 4; index++) {
+      steps.push(await page.evaluate((programCs) => window.sakaStartProbe.stepSource(programCs), preRelease.control.cs));
+    }
+    assert.deepEqual(steps.map((step) => step.sourceLine), [196, 197, 198, 199],
+      'call .putから4命令のソース行遷移が期待値と異なります');
+    console.log('[REASON] 164行でopen1（平成8年10月の第1画面）を選び、165行がその描画ループを呼ぶため');
+    console.log(`[MAP] samples/legacy/saka/SAKA_NASM.ASM entries=${inputs.map.length}`);
+    console.log(`[BP] line=${checkedStop.sourceLine} CS:IP=${checkedStop.cs.toString(16).toUpperCase().padStart(4, '0')}:`
+      + `${checkedStop.ip.toString(16).toUpperCase().padStart(4, '0')} source=${JSON.stringify(stopped.sourceText)}`);
+    for (const [index, step] of steps.entries()) {
+      console.log(`[STEP ${index + 1}] ${step.before.cs.toString(16).toUpperCase().padStart(4, '0')}:`
+        + `${step.before.eip.toString(16).toUpperCase().padStart(4, '0')} ${step.instruction.text} -> `
+        + `line=${step.sourceLine} ${JSON.stringify(step.sourceText)}`);
+    }
+    console.log(`[PASS] SAKA source line breakpoint/4 instruction steps; wrong-line guard=FAIL confirmed`);
+    console.log(`[SHOT] ${SOURCE_DEBUG_SHOT}`);
+  } else {
   await page.evaluate(() => window.sakaStartProbe.resume());
   let drawResult = await page.evaluate(
     ({ baselineHash, timeout }) => window.sakaStartProbe.waitForDraw(baselineHash, timeout),
@@ -330,6 +434,7 @@ try {
     await writeFile(RESULT_PATH, `${JSON.stringify({ variant: VARIANT, entry: {
       cs: preRelease.control.cs, ip: preRelease.control.ip, comparedBytes: entry.comparedBytes,
     }, checkpoints }, null, 2)}\n`);
+  }
   }
 } catch (error) {
   console.error(`[FAIL] ${error instanceof Error ? error.message : String(error)}`);

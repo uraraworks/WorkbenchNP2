@@ -3,9 +3,11 @@ import {
   createWebNP2,
   mountDisassemblyView,
 } from './vendor/webnp2/webnp2-embed.js';
-import { lineToOffset, offsetToLine } from '../toolchain/listing.mjs';
+import { lineToOffset } from '../toolchain/listing.mjs';
 import { assembleDebugLoader, assembleHello, makeProgramFd } from './toolchain.js';
 import { releaseLoaderAtEntry, waitForLoaderControl } from './loader-control.mjs';
+import { nextSourceEntry, sourceLineForRegisters } from './source-debug.mjs';
+import { renderSourceLines } from './source-view.mjs';
 
 const statusNode = document.querySelector('#status');
 const sourceNode = document.querySelector('#source');
@@ -42,25 +44,9 @@ function hex(value, width) {
 }
 
 function renderSource() {
-  sourceNode.replaceChildren();
-  const mappedLines = new Set(sourceMap.map((entry) => entry.srcLine));
-  sourceLines.forEach((text, index) => {
-    const line = index + 1;
-    const row = document.createElement('button');
-    row.type = 'button';
-    row.className = 'source-line';
-    row.dataset.sourceLine = String(line);
-    row.dataset.text = text;
-    if (mappedLines.has(line)) row.dataset.debuggable = 'true';
-    if (line === currentLine) row.classList.add('current');
-    if (line === selectedLine) row.classList.add('breakpoint');
-    row.disabled = !mappedLines.has(line) || programCs === undefined;
-    const number = document.createElement('span'); number.className = 'line-number'; number.textContent = String(line);
-    const marker = document.createElement('span'); marker.className = 'line-marker'; marker.textContent = line === selectedLine ? '●' : '';
-    const code = document.createElement('code'); code.textContent = text || ' ';
-    row.append(number, marker, code);
-    row.addEventListener('click', () => toggleSourceBreakpoint(line));
-    sourceNode.append(row);
+  renderSourceLines(sourceNode, {
+    sourceLines, sourceMap, currentLine, selectedLine, programCs,
+    onToggleBreakpoint: toggleSourceBreakpoint,
   });
 }
 
@@ -81,7 +67,7 @@ function refreshDebugViews() {
   if (!debug?.isPaused()) return;
   const regs = debug.readRegisters();
   renderRegisters(regs);
-  currentLine = programCs === regs.cs ? offsetToLine(sourceMap, regs.eip) : null;
+  currentLine = sourceLineForRegisters(sourceMap, programCs, regs);
   renderSource();
   disassemblyView.update({
     seg: regs.cs,
@@ -122,15 +108,9 @@ async function continueToSourceBreakpoint() {
   setStatus(`ソース ${currentLine} 行で停止（CS=${hex(programCs, 4)}）`);
 }
 
-function nextSourceEntry(line) {
-  const currentIndex = sourceMap.findIndex((entry) => entry.srcLine === line);
-  if (currentIndex < 0) return null;
-  return sourceMap.slice(currentIndex + 1).find((entry) => entry.srcLine !== line) ?? null;
-}
-
 function runToNextSourceLine() {
   if (programCs === undefined || currentLine == null) throw new Error('現在のソース行を特定できません');
-  const next = nextSourceEntry(currentLine);
+  const next = nextSourceEntry(sourceMap, currentLine);
   if (!next) throw new Error('次の生成行がありません');
   debug.setBreakpoint(1, programCs, next.offset, true);
   const hit = debug.runUntilBreakpoint(100_000);
