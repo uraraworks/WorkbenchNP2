@@ -36,9 +36,9 @@ const wrappedGood = {
   regs: { cs: 0x111a, eip: 0x0100, ss: 0x111a, esp: 0x03fe, ds: 0x111a, es: 0x111a },
 };
 assert.equal(validateSakaEntry(wrappedGood).fileEntry, 0x20);
-// 故意に & 0xFFFF を外した旧式の期待値は10000h超となり、実際のCSと一致しない。
-const unwrappedCs = wrappedGood.control.targetPsp + 0x10 + 0xfff0;
-assert.throws(() => assert.equal(wrappedGood.control.cs, unwrappedCs));
+// 検証対象へ故意に折り返し無し版を注入すると、実際のCSと一致せずFAILする。
+const unwrappedLoadedSegment = (psp, mzSegment) => psp + 0x10 + mzSegment;
+assert.throws(() => validateSakaEntry(wrappedGood, { loadedSegment: unwrappedLoadedSegment }));
 
 // 最重要ガード: 停止IPを1バイトずらすと必ずFAILする。
 assert.throws(() => validateSakaEntry({ ...good, regs: { ...good.regs, eip: 1 } }));

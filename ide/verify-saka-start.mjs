@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { createServer } from 'node:http';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, extname, join, resolve, sep } from 'node:path';
 import { createRequire } from 'node:module';
@@ -25,9 +25,15 @@ const BASE_URL = 'http://127.0.0.1:5187/ide/saka-start-probe.html';
 const CHROME = process.env.CHROME_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ENTRY_COMPARE_BYTES = 32;
 const START_TIMEOUT = Number.parseInt(process.env.PC98DEV_SAKA_START_TIMEOUT ?? '60000', 10);
+const VARIANT = process.env.PC98DEV_SAKA_VARIANT ?? 'converted';
+const CHECKPOINTS = Number.parseInt(process.env.PC98DEV_SAKA_CHECKPOINTS ?? '1', 10);
+const RESULT_PATH = process.env.PC98DEV_SAKA_RESULT;
 
 assert.ok(Number.isInteger(START_TIMEOUT) && START_TIMEOUT >= 1000,
   'PC98DEV_SAKA_START_TIMEOUTは1000ms以上で指定してください');
+assert.ok(VARIANT === 'original' || VARIANT === 'converted', 'PC98DEV_SAKA_VARIANTが不正です');
+assert.ok(Number.isInteger(CHECKPOINTS) && CHECKPOINTS >= 1 && CHECKPOINTS <= 3,
+  'PC98DEV_SAKA_CHECKPOINTSは1〜3で指定してください');
 
 async function loadPuppeteer() {
   try {
@@ -65,7 +71,7 @@ import { createDebugger, createWebNP2, fatReadFile, openDiskImage } from './vend
 import { makeFd } from '../toolchain/makefd.mjs';
 import { freezeLoaderControl, releaseLoaderAtEntry, waitForLoaderControl } from './loader-control.mjs';
 import { createSakaVisualSnapshot } from './saka-visual-state.mjs';
-const config = await (await fetch('/saka-config')).json();
+const config = await (await fetch('/saka-config?variant=' + encodeURIComponent('${VARIANT}'))).json();
 const canvas = document.querySelector('#screen');
 const engine = createWebNP2(canvas);
 const debug = createDebugger(engine);
@@ -101,6 +107,7 @@ window.sakaStartProbe = {
     };
   },
   resume: () => debug.setPaused(false),
+  sendKey: (key) => engine.sendKeys(key),
   waitForDraw: async (baselineHash, timeout) => {
     const limit = Date.now() + timeout;
     let last;
@@ -108,9 +115,10 @@ window.sakaStartProbe = {
     let stableSamples = 0;
     while (Date.now() < limit) {
       last = await snapshotState();
+      const candidate = last.gvram.sha256 + ':' + last.canvas.sha256;
       if (last.gvram.sha256 !== baselineHash && last.gvram.nonzero > 0) {
-        stableSamples = last.gvram.sha256 === candidateHash ? stableSamples + 1 : 1;
-        candidateHash = last.gvram.sha256;
+        stableSamples = candidate === candidateHash ? stableSamples + 1 : 1;
+        candidateHash = candidate;
         if (stableSamples >= 2) return last;
       } else {
         candidateHash = undefined;
@@ -129,25 +137,29 @@ window.sakaStartProbe = {
     ]);
     if (!loaderResponse.ok || !exeResponse.ok || !hddResponse.ok) throw new Error('input fetch failed');
     const loader = new Uint8Array(await loaderResponse.arrayBuffer());
-    exeBytes = new Uint8Array(await exeResponse.arrayBuffer());
+    const convertedExe = new Uint8Array(await exeResponse.arrayBuffer());
     const hddBytes = new Uint8Array(await hddResponse.arrayBuffer());
     const disk = openDiskImage(hddBytes, config.imageName);
     // 非公開領域は列挙せず、許可されたSAKAの固定5ファイルだけを読む。
     const dataFiles = DATA_EXTENSIONS.map((ext) => ({
       name: 'SAKA', ext, data: fatReadFile(disk, 'A-GAMES/SAKA/SAKA.' + ext),
     }));
+    exeBytes = config.variant === 'original'
+      ? fatReadFile(disk, 'A-GAMES/SAKA/SAKA.EXE')
+      : convertedExe;
     const fd = makeFd([
       { name: 'E0LOAD', ext: 'COM', data: loader },
       { name: 'SAKA', ext: 'EXE', data: exeBytes },
       ...dataFiles,
     ]);
     pendingProbeFd = {
-      file: { name: 'saka-converted.xdf', bytes: fd }, sourceKey: 'saka-start:fd',
+      file: { name: 'saka-' + config.variant + '.xdf', bytes: fd },
+      sourceKey: 'saka-start:fd:' + config.variant,
     };
     await engine.boot({
       hdd: {
         file: { name: config.imageName, bytes: hddBytes },
-        sourceKey: 'saka-start:external-hdd', alreadyPersisted: true,
+        sourceKey: 'saka-start:external-hdd:' + config.variant, alreadyPersisted: true,
       },
       latencyMs: 40, extMemMB: 1,
     });
@@ -170,8 +182,10 @@ function startServer(inputs, scenario) {
           response.writeHead(200, { 'Content-Type': 'application/octet-stream' }).end(body); return;
         }
         if (url.pathname === '/saka-config') {
+          const variant = url.searchParams.get('variant');
+          if (variant !== 'original' && variant !== 'converted') throw new Error('invalid variant');
           response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({
-            imageName: scenario.imageName, imageUrl: '/external-hdd/legacy',
+            imageName: scenario.imageName, imageUrl: '/external-hdd/legacy', variant,
           })); return;
         }
         if (url.pathname === '/external-hdd/legacy') {
@@ -258,36 +272,65 @@ try {
   };
   const entry = validateSakaEntry(entryEvidence);
   const mz = parseMz(Uint8Array.from(entryEvidence.exeBytes));
-  assert.equal(entryEvidence.exeBytes.length, 8668, '変換版SAKA.EXEのサイズが既知値8668Bと異なります');
+  const expected = VARIANT === 'converted'
+    ? { size: 8668, header: { ss: 0xfff0, sp: 0x26bc, ip: 0x0100, cs: 0xfff0, relocations: 0 } }
+    : { size: 9149, header: { ss: 0x021c, sp: 0x0400, ip: 0x0000, cs: 0x0000, relocations: 4 } };
+  assert.equal(entryEvidence.exeBytes.length, expected.size, `${VARIANT} SAKA.EXEのサイズが既知値と異なります`);
   assert.deepEqual(
-    { ss: mz.ss, sp: mz.sp, ip: mz.ip, cs: mz.cs, relocations: mz.relocations },
-    { ss: 0xfff0, sp: 0x26bc, ip: 0x0100, cs: 0xfff0, relocations: 0 },
-    '変換版SAKA.EXEのMZヘッダが既知値と異なります',
+    { ss: mz.ss, sp: mz.sp, ip: mz.ip, cs: mz.cs, relocations: mz.relocations }, expected.header,
+    `${VARIANT} SAKA.EXEのMZヘッダが既知値と異なります`,
   );
   await page.evaluate(() => window.sakaStartProbe.resume());
-  const drawResult = await page.evaluate(
+  let drawResult = await page.evaluate(
     ({ baselineHash, timeout }) => window.sakaStartProbe.waitForDraw(baselineHash, timeout),
     { baselineHash: entryState.gvram.sha256, timeout: START_TIMEOUT },
   );
-  if (drawResult.timeout) {
-    const regs = drawResult.registers;
-    const at = `${regs.cs.toString(16).toUpperCase().padStart(4, '0')}:`
-      + `${regs.eip.toString(16).toUpperCase().padStart(4, '0')}`;
-    const instruction = drawResult.instruction?.text ?? '(逆アセンブル不能)';
-    throw new Error(`GVRAM描画待機がタイムアウトしました; 停止位置=${at} ${instruction}`);
+  const checkpoints = [];
+  let previousState = entryState;
+  for (let index = 0; index < CHECKPOINTS; index++) {
+    if (drawResult.timeout) {
+      const regs = drawResult.registers;
+      const at = `${regs.cs.toString(16).toUpperCase().padStart(4, '0')}:`
+        + `${regs.eip.toString(16).toUpperCase().padStart(4, '0')}`;
+      const instruction = drawResult.instruction?.text ?? '(逆アセンブル不能)';
+      throw new Error(`checkpoint ${index + 1}の描画待機がタイムアウトしました; 停止位置=${at} ${instruction}`);
+    }
+    validateSakaVisualStart(previousState, drawResult);
+    const state = await page.evaluate(() => window.sakaStartProbe.snapshotState({ includeBytes: true }));
+    const shotPath = join(evidenceDir, `saka-${VARIANT}-opening-${index + 1}.png`);
+    const png = await page.screenshot({ path: shotPath });
+    checkpoints.push({
+      name: `opening-${index + 1}`, keyBefore: index === 0 ? null : 'SPACE', state,
+      pngSha256: createHash('sha256').update(png).digest('hex'), shotPath,
+    });
+    previousState = state;
+    if (index + 1 < CHECKPOINTS) {
+      await page.evaluate(() => window.sakaStartProbe.sendKey('SPACE'));
+      drawResult = await page.evaluate(
+        ({ baselineHash, timeout }) => window.sakaStartProbe.waitForDraw(baselineHash, timeout),
+        { baselineHash: state.gvram.sha256, timeout: START_TIMEOUT },
+      );
+    }
   }
-  const visual = validateSakaVisualStart(entryState, drawResult);
-  const shotPath = join(evidenceDir, 'saka-converted-start.png');
-  const png = await page.screenshot({ path: shotPath });
-  const pngSha256 = createHash('sha256').update(png).digest('hex');
   assert.deepEqual(pageErrors, []);
   console.log(
-    `[PASS] converted SAKA start entry=${preRelease.control.cs.toString(16).toUpperCase().padStart(4, '0')}:`
+    `[PASS] ${VARIANT} SAKA start entry=${preRelease.control.cs.toString(16).toUpperCase().padStart(4, '0')}:`
     + `${preRelease.control.ip.toString(16).toUpperCase().padStart(4, '0')} `
     + `file/RAM=${entry.comparedBytes} bytes drives=${driveAttempts.join(',')} fd=${found.letter}:`,
   );
-  console.log(`[DRAW] gvram=${visual.after} nonzero=${visual.nonzero} canvasChanged=${visual.canvasChanged}`);
-  console.log(`[SHOT] ${shotPath} sha256=${pngSha256}`);
+  for (const checkpoint of checkpoints) {
+    console.log(
+      `[CHECKPOINT] ${checkpoint.name} tvram=${checkpoint.state.tvram.sha256} `
+      + `gvram=${checkpoint.state.gvram.sha256} canvas=${checkpoint.state.canvas.sha256} `
+      + `png=${checkpoint.pngSha256}`,
+    );
+    console.log(`[SHOT] ${checkpoint.shotPath}`);
+  }
+  if (RESULT_PATH) {
+    await writeFile(RESULT_PATH, `${JSON.stringify({ variant: VARIANT, entry: {
+      cs: preRelease.control.cs, ip: preRelease.control.ip, comparedBytes: entry.comparedBytes,
+    }, checkpoints }, null, 2)}\n`);
+  }
 } catch (error) {
   console.error(`[FAIL] ${error instanceof Error ? error.message : String(error)}`);
   if (page && evidenceDir) {

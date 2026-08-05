@@ -139,8 +139,10 @@ MS-DOS環境は再配布できないためリポジトリへ置かず、`PC98DEV
 MZのword順は同梱NASM upstream `toolchain/nasm-src/misc/exebin.mac` と照合し、
 `e_ss=0Eh`、`e_sp=10h`、`e_ip=14h`、`e_cs=16h`と確定した。ホストは表示値が事前読取り値と
 一致することに加え、`IP=e_ip`、`SP=e_sp-2`、CS側とSS側から算出したPSP一致、PSP先頭`CD 20`、
-EXEがCOM同様の`IP=0100h`/`CS=PSP`でないことを検査する。対象エントリへの制御移行は行わない。
-純粋関数のfixtureを意図的に8通り壊してFAILすることは `node ide/verify-exec-load-result.mjs`
+PSP先頭が`CD 20`であることを検査する。`exebin.mac`型MZは`FFF0:0100`により実効
+`CS=PSP`となり得るため、IP/CSだけでCOMと判定しない。対象エントリへの制御移行は行わない。
+純粋関数のfixtureは通常値とFFF0h折り返しを受理し、折り返し無し注入を含む9通りの破壊が
+FAILすることを `node ide/verify-exec-load-result.mjs`
 で確認できる。
 
 **実測結果（1996年HDD環境、ASM版・C版とも load-only 成功）:**
@@ -150,8 +152,8 @@ EXEがCOM同様の`IP=0100h`/`CS=PSP`でないことを検査する。対象エ�
 | ASM版 `\A-GAMES\SAKA\SAKA.EXE` | 0000:0000 | 021C:0400 | 113C:0000 | 112C |
 | C版 `\C-GAMES\SAKA\1014\SAKA.EXE` | 0000:48D8 | 6D1D:0800 | 113C:48D8 | 112C |
 
-いずれも `CS = PSP + 10h + e_cs` / `SS = PSP + 10h + e_ss` が成立し、`IP != 0100h` かつ
-`CS != PSP` でCOMとは別経路になっている。**C版は437,130B・常駐438KBだがメモリ不足`0008h`に
+いずれも16bitで折り返した `CS = PSP + 10h + e_cs` / `SS = PSP + 10h + e_ss` が成立する。
+**C版は437,130B・常駐438KBだがメモリ不足`0008h`に
 ならず、当時環境の空きメモリに載る**。無改変のビルド済みバイナリでも入口を確定できることを示す。
 
 #### 返却SPがe_spより2小さい理由
@@ -172,7 +174,7 @@ DOSは子プロセスのスタックへゼロワードを1つ積んでから返�
 さらにNP2kaiの2MB RAMビュー内にあるGVRAM両ページ・B/R/G/E各32KBもSHA-256照合し、
 テキストプレーンだけが不変でもグラフィックが変化したケースをPASSにしない。
 さらにホスト側FATリーダがHDD像から固定パスのSAKA.EXEだけをメモリ上へ読み、
-`e_cparhdr*16 + e_cs*16 + e_ip`のファイル実体とゲストRAMを32 bytes照合する。
+`e_cparhdr*16 + ((e_cs*16 + e_ip) & FFFFFh)`のファイル実体とゲストRAMを32 bytes照合する。
 再配置表のwordに重なるバイトは比較から除外し、除外バイト数をPASS行へ明示する。
 その後は既定8命令（`PC98DEV_SAKA_STEPS`で1〜12）だけを逆アセンブル順にstepし、
 非分岐命令では次IPが命令長どおりかを検査する。分岐・CALL・INT等は件数を明示して連続IP検査を省略する。

@@ -8,9 +8,24 @@ const hexDigest = async (bytes) => Array.from(
   (byte) => byte.toString(16).padStart(2, '0'),
 ).join('');
 
+function base64(bytes) {
+  let binary = '';
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+  }
+  return btoa(binary);
+}
+
 /** E-3と変換版起動検証で共有するTVRAM/GVRAM/canvas採取器。 */
 export function createSakaVisualSnapshot(engine, debug, canvas) {
-  async function gvramState() {
+  async function tvramState(includeBytes) {
+    const bytes = debug.readMemory(0x0a0000, 0x4000);
+    const result = { sha256: await hexDigest(bytes), text: engine.getScreenText().text };
+    if (includeBytes) result.base64 = base64(bytes);
+    return result;
+  }
+
+  async function gvramState(includeBytes) {
     const combined = new Uint8Array(GVRAM_REGIONS.length * 0x8000);
     const regions = [];
     let nonzero = 0;
@@ -20,12 +35,14 @@ export function createSakaVisualSnapshot(engine, debug, canvas) {
       combined.set(bytes, index * 0x8000);
       const regionNonzero = bytes.reduce((count, byte) => count + (byte !== 0 ? 1 : 0), 0);
       nonzero += regionNonzero;
-      regions.push({ address, nonzero: regionNonzero, sha256: await hexDigest(bytes) });
+      const region = { address, nonzero: regionNonzero, sha256: await hexDigest(bytes) };
+      if (includeBytes) region.base64 = base64(bytes);
+      regions.push(region);
     }
     return { sha256: await hexDigest(combined), nonzero, regions };
   }
 
-  async function canvasState() {
+  async function canvasState(includeBytes) {
     await new Promise((resolveFrame) => requestAnimationFrame(() => requestAnimationFrame(resolveFrame)));
     const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
     let pixels;
@@ -41,12 +58,18 @@ export function createSakaVisualSnapshot(engine, debug, canvas) {
     for (let offset = 0; offset < pixels.length; offset += 4) {
       if (pixels[offset] !== 0 || pixels[offset + 1] !== 0 || pixels[offset + 2] !== 0) colored++;
     }
-    return { sha256: await hexDigest(pixels), colored, width: canvas.width, height: canvas.height };
+    const result = {
+      sha256: await hexDigest(pixels), colored, width: canvas.width, height: canvas.height,
+      origin: gl ? 'bottom-left' : 'top-left',
+    };
+    if (includeBytes) result.base64 = base64(pixels);
+    return result;
   }
 
-  return async () => ({
+  return async ({ includeBytes = false } = {}) => ({
     screen: engine.getScreenText().text,
-    gvram: await gvramState(),
-    canvas: await canvasState(),
+    tvram: await tvramState(includeBytes),
+    gvram: await gvramState(includeBytes),
+    canvas: await canvasState(includeBytes),
   });
 }

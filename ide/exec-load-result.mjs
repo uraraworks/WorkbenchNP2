@@ -30,7 +30,10 @@ export function parseExecLoadScreen(screen) {
  * ゲストが対象ファイルから独立に読んだMZヘッダと、DOS 4B01h返却値を照合する。
  * pspPrefixはホストがエミュレータRAMから直接読んだPSP先頭バイトである。
  */
-export function validateMzExecLoad(screen, pspPrefix, expectedTarget, expectedHeader, stackTop) {
+export function validateMzExecLoad(
+  screen, pspPrefix, expectedTarget, expectedHeader, stackTop,
+  { pspFromSegment = pspFromLoadedSegment } = {},
+) {
   const result = parseExecLoadScreen(screen);
   assert.equal(result.headerError, undefined, `対象のMZヘッダを読めませんでした AX=${result.headerError}`);
   assert.equal(result.target?.toUpperCase(), expectedTarget.toUpperCase(), 'ローダが開いた対象パスが不一致です');
@@ -52,8 +55,8 @@ export function validateMzExecLoad(screen, pspPrefix, expectedTarget, expectedHe
   assert.equal(result.loaded.sp, segment16(result.mz.sp - 2), '4B01hのSPがMZ e_sp-2と一致しません');
   assert.deepEqual(Array.from(stackTop ?? []), [0x00, 0x00], 'SS:SPに積まれているワードが0000ではありません');
 
-  const pspFromCs = pspFromLoadedSegment(result.loaded.cs, result.mz.cs);
-  const pspFromSs = pspFromLoadedSegment(result.loaded.ss, result.mz.ss);
+  const pspFromCs = pspFromSegment(result.loaded.cs, result.mz.cs);
+  const pspFromSs = pspFromSegment(result.loaded.ss, result.mz.ss);
   assert.ok(pspFromCs >= 0x0050 && pspFromCs < 0xA000, `CSから求めたPSPが不正です: ${pspFromCs}`);
   assert.equal(pspFromSs, pspFromCs, 'CS/e_csとSS/e_ssから求めたPSPが一致しません');
   assert.deepEqual(Array.from(pspPrefix), [0xCD, 0x20], '算出PSP先頭にINT 20hがありません');

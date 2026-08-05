@@ -38,9 +38,12 @@ assert.equal(
   validateMzExecLoad(wrapped, [0xCD, 0x20], expectedTarget, wrappedHeader, ZERO_WORD).psp,
   0x111A,
 );
-// 故意に & 0xFFFF を外した旧式は負値となり、正しいPSPと一致しないことも固定する。
-const unwrappedPsp = 0x111A - 0xFFF0 - 0x10;
-assert.throws(() => assert.equal(unwrappedPsp, 0x111A));
+// 検証対象へ故意に折り返し無し版を注入すると、負のPSPを拒否してFAILする。
+const unwrappedPspFromSegment = (loaded, mzSegment) => loaded - mzSegment - 0x10;
+assert.throws(() => validateMzExecLoad(
+  wrapped, [0xCD, 0x20], expectedTarget, wrappedHeader, ZERO_WORD,
+  { pspFromSegment: unwrappedPspFromSegment },
+));
 
 // 画面表示を1箇所ずつ壊すと必ずFAILすること(検査が空回りしていないことの確認)。
 const brokenScreens = [
