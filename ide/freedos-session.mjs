@@ -1,4 +1,4 @@
-import { currentDosPrompt } from './dos-prompt.mjs';
+import { currentDosPrompt, DOS_DRIVE_ERROR_PATTERN } from './dos-prompt.mjs';
 
 const sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
 
@@ -9,6 +9,12 @@ export async function waitForCurrentDosPrompt(engine, opts = {}) {
   while (Date.now() < limit) {
     screen = engine.getScreenText();
     opts.onScreen?.(screen);
+    if (DOS_DRIVE_ERROR_PATTERN.test(screen.text)) {
+      const error = new Error('DOSがドライブ未準備エラーの選択待ちになりました');
+      error.code = 'DOS_DRIVE_ERROR';
+      error.screen = screen;
+      throw error;
+    }
     const prompt = currentDosPrompt(screen);
     if (screen.text !== opts.baseline && prompt !== null) return { ...screen, cursorLine: prompt };
     await sleep(100);

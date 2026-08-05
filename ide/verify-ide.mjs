@@ -280,17 +280,21 @@ try {
     await cPage.setViewport({ width: 800, height: 500, deviceScaleFactor: 1 });
     await cPage.goto(new URL('c-runner.html', BASE_URL).href, { waitUntil: 'networkidle2' });
     await cPage.evaluate(() => window.pc98c.ready);
+    const prompt = await cPage.evaluate(async (bytes) => (
+      window.pc98c.bootWithProgramFd('smallerc.xdf', bytes)
+    ), Array.from(cProgramFd.fd));
     const paused = await cPage.evaluate(() => window.pc98c.isCpuPaused());
     console.log(`[INFO] check 9 precondition: dbgIsPaused=${paused}`);
     assert.equal(paused, false, 'チェック9開始時にCPUがpauseしています');
-
-    const prompt = await cPage.evaluate(() => window.pc98c.waitForPrompt());
     console.log(`[INFO] check 9 active prompt: row=${prompt.cursor.row} line=${JSON.stringify(prompt.cursorLine)}`);
 
-    await cPage.evaluate(async (bytes) => {
-      await window.pc98c.insertProgramFd('smallerc.xdf', bytes);
-    }, Array.from(cProgramFd.fd));
-    await sleep(1_000);
+    const mounted = await cPage.evaluate(() => window.pc98c.getMountedImages());
+    console.log(`[INFO] check 9 mounted images: ${JSON.stringify(mounted)}`);
+    const fd2 = mounted.find((image) => image.slot === 'fd2');
+    assert.deepEqual(fd2 && { name: fd2.name, sourceKey: fd2.sourceKey }, {
+      name: 'smallerc.xdf', sourceKey: 'c-runner:smallerc.xdf',
+    }, 'FD2に意図したC成果物イメージがマウントされていません');
+
     const beforeDir = await cPage.evaluate(() => window.pc98c.getScreenText().text);
     await cPage.evaluate(() => window.pc98c.pasteDosCommand('DIR B:'));
     console.log('[INFO] check 9 command sent: DIR B:');
