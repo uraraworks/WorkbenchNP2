@@ -80,6 +80,14 @@ function assertTvramContains(screen, expected) {
   assert.ok(screen.includes(expected), `TVRAMに期待文字列がありません: ${expected}`);
 }
 
+async function dumpTvram(page, label) {
+  const screen = await page.evaluate(() => window.pc98ide.getScreenText());
+  console.error(`[ERROR] ${label}: TVRAM ${screen.lines.length} lines, cursor=${JSON.stringify(screen.cursor)}`);
+  screen.lines.forEach((line, index) => {
+    console.error(`[ERROR] TVRAM ${String(index).padStart(2, '0')}: ${JSON.stringify(line)}`);
+  });
+}
+
 async function buildCProgramFd() {
   const [source, library] = await Promise.all([
     readFile(join(ROOT, 'samples', 'hello-c.c')),
@@ -258,10 +266,15 @@ try {
     await page.evaluate(async (bytes) => {
       await window.pc98ide.runFdProgram('smallerc.xdf', bytes, 'B:\\HELLOC');
     }, Array.from(cProgramFd));
-    await page.waitForFunction(
-      () => window.pc98ide.getScreenText()?.text.includes('Hello from C on PC-98!'),
-      { timeout: 15_000 },
-    );
+    try {
+      await page.waitForFunction(
+        () => window.pc98ide.getScreenText()?.text.includes('Hello from C on PC-98!'),
+        { timeout: 15_000 },
+      );
+    } catch (error) {
+      await dumpTvram(page, 'check 9 timeout after B:\\HELLOC');
+      throw error;
+    }
     const screen = await page.evaluate(() => window.pc98ide.getScreenText().text);
     assertTvramContains(screen, 'Hello from C on PC-98!');
     assert.throws(() => assertTvramContains(screen, 'Hello from C on PC-99!'));
