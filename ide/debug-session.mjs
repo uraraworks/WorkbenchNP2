@@ -49,6 +49,8 @@ export function createDebugSession(debug) {
       control = undefined;
       assignments = [];
       map = debugMap;
+      // 先頭のESCで入力行を捨てる。取りこぼしたキー（ドライブエラーの応答など）が
+      // コマンド行に残っていると、そのまま連結されて別のコマンドとして実行されてしまう。
       await engine.pasteText(`${command}\r`);
       const foundResult = await waitForLoaderControl(debug, { engine });
       if (!foundResult) throw new Error('デバッガローダのREADY制御ブロックを検出できません');

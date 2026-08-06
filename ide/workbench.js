@@ -8,6 +8,9 @@ import {
 } from './vendor/codemirror/codemirror.js';
 import { createDebugger, createWebNP2, mountDisassemblyView } from './vendor/webnp2/webnp2-embed.js';
 import { bootFreeDos, waitForCurrentDosPrompt } from './freedos-session.mjs';
+import {
+  answerDriveErrorAbort, currentDosPrompt, DOS_DRIVE_ERROR_PATTERN,
+} from './dos-prompt.mjs';
 import { LOADER_NAME, buildSource, makeLoaderOnlyFd } from './browser-toolchain.mjs';
 import { debugMapForBuild } from './debug-map.mjs';
 import { createDebugSession } from './debug-session.mjs';
@@ -29,10 +32,12 @@ const nodes = {
   folderOpen: document.querySelector('#folder-open'), folderDisconnect: document.querySelector('#folder-disconnect'),
   swapPanes: document.querySelector('#swap-panes'), folderState: document.querySelector('#folder-state'),
   editorCard: document.querySelector('.editor-card'), machineCard: document.querySelector('.machine-card'),
+  workspace: document.querySelector('.workspace-grid'), splitter: document.querySelector('#splitter'),
   maximizeEditor: document.querySelector('#maximize-editor'), maximizeMachine: document.querySelector('#maximize-machine'),
   editor: document.querySelector('#editor'), build: document.querySelector('#build'), run: document.querySelector('#run'),
   buildActions: document.querySelector('#build-actions'), debugActions: document.querySelector('#debug-actions'),
   buildStatus: document.querySelector('#build-status'), errors: document.querySelector('#build-errors'),
+  disassemblySplitter: document.querySelector('#disassembly-splitter'),
   disassemblyPanel: document.querySelector('#disassembly-panel'), disassembly: document.querySelector('#disassembly'),
   machineStatus: document.querySelector('#machine-status'), screenText: document.querySelector('#screen-text'),
   debug: document.querySelector('#debug'), continue: document.querySelector('#debug-continue'),
@@ -59,6 +64,7 @@ let freeDos;
 let runSequence = 0;
 let FD_SWAP_MS = 300;
 let driveErrorRetries = 0;
+let driveRemounts = 0;
 let booted;
 let resolvePrewarm;
 let rejectPrewarm;
@@ -79,11 +85,22 @@ let sidebarPreference = null;
 let lastShortcut = null;
 const PANES_SWAPPED_KEY = 'pc98dev:panes-swapped';
 const SIDEBAR_KEY = 'pc98dev:sidebar';
+const SPLIT_EDITOR_KEY = 'pc98dev:split-editor';
+const SPLIT_DISASSEMBLY_KEY = 'pc98dev:split-disassembly';
+// 画面幅が狭い環境ではPC-98画面を等倍(640px)まで広げられなくなるため、可動域は絞らない。
+// 片側を潰しきってもスプリッタ自体は残るので、いつでも引き戻せる。
+const MIN_EDITOR_WIDTH = 0;
+const MIN_MACHINE_WIDTH = 0;
+const MIN_DISASSEMBLY_HEIGHT = 80;
+const MAX_DISASSEMBLY_HEIGHT = 420;
+const MIN_SPLIT_EDITOR_HEIGHT = 200;
 const DEBUG_SECTION_KEYS = [
   [nodes.sectionRegisters, 'pc98dev:section:registers'],
   [nodes.sectionBreakpoints, 'pc98dev:section:breakpoints'],
 ];
-const GUARDED_KEYBOARD_TARGETS = ['.sidebar', '.editor-card', '.debug-panel'];
+const GUARDED_KEYBOARD_TARGETS = [
+  '.sidebar', '.editor-card', '.debug-panel', '.splitter', '.disassembly-splitter',
+];
 
 for (const [section, key] of DEBUG_SECTION_KEYS) {
   try {
@@ -129,6 +146,7 @@ function setSidebarVisible(value, { persist = true } = {}) {
     sidebarPreference = sidebarVisible;
     try { localStorage.setItem(SIDEBAR_KEY, sidebarVisible ? '1' : '0'); } catch {}
   }
+  reclampExplicitEditorWidth();
   return sidebarVisible;
 }
 
@@ -148,6 +166,7 @@ function setMaximizedPane(pane) {
   document.body.classList.toggle('maximized-machine', pane === 'machine');
   nodes.maximizeEditor.setAttribute('aria-pressed', String(pane === 'editor'));
   nodes.maximizeMachine.setAttribute('aria-pressed', String(pane === 'machine'));
+  if (pane === null) reclampExplicitEditorWidth();
   return maximizedPane;
 }
 
@@ -184,6 +203,221 @@ new ResizeObserver(syncScreenScaling).observe(screenCanvas);
 new MutationObserver(syncScreenScaling).observe(screenCanvas, {
   attributes: true, attributeFilter: ['width', 'height'],
 });
+
+function splitBounds() {
+  const gridStyle = getComputedStyle(nodes.workspace);
+  const gridWidth = nodes.workspace.getBoundingClientRect().width
+    - parseFloat(gridStyle.paddingLeft) - parseFloat(gridStyle.paddingRight);
+  const sidebarWidth = nodes.sidebar.offsetParent === null ? 0 : nodes.sidebar.getBoundingClientRect().width;
+  const splitterWidth = parseFloat(getComputedStyle(document.documentElement)
+    .getPropertyValue('--splitter-col')) || nodes.splitter.getBoundingClientRect().width || 6;
+  const gap = parseFloat(gridStyle.columnGap) || 0;
+  const trackCount = sidebarWidth > 0 ? 4 : 3;
+  const available = gridWidth - gap * (trackCount - 1);
+  return {
+    min: MIN_EDITOR_WIDTH,
+    max: Math.max(MIN_EDITOR_WIDTH,
+      Math.floor(available - sidebarWidth - splitterWidth - MIN_MACHINE_WIDTH)),
+  };
+}
+
+function reclampExplicitEditorWidth() {
+  const explicit = parseFloat(document.documentElement.style.getPropertyValue('--editor-col'));
+  if (Number.isFinite(explicit)) setEditorWidth(explicit);
+  else syncScreenScaling();
+}
+
+function setEditorWidth(px, { persist = true } = {}) {
+  if (px === null) {
+    document.documentElement.style.removeProperty('--editor-col');
+    if (persist) {
+      try { localStorage.removeItem(SPLIT_EDITOR_KEY); } catch {}
+    }
+  } else {
+    const requested = Number(px);
+    if (!Number.isFinite(requested)) throw new TypeError('エディタ幅は数値または null で指定してください');
+    const { min, max } = splitBounds();
+    const applied = Math.min(max, Math.max(min, Math.round(requested)));
+    document.documentElement.style.setProperty('--editor-col', `${applied}px`);
+    if (persist) {
+      try { localStorage.setItem(SPLIT_EDITOR_KEY, String(applied)); } catch {}
+    }
+  }
+  // ResizeObserver任せにせず、幅変更と同じターンで補間状態も合わせる。
+  const editorWidth = nodes.editorCard.getBoundingClientRect().width;
+  syncScreenScaling();
+  return editorWidth;
+}
+
+function restoreEditorWidth() {
+  try {
+    const stored = localStorage.getItem(SPLIT_EDITOR_KEY);
+    if (stored === null) return setEditorWidth(null, { persist: false });
+    const width = Number(stored);
+    if (!Number.isFinite(width)) {
+      localStorage.removeItem(SPLIT_EDITOR_KEY);
+      return setEditorWidth(null, { persist: false });
+    }
+    // 現在のviewport・サイドバー状態で可動範囲を再計算し、保存値も正規化する。
+    return setEditorWidth(width);
+  } catch {
+    return setEditorWidth(null, { persist: false });
+  }
+}
+
+function getSplit() {
+  const bounds = splitBounds();
+  const screenWidth = screenCanvas.getBoundingClientRect().width;
+  return {
+    editorWidth: nodes.editorCard.getBoundingClientRect().width,
+    machineWidth: nodes.machineCard.getBoundingClientRect().width,
+    screenWidth,
+    screenScale: screenWidth / (screenCanvas.width || 640),
+    minEditorWidth: bounds.min,
+    maxEditorWidth: bounds.max,
+    disassemblyHeight: nodes.disassemblyPanel.getBoundingClientRect().height,
+  };
+}
+
+let disassemblySplitTotal;
+function disassemblyBounds() {
+  if (!disassemblySplitTotal && nodes.disassemblyPanel.offsetParent !== null) {
+    disassemblySplitTotal = nodes.editor.getBoundingClientRect().height
+      + nodes.disassemblyPanel.getBoundingClientRect().height;
+  }
+  return {
+    min: MIN_DISASSEMBLY_HEIGHT,
+    max: Math.max(MIN_DISASSEMBLY_HEIGHT, Math.min(
+      MAX_DISASSEMBLY_HEIGHT,
+      (disassemblySplitTotal || MAX_DISASSEMBLY_HEIGHT + MIN_SPLIT_EDITOR_HEIGHT)
+        - MIN_SPLIT_EDITOR_HEIGHT,
+    )),
+  };
+}
+
+function setDisassemblyHeight(px, { persist = true } = {}) {
+  if (px === null) {
+    nodes.editor.style.removeProperty('height');
+    nodes.disassemblyPanel.style.removeProperty('height');
+    nodes.disassemblyPanel.style.removeProperty('max-height');
+    disassemblySplitTotal = undefined;
+    if (persist) {
+      try { localStorage.removeItem(SPLIT_DISASSEMBLY_KEY); } catch {}
+    }
+  } else {
+    const requested = Number(px);
+    if (!Number.isFinite(requested)) throw new TypeError('逆アセンブルの高さは数値または null で指定してください');
+    const { min, max } = disassemblyBounds();
+    const applied = Math.min(max, Math.max(min, Math.round(requested)));
+    nodes.disassemblyPanel.style.height = `${applied}px`;
+    nodes.disassemblyPanel.style.maxHeight = 'none';
+    if (disassemblySplitTotal) {
+      nodes.editor.style.height = `${Math.max(MIN_SPLIT_EDITOR_HEIGHT, disassemblySplitTotal - applied)}px`;
+    }
+    if (persist) {
+      try { localStorage.setItem(SPLIT_DISASSEMBLY_KEY, String(applied)); } catch {}
+    }
+  }
+  return nodes.disassemblyPanel.getBoundingClientRect().height;
+}
+
+function restoreDisassemblyHeight() {
+  if (nodes.disassemblyPanel.style.height) return;
+  try {
+    const stored = localStorage.getItem(SPLIT_DISASSEMBLY_KEY);
+    if (stored === null) return;
+    const height = Number(stored);
+    if (!Number.isFinite(height)) {
+      localStorage.removeItem(SPLIT_DISASSEMBLY_KEY);
+      return;
+    }
+    setDisassemblyHeight(height, { persist: false });
+  } catch {}
+}
+
+function editorWidthAtPointer(clientX, drag) {
+  const gridRect = nodes.workspace.getBoundingClientRect();
+  const gridStyle = getComputedStyle(nodes.workspace);
+  const gap = parseFloat(gridStyle.columnGap) || 0;
+  const contentLeft = gridRect.left + parseFloat(gridStyle.paddingLeft);
+  const contentRight = gridRect.right - parseFloat(gridStyle.paddingRight);
+  const sidebarWidth = nodes.sidebar.offsetParent === null ? 0 : nodes.sidebar.getBoundingClientRect().width;
+  const splitterLeft = clientX - drag.pointerOffset;
+  if (panesSwapped) {
+    return contentRight - splitterLeft - drag.splitterSize - gap;
+  }
+  const editorLeft = contentLeft + (sidebarWidth > 0 ? sidebarWidth + gap : 0);
+  return splitterLeft - gap - editorLeft;
+}
+
+function installSplitter({ node, axis, decreaseKey, increaseKey, getValue, setValue, valueAtPointer }) {
+  let drag;
+  const coordinate = (event) => (axis === 'vertical' ? event.clientX : event.clientY);
+  const size = (rect) => (axis === 'vertical' ? rect.width : rect.height);
+  node.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0 || node.offsetParent === null) return;
+    const rect = node.getBoundingClientRect();
+    drag = {
+      pointerId: event.pointerId,
+      startCoordinate: coordinate(event),
+      startValue: getValue(),
+      value: getValue(),
+      pointerOffset: coordinate(event) - (axis === 'vertical' ? rect.left : rect.top),
+      splitterSize: size(rect),
+    };
+    node.setPointerCapture(event.pointerId);
+    document.body.classList.add('splitting', `splitting-${axis}`);
+    event.preventDefault();
+  });
+  node.addEventListener('pointermove', (event) => {
+    if (drag?.pointerId !== event.pointerId) return;
+    const requested = valueAtPointer
+      ? valueAtPointer(coordinate(event), drag)
+      : drag.startValue - (coordinate(event) - drag.startCoordinate);
+    drag.value = setValue(requested, { persist: false });
+  });
+  const finish = (event) => {
+    if (drag?.pointerId !== event.pointerId) return;
+    const { pointerId, value } = drag;
+    drag = undefined;
+    document.body.classList.remove('splitting', `splitting-${axis}`);
+    if (node.hasPointerCapture(pointerId)) node.releasePointerCapture(pointerId);
+    setValue(value);
+  };
+  node.addEventListener('pointerup', finish);
+  node.addEventListener('pointercancel', finish);
+  node.addEventListener('dblclick', () => setValue(null));
+  node.addEventListener('keydown', (event) => {
+    if (event.key === 'Home') {
+      event.preventDefault();
+      setValue(null);
+    } else if (event.key === decreaseKey || event.key === increaseKey) {
+      event.preventDefault();
+      setValue(getValue() + (event.key === decreaseKey ? -16 : 16));
+    }
+  });
+}
+
+installSplitter({
+  node: nodes.splitter, axis: 'vertical', decreaseKey: 'ArrowLeft', increaseKey: 'ArrowRight',
+  getValue: () => nodes.editorCard.getBoundingClientRect().width,
+  setValue: setEditorWidth,
+  valueAtPointer: editorWidthAtPointer,
+});
+installSplitter({
+  node: nodes.disassemblySplitter, axis: 'horizontal',
+  decreaseKey: 'ArrowDown', increaseKey: 'ArrowUp',
+  getValue: () => nodes.disassemblyPanel.getBoundingClientRect().height,
+  setValue: setDisassemblyHeight,
+});
+
+/** TVRAMダンプは常に最新が見えるよう、行が増えたら最下段へ追従させる。 */
+function setScreenText(text) {
+  const node = nodes.screenText;
+  const atBottom = node.scrollHeight - node.scrollTop - node.clientHeight < 24;
+  node.textContent = text;
+  if (atBottom) node.scrollTop = node.scrollHeight;
+}
 
 function currentText() { return editor.state.doc.toString(); }
 function extensionFor(path) { return path?.match(/\.([^.]+)$/)?.[1].toLowerCase(); }
@@ -720,9 +954,10 @@ async function buildCurrent() {
  * 以後はビルドのたびにB:のFDだけ差し替える。ビルド→実行→デバッグを何度でも繰り返せる。
  */
 /**
- * 短い待ちは通常経路の最適化であり、媒体交換の正しさの根拠ではない。
- * 足りなければDOS画面のドライブエラーを検出し、挿入済み媒体の読込みを自動で再試行する。
+ * 短い待ちは通常経路の最適化にすぎない。正しさはDOS画面のエラー検出と、
+ * Rで直らない場合に排出からメディア交換をやり直す二段の自己回復で担保する。
  */
+const FD_INSERT_SETTLE_FACTOR = 3;
 const settle = (ms) => new Promise((resolveSettle) => { setTimeout(resolveSettle, ms); });
 
 function setFdSwapDelay(ms) {
@@ -744,7 +979,7 @@ function startBoot(programFd, programName, programKey) {
   let tracked;
   tracked = bootFreeDos(engine, {
     freeDos, freeDosKey: 'workbench:freedos', programFd, programName, programKey,
-    onScreen: (screen) => { nodes.screenText.textContent = screen.text; },
+    onScreen: (screen) => { setScreenText(screen.text); },
   }).then((screen) => {
     if (!recordDriveErrorRetries(screen.driveErrorRetries)) {
       setMachineStatus('エミュレータ起動しました。実行の準備ができています');
@@ -776,11 +1011,11 @@ async function mountProgramFd(built) {
   const key = `workbench:${built.dosName}:${runSequence++}`;
   if (!booted) {
     // 初回はB:へFDを入れた状態で起動する。空のB:で起動するとDOSがドライブ未準備を覚えてしまう。
-    return startBoot(built.fd, name, key);
+    return { baseline: await startBoot(built.fd, name, key), name, key };
   }
   try { await booted; } catch {}
   // プリウォーム失敗後の最初の操作は、対象入りFDでブートそのものを再試行する。
-  if (!booted) return startBoot(built.fd, name, key);
+  if (!booted) return { baseline: await startBoot(built.fd, name, key), name, key };
   // drive=2 は fd2 スロット、すなわち B:。1 を渡すと FreeDOS 側の A: を差し替えてしまう。
   // 挿入だけだとDOSがFATキャッシュを持ち越して「ドライブの準備ができていません」になるため、
   // 排出してからメディア交換として挿入する。
@@ -790,27 +1025,74 @@ async function mountProgramFd(built) {
   // 読めない瞬間があり、そこへキーを送ると入力がドライブエラーの選択待ちへ吸われて
   // 再試行が空回りする（実測で再試行が上限に達した）。ディスクが安定している間に済ませる。
   const beforeSeparator = engine.getScreenText();
-  await engine.pasteText('\r\r\r');
-  const screen = await waitForCurrentDosPrompt(engine, { baseline: beforeSeparator.text, timeout: 30_000 });
-  nodes.screenText.textContent = screen.text;
+  let screen = beforeSeparator;
+  try {
+    // 先頭のESCで入力行を捨てる。ドライブエラーの応答(R/A)は、送る直前にダイアログが
+    // 自力で消えていると**コマンド行へ打ち込まれてしまう**（実測: `A:\>RRRAB:\E0LOAD …`
+    // となり次のコマンドが壊れた）。取りこぼした文字を必ず流してからコマンドを組み立てる。
+    await engine.pasteText('\r\r\r');
+    screen = await waitForCurrentDosPrompt(engine, { baseline: beforeSeparator.text, timeout: 30_000 });
+    setScreenText(screen.text);
+  } catch (error) {
+    // 区切り行は見た目だけの処理なので、ここでの失敗でマウント自体を止めない。
+    // 前の操作のドライブエラーが残っていれば中止で抜けて、交換のやり直しへ進む。
+    if (DOS_DRIVE_ERROR_PATTERN.test(engine.getScreenText().text)) await answerDriveErrorAbort(engine);
+    screen = engine.getScreenText();
+  }
 
   setMachineStatus('作業用ディスクを挿入しています…');
+  await swapProgramFd(built, name, key);
+  return { baseline: screen, name, key };
+}
+
+async function swapProgramFd(built, name, key) {
   await engine.ejectFd(2);
   await settle(FD_SWAP_MS);
   await engine.insertFd(2, { name, bytes: built.fd }, key);
+  // この間隔は成功しやすくする最適化であり、正しさは検出後の交換やり直しで担保する。
   await settle(FD_SWAP_MS);
-  return screen;
+}
+
+async function abortDriveError() {
+  // 中止は1回だけ送り、ダイアログが実際に消えるのを確認してから次へ進む。
+  // 消えたかを見ずに送り足すと、余ったキーがコマンド行へ流れて次のコマンドを壊す。
+  if (!DOS_DRIVE_ERROR_PATTERN.test(engine.getScreenText().text)) return false;
+  await answerDriveErrorAbort(engine);
+  const limit = Date.now() + 5_000;
+  while (Date.now() < limit) {
+    await settle(100);
+    if (!DOS_DRIVE_ERROR_PATTERN.test(engine.getScreenText().text)) return true;
+  }
+  return false;
+}
+
+async function withDriveRecovery(operation, built, name) {
+  for (let remount = 0; ; remount++) {
+    try {
+      return await operation();
+    } catch (error) {
+      recordDriveErrorRetries(error.driveErrorRetries);
+      if (error.code !== 'DOS_DRIVE_ERROR' || remount >= 2) throw error;
+      await abortDriveError();
+      driveRemounts++;
+      setMachineStatus(`ディスクを入れ直しています…（${remount + 1}回目）`);
+      await swapProgramFd(built, name, `workbench:${built.dosName}:${runSequence++}`);
+    }
+  }
 }
 
 async function runCurrent() {
   const built = activeTab()?.build ?? await buildCurrent();
   if (!built?.ok) return built;
   if (session?.isStarted()) await stopDebug();
-  const baseline = await mountProgramFd(built);
-  setMachineStatus(`${built.dosName}を実行中…`);
-  await engine.pasteText(`B:\\${built.dosName}\r`);
-  const screen = await waitForCurrentDosPrompt(engine, { baseline: baseline.text, timeout: 60_000 });
-  nodes.screenText.textContent = screen.text;
+  const mounted = await mountProgramFd(built);
+  const screen = await withDriveRecovery(async () => {
+    const baseline = engine.getScreenText();
+    setMachineStatus(`${built.dosName}を実行中…`);
+    await engine.pasteText(`B:\\${built.dosName}\r`);
+    return waitForCurrentDosPrompt(engine, { baseline: baseline.text, timeout: 60_000 });
+  }, built, mounted.name);
+  setScreenText(screen.text);
   if (!recordDriveErrorRetries(screen.driveErrorRetries)) {
     setMachineStatus(`${built.dosName} 終了・DOSプロンプト復帰`);
   }
@@ -847,7 +1129,9 @@ function setDebugControls(active) {
   nodes.buildActions.hidden = active;
   nodes.debugActions.hidden = !active;
   nodes.debugPanel.hidden = !active;
+  nodes.disassemblySplitter.hidden = !active;
   nodes.disassemblyPanel.hidden = !active;
+  if (active) restoreDisassemblyHeight();
   nodes.editLock.hidden = !targetActive;
   document.body.classList.toggle('debugging', active);
   setEditorReadOnly(targetActive);
@@ -884,7 +1168,7 @@ function refreshDebugViews() {
   });
   const line = session.currentLine();
   syncDebugMarks(line);
-  nodes.screenText.textContent = engine.getScreenText().text;
+  setScreenText(engine.getScreenText().text);
   setDebugControls(true);
   return { regs, line };
 }
@@ -936,11 +1220,11 @@ async function startDebug() {
   }
   nodes.debugPanel.hidden = false;
   setDebugStatus('FreeDOSとデバッガローダを準備中…');
-  await mountProgramFd(built);
+  const mounted = await mountProgramFd(built);
   session = createDebugSession(debugController);
-  const started = await session.start(
+  const started = await withDriveRecovery(() => session.start(
     engine, `B:\\${LOADER_NAME} B:\\${built.dosName}`, tab.debugMap, built.kind,
-  );
+  ), built, mounted.name);
   debugTabId = tab.id;
   const recoveredDriveError = recordDriveErrorRetries(started.driveErrorRetries);
   const unmapped = [...tab.breakpoints].filter((line) => !tab.debugMap.isDebuggable(line));
@@ -1034,7 +1318,7 @@ async function stopDebug() {
   renderBreakpointList();
   setMachineStatus('通常実行中…');
   const screen = await waitForCurrentDosPrompt(engine, { timeout: 60_000 });
-  nodes.screenText.textContent = screen.text;
+  setScreenText(screen.text);
   if (!recordDriveErrorRetries(screen.driveErrorRetries)) {
     setMachineStatus('実行終了・DOSプロンプト復帰');
   }
@@ -1100,6 +1384,7 @@ async function initialize() {
   sidebarPreference = loadSidebarPreference();
   setSidebarVisible(sidebarPreference ?? !sidebarMedia.matches, { persist: false });
   setPanesSwapped(loadPanesSwapped());
+  restoreEditorWidth();
   await projectFS.open();
   const response = await fetch('./freedos/fd98_2hd.xdf');
   if (!response.ok) throw new Error(`FreeDOS: HTTP ${response.status}`);
@@ -1179,6 +1464,7 @@ window.pc98workbench = {
   continueToBreakpoint, continueOrRun, setPanesSwapped, getPanesSwapped,
   setMaximizedPane, getMaximizedPane,
   setSidebarVisible, getSidebarVisible,
+  setEditorWidth, setDisassemblyHeight, getSplit,
   getLastShortcut: () => lastShortcut,
   getScreenScaling: syncScreenScaling,
   getGuardedKeyboardTargets: () => [...GUARDED_KEYBOARD_TARGETS],
@@ -1197,6 +1483,7 @@ window.pc98workbench = {
   setFdSwapDelay,
   getFdSwapDelay: () => FD_SWAP_MS,
   getDriveErrorRetries: () => driveErrorRetries,
+  getDriveRemounts: () => driveRemounts,
   getBuiltOutput: () => (activeTab()?.build?.output ? Array.from(activeTab().build.output) : null),
   readGuestMemory: (address, length) => Array.from(debugController.readMemory(address, length)),
   disassembleAt: (segment, offset, count) => debugController.disassemble(segment, offset, count),
