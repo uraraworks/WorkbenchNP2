@@ -109,6 +109,33 @@ try {
   assert.ok(!editorGuard.screen.toLowerCase().includes('qqq'), 'エディタのQQQがゲストへ漏れました');
   await page.evaluate((source) => window.pc98workbench.setValue(source), guardedSource.source);
 
+  // Tabは行頭の字下げではなくカーソル位置への本物のタブ挿入。アセンブラのコメント桁揃え用。
+  const beforeTab = await page.evaluate(() => window.pc98workbench.getValue());
+  await page.evaluate(() => {
+    const line = window.pc98workbench.getValue().split('\n')[7];
+    window.pc98workbench.setCursorToLineEnd(8);
+    return line;
+  });
+  await page.keyboard.press('Tab');
+  await page.keyboard.type('; comment');
+  const tabbed = await page.evaluate(() => ({
+    line: window.pc98workbench.getValue().split('\n')[7],
+    tabSize: getComputedStyle(document.querySelector('.cm-content')).tabSize,
+    cursor: (() => {
+      const node = document.querySelector('.cm-cursor-primary, .cm-cursor');
+      const style = node && getComputedStyle(node);
+      return style ? { display: style.display, color: style.borderLeftColor } : null;
+    })(),
+  }));
+  assert.equal(tabbed.line, '\tmov\tah,09h\t; comment',
+    `Tabがカーソル位置へタブを挿入していません: ${JSON.stringify(tabbed.line)}`);
+  assert.ok(!tabbed.line.startsWith('  '), 'Tabが行頭を字下げしています（indentWithTabに戻っています）');
+  assert.equal(tabbed.tabSize, '8', 'タブ幅が8桁ではありません');
+  // drawSelection()は素のcaretを消して自前で描くので、その描画色が背景と同化していないか見る。
+  assert.equal(tabbed.cursor?.display, 'block', 'エディタのカーソルが描画されていません');
+  assert.notEqual(tabbed.cursor?.color, 'rgb(0, 0, 0)', 'カーソル色が黒のままで暗色背景に埋もれます');
+  await page.evaluate((source) => window.pc98workbench.setValue(source), beforeTab);
+
   const formScreen = await page.evaluate(() => window.pc98workbench.getScreenText().text);
   await page.click('#new-path');
   await page.keyboard.type('guarded/main.asm');
@@ -383,6 +410,7 @@ try {
 
   console.log(`[PASS] file/edit/IndexedDB/build/run: ${output}`);
   console.log('[PASS] 実キー入力 guard: editor/file bar stay local, canvas reaches guest DOS');
+  console.log(`[PASS] Tab/caret: real tab at cursor (tab-size ${tabbed.tabSize}), caret drawn in ${tabbed.cursor.color}`);
   console.log('[PASS] .c auto build: HELLO-C.EXE');
   console.log('[PASS] structured error: line=4, list=true, gutter=true, wrong-line fault detected');
   console.log(`[PASS] ASM debug in editor: entry=8 next=9 bp=11 cs=${asmDebug.control.cs.toString(16).toUpperCase()} dots=1, non-mapped line rejected`);

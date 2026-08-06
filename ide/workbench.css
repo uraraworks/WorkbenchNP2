@@ -36,6 +36,10 @@ body.debugging .cm-content { caret-color: transparent; }
 .cm-scroller { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .cm-gutters { background: #111e27 !important; border-right-color: #263d4c !important; }
 .cm-activeLine, .cm-activeLineGutter { background: rgba(67, 137, 177, .18) !important; }
+/* drawSelection()は素のcaretを消して自前で描くが、既定色が黒なので暗色背景だと見えない。 */
+.cm-cursor, .cm-cursor-primary { border-left-color: #eff8ff !important; border-left-width: 2px !important; }
+.cm-selectionBackground, .cm-content ::selection { background: #2b4d66 !important; }
+.cm-focused .cm-selectionBackground { background: #35617f !important; }
 .cm-breakpoint-gutter { width: 16px; cursor: pointer; }
 .cm-breakpoint-gutter .cm-gutterElement:hover { background: rgba(255, 120, 120, .18); }
 .cm-breakpoint-dot { display: block; color: #ff6b6b; font-size: 11px; line-height: 1.4; text-align: center; }

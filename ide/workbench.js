@@ -2,8 +2,9 @@ import {
   Compartment, Decoration, EditorState, EditorView, GutterMarker, RangeSetBuilder, StateEffect,
   StateField, bracketMatching, cpp, crosshairCursor, defaultHighlightStyle, defaultKeymap,
   drawSelection, dropCursor, gutter, highlightActiveLine, highlightActiveLineGutter,
-  highlightSpecialChars, history, historyKeymap, indentOnInput, indentWithTab, keymap,
-  lineNumbers, lintGutter, rectangularSelection, setDiagnostics, syntaxHighlighting,
+  highlightSpecialChars, history, historyKeymap, indentLess, indentOnInput, indentUnit,
+  insertTab, keymap, lineNumbers, lintGutter, rectangularSelection, setDiagnostics,
+  syntaxHighlighting,
 } from './vendor/codemirror/codemirror.js';
 import { createDebugger, createWebNP2, mountDisassemblyView } from './vendor/webnp2/webnp2-embed.js';
 import { bootFreeDos, waitForCurrentDosPrompt } from './freedos-session.mjs';
@@ -167,7 +168,11 @@ const editor = new EditorView({
       lineNumbers(), highlightActiveLineGutter(), highlightSpecialChars(), history(), drawSelection(),
       dropCursor(), EditorState.allowMultipleSelections.of(true), indentOnInput(), bracketMatching(),
       rectangularSelection(), crosshairCursor(), highlightActiveLine(), syntaxHighlighting(defaultHighlightStyle),
-      keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]), lintGutter(), EditorView.lineWrapping,
+      // アセンブラは「命令のあとにタブでコメント桁を揃える」書き方をするので、Tabは行頭の
+      // 字下げ(indentWithTab)ではなくカーソル位置への挿入にする。単位は本物のタブ、桁は8。
+      indentUnit.of('\t'), EditorState.tabSize.of(8),
+      keymap.of([...defaultKeymap, ...historyKeymap, { key: 'Tab', run: insertTab, shift: indentLess }]),
+      lintGutter(), EditorView.lineWrapping,
       language.of([]),
       EditorView.updateListener.of((update) => {
         if (update.docChanged && !loadingDocument) {
@@ -689,6 +694,12 @@ window.pc98workbench = {
   engine,
   setValue: (text) => editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: text } }),
   getValue: currentText,
+  /** 実キー入力の検証で、押す前のカーソル位置を確定させるために使う。 */
+  setCursorToLineEnd: (lineNumber) => {
+    const line = editor.state.doc.line(lineNumber);
+    editor.focus();
+    editor.dispatch({ selection: { anchor: line.to } });
+  },
   getState: () => ({ currentPath, currentOrigin, dirty, errors: lastErrors, built: lastBuild?.dosName ?? null }),
   listProjectFiles: () => projectFS.list(),
   connectDirectory, disconnectDirectory,
