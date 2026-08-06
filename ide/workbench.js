@@ -10,6 +10,10 @@ import { bootFreeDos, waitForCurrentDosPrompt } from './freedos-session.mjs';
 import { LOADER_NAME, buildSource } from './browser-toolchain.mjs';
 import { debugMapForBuild } from './debug-map.mjs';
 import { createDebugSession } from './debug-session.mjs';
+import {
+  DirectoryProjectFS, clearDirectoryHandle, isDirectoryPickerAvailable, loadDirectoryHandle,
+  pickDirectory, saveDirectoryHandle,
+} from './directory-fs.mjs';
 import { IndexedDbProjectFS } from './project-fs.mjs';
 import { SAMPLE_FILES, loadSample } from './sample-manifest.mjs';
 
@@ -17,6 +21,8 @@ const nodes = {
   fileSelect: document.querySelector('#file-select'), newPath: document.querySelector('#new-path'),
   newFile: document.querySelector('#new-file'), save: document.querySelector('#save-file'),
   saveState: document.querySelector('#save-state'), currentPath: document.querySelector('#current-path'),
+  folderOpen: document.querySelector('#folder-open'), folderDisconnect: document.querySelector('#folder-disconnect'),
+  folderState: document.querySelector('#folder-state'),
   editor: document.querySelector('#editor'), build: document.querySelector('#build'), run: document.querySelector('#run'),
   buildStatus: document.querySelector('#build-status'), errors: document.querySelector('#build-errors'),
   runtimeStatus: document.querySelector('#runtime-status'), screenText: document.querySelector('#screen-text'),
@@ -40,6 +46,9 @@ let runSequence = 0;
 let booted;
 let session;
 let debugMap;
+let directoryFS;
+let directoryListing;
+let currentEncoding = 'utf-8';
 const breakpointLines = new Set();
 
 function setSaveState(value) {
@@ -167,8 +176,13 @@ function showErrors(errors) {
   }));
 }
 
+const ORIGIN_LABELS = { sample: 'サンプル', project: 'IndexedDB', directory: 'フォルダ' };
+
+/** 書き込み先は「フォルダを繋いでいればフォルダ、でなければIndexedDB」。両者を同期はしない。 */
+function writableOrigin() { return directoryFS ? 'directory' : 'project'; }
+function backendFor(origin) { return origin === 'directory' ? directoryFS : projectFS; }
+
 async function refreshFileSelect(selected = `${currentOrigin}:${currentPath}`) {
-  const projects = await projectFS.list();
   const makeGroup = (label, files, origin) => {
     const group = document.createElement('optgroup'); group.label = label;
     for (const file of files) {
@@ -177,23 +191,33 @@ async function refreshFileSelect(selected = `${currentOrigin}:${currentPath}`) {
     }
     return group;
   };
-  nodes.fileSelect.replaceChildren(
-    makeGroup('IndexedDB プロジェクト', projects, 'project'),
-    makeGroup('同梱サンプル', SAMPLE_FILES, 'sample'),
-  );
+  const groups = [];
+  if (directoryFS) {
+    const listing = await directoryFS.listDetailed();
+    directoryListing = listing;
+    const suffix = listing.truncated ? `（先頭${listing.files.length}件のみ）` : '';
+    groups.push(makeGroup(`フォルダ ${directoryFS.name}${suffix}`, listing.files, 'directory'));
+  }
+  groups.push(makeGroup('IndexedDB プロジェクト', await projectFS.list(), 'project'));
+  groups.push(makeGroup('同梱サンプル', SAMPLE_FILES, 'sample'));
+  nodes.fileSelect.replaceChildren(...groups);
   if ([...nodes.fileSelect.options].some((option) => option.value === selected)) nodes.fileSelect.value = selected;
 }
 
 async function openFile(origin, path) {
   let content;
-  if (origin === 'project') {
-    const record = await projectFS.read(path);
-    if (!record) throw new Error(`${path}がIndexedDBにありません`);
-    content = record.content;
-  } else {
+  currentEncoding = 'utf-8';
+  if (origin === 'sample') {
     const sample = SAMPLE_FILES.find((entry) => entry.path === path);
     if (!sample) throw new Error(`${path}は同梱サンプルではありません`);
     content = await loadSample(sample);
+  } else {
+    const backend = backendFor(origin);
+    if (!backend) throw new Error('フォルダが接続されていません');
+    const record = await backend.read(path);
+    if (!record) throw new Error(`${path}が${ORIGIN_LABELS[origin]}にありません`);
+    content = record.content;
+    currentEncoding = record.encoding ?? 'utf-8';
   }
   currentPath = path; currentOrigin = origin;
   loadingDocument = true;
@@ -205,25 +229,33 @@ async function openFile(origin, path) {
   session?.detach(); session = undefined; debugMap = undefined;
   syncDebugMarks(null); setDebugControls(false);
   clearDiagnostics(); lastBuild = undefined; setSaveState(false);
-  nodes.currentPath.textContent = `${origin === 'sample' ? 'サンプル' : 'IndexedDB'} / ${path}`;
+  setCurrentPathLabel();
   nodes.buildStatus.textContent = '.asm / .c を自動判別します'; nodes.buildStatus.classList.remove('error');
   await refreshFileSelect(`${origin}:${path}`);
 }
 
+function setCurrentPathLabel() {
+  const encoding = currentEncoding === 'utf-8' ? '' : `（${currentEncoding}）`;
+  nodes.currentPath.textContent = `${ORIGIN_LABELS[currentOrigin]} / ${currentPath}${encoding}`;
+}
+
 async function saveFile() {
   if (!currentPath) throw new Error('保存対象がありません');
-  await projectFS.write(currentPath, currentText());
-  currentOrigin = 'project'; setSaveState(false);
-  nodes.currentPath.textContent = `IndexedDB / ${currentPath}`;
-  await refreshFileSelect(`project:${currentPath}`);
+  // サンプルは読み取り専用なので、保存すると書き込み可能なバックエンドへ複製される。
+  const target = currentOrigin === 'sample' ? writableOrigin() : currentOrigin;
+  await backendFor(target).write(currentPath, currentText());
+  currentOrigin = target; currentEncoding = 'utf-8'; setSaveState(false);
+  setCurrentPathLabel();
+  await refreshFileSelect(`${target}:${currentPath}`);
 }
 
 async function createFile(path) {
   const ext = extensionFor(path);
   if (ext !== 'asm' && ext !== 'c') throw new Error('新規ファイルは .asm または .c にしてください');
   const template = ext === 'asm' ? 'CPU 8086\nBITS 16\nORG 100h\n\n' : 'int main(void)\n{\n  return 0;\n}\n';
-  await projectFS.write(path, template);
-  await openFile('project', path);
+  const target = writableOrigin();
+  await backendFor(target).write(path, template);
+  await openFile(target, path);
 }
 
 async function buildCurrent() {
@@ -438,11 +470,70 @@ async function stopDebug() {
   return screen;
 }
 
+function setDirectoryLabel(message) {
+  nodes.folderState.textContent = message;
+  nodes.folderDisconnect.hidden = !directoryFS;
+  nodes.folderOpen.textContent = directoryFS ? '別のフォルダ' : 'フォルダを開く';
+}
+
+/**
+ * ローカルフォルダをそのまま作業場所にする。IndexedDBとは同期せず、
+ * 接続中は保存も新規作成もフォルダ側だけへ行う（1プロジェクト=1バックエンド）。
+ */
+async function connectDirectory(handle, { persist = true } = {}) {
+  const candidate = new DirectoryProjectFS(handle);
+  const permission = await candidate.ensurePermission('readwrite', { request: true });
+  if (permission !== 'granted') throw new Error(`フォルダの読み書き許可がありません: ${permission}`);
+  directoryFS = candidate;
+  if (persist) await saveDirectoryHandle(handle).catch(() => {});
+  const listing = await directoryFS.listDetailed();
+  directoryListing = listing;
+  const notes = [`${listing.files.length}件`];
+  if (listing.skipped > 0) notes.push(`対象外${listing.skipped}件`);
+  if (listing.truncated) notes.push('上限で打切り');
+  setDirectoryLabel(`${directoryFS.name}（${notes.join(' / ')}）`);
+  await refreshFileSelect();
+  return { name: directoryFS.name, permission, ...listing };
+}
+
+async function disconnectDirectory() {
+  directoryFS = undefined;
+  directoryListing = undefined;
+  await clearDirectoryHandle().catch(() => {});
+  setDirectoryLabel('フォルダ未接続');
+  // 開いていたのがフォルダのファイルなら、参照先を失うので同梱サンプルへ戻す。
+  if (currentOrigin === 'directory') await openFile('sample', 'samples/hello.asm');
+  else await refreshFileSelect();
+}
+
+/** 再読込後のハンドルは許可が prompt へ落ちることがあり、再許可には利用者ジェスチャが要る。 */
+async function restoreDirectory() {
+  if (!isDirectoryPickerAvailable()) { setDirectoryLabel('このブラウザはフォルダを開けません'); return; }
+  const handle = await loadDirectoryHandle().catch(() => null);
+  if (!handle) { setDirectoryLabel('フォルダ未接続'); return; }
+  const stored = new DirectoryProjectFS(handle);
+  if (await stored.ensurePermission('readwrite') === 'granted') {
+    await connectDirectory(handle, { persist: false });
+    return;
+  }
+  setDirectoryLabel(`${handle.name}（再接続には許可が必要）`);
+  nodes.folderOpen.textContent = 'フォルダを再接続';
+  nodes.folderOpen.dataset.restoreHandle = 'true';
+}
+
+async function openFolder() {
+  const stored = nodes.folderOpen.dataset.restoreHandle === 'true' ? await loadDirectoryHandle() : null;
+  delete nodes.folderOpen.dataset.restoreHandle;
+  return connectDirectory(stored ?? await pickDirectory());
+}
+
 async function initialize() {
   await projectFS.open();
   const response = await fetch('./freedos/fd98_2hd.xdf');
   if (!response.ok) throw new Error(`FreeDOS: HTTP ${response.status}`);
   freeDos = new Uint8Array(await response.arrayBuffer());
+  // フォルダ復元に失敗しても、同梱サンプルだけで動く状態までは必ず立ち上げる。
+  await restoreDirectory().catch((error) => setDirectoryLabel(`フォルダ復元に失敗: ${error.message}`));
   await refreshFileSelect();
   await openFile('sample', 'samples/hello.asm');
   nodes.buildStatus.textContent = '準備完了';
@@ -455,6 +546,8 @@ nodes.fileSelect.addEventListener('change', () => {
 });
 nodes.newFile.addEventListener('click', () => createFile(nodes.newPath.value).catch((error) => showErrors([{ stage: 'input', line: 0, message: error.message }])));
 nodes.save.addEventListener('click', () => saveFile().catch((error) => showErrors([{ stage: 'save', line: 0, message: error.message }])));
+nodes.folderOpen.addEventListener('click', () => openFolder().catch((error) => setDirectoryLabel(error.message)));
+nodes.folderDisconnect.addEventListener('click', () => disconnectDirectory().catch((error) => setDirectoryLabel(error.message)));
 nodes.build.addEventListener('click', () => buildCurrent());
 nodes.run.addEventListener('click', () => runCurrent());
 nodes.debug.addEventListener('click', () => startDebug().catch((error) => setDebugStatus(error.message, true)));
@@ -481,6 +574,12 @@ window.pc98workbench = {
   getValue: currentText,
   getState: () => ({ currentPath, currentOrigin, dirty, errors: lastErrors, built: lastBuild?.dosName ?? null }),
   listProjectFiles: () => projectFS.list(),
+  connectDirectory, disconnectDirectory,
+  getDirectoryState: () => ({
+    available: isDirectoryPickerAvailable(), connected: Boolean(directoryFS),
+    name: directoryFS?.name ?? null, fileCount: directoryListing?.files.length ?? 0,
+    truncated: directoryListing?.truncated ?? false, skipped: directoryListing?.skipped ?? 0,
+  }),
   getScreenText: () => engine.getScreenText(),
   getLayout: () => ({
     editor: nodes.editor.getBoundingClientRect().toJSON(),

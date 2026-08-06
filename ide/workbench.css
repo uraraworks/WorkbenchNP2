@@ -13,6 +13,7 @@ button:disabled { opacity: .45; }
 .file-bar label { display: grid; gap: 3px; min-width: min(420px, 38vw); color: #91a9b8; font-size: 11px; }
 .file-bar select, .file-bar input { min-height: 34px; border: 1px solid #385263; border-radius: 5px; color: #eef7fc; background: #111d26; padding: 5px 8px; }
 #new-path { width: min(260px, 26vw); }
+#folder-state { max-width: 34vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #8fa9b9; font: 12px ui-monospace, monospace; }
 #save-state { margin-left: auto; color: #8fa9b9; font-size: 12px; }
 #save-state.dirty { color: #ffd479; }
 .workspace-grid { display: grid; grid-template-columns: minmax(430px, 1fr) minmax(480px, 1fr); gap: 12px; padding: 12px 20px 20px; }
@@ -52,6 +53,7 @@ button:disabled { opacity: .45; }
   .file-bar { padding: 7px 10px; flex-wrap: wrap; align-items: center; gap: 5px; }
   .file-bar label { min-width: calc(100% - 2px); }
   #new-path { flex: 1; width: auto; min-width: 145px; }
+  #folder-state { max-width: 100%; width: 100%; }
   #save-state { width: 100%; margin: 0; }
   .workspace-grid { grid-template-columns: 1fr; gap: 8px; padding: 8px 10px 12px; }
   .panel-heading { min-height: 42px; padding: 5px 8px; }

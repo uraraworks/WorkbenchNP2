@@ -200,6 +200,17 @@ try {
   assert.throws(() => assertRun(cResume, '4'));
 
   await page.evaluate(() => window.pc98workbench.openFile('project', 'samples/hello.asm'));
+  // フォルダ操作を足した後もファイルバーが横にはみ出さないことを、実測値で確認する。
+  const fileBar = () => page.$eval('.file-bar', (node) => ({
+    overflow: node.scrollWidth - node.clientWidth,
+    folderOpen: node.querySelector('#folder-open').getBoundingClientRect().width > 0,
+    folderState: node.querySelector('#folder-state').textContent,
+  }));
+  const desktopBar = await fileBar();
+  assert.ok(desktopBar.overflow <= 1, `デスクトップのファイルバーがはみ出しています: ${desktopBar.overflow}px`);
+  assert.equal(desktopBar.folderOpen, true, 'フォルダを開くボタンが表示されていません');
+  assert.equal(desktopBar.folderState, 'フォルダ未接続', '未接続時のフォルダ表示が期待と不一致です');
+
   const desktopLayout = await page.evaluate(() => window.pc98workbench.getLayout());
   assert.equal(desktopLayout.contentEditable, true, 'CodeMirrorがcontentEditableではありません');
   assert.ok(desktopLayout.editor.width > 500 && desktopLayout.screen.width > 500, 'デスクトップのエディタ/画面幅が不足しています');
@@ -212,6 +223,9 @@ try {
     `モバイルeditorが使用可能領域にありません: ${JSON.stringify(mobile.editor)}`);
   assert.ok(visible(mobile.screen) && mobile.screen.width >= 330,
     `モバイルPC-98画面がviewportにありません: ${JSON.stringify(mobile.screen)}`);
+  const mobileBar = await fileBar();
+  assert.ok(mobileBar.overflow <= 1, `モバイルのファイルバーがはみ出しています: ${mobileBar.overflow}px`);
+  assert.equal(mobileBar.folderOpen, true, 'モバイルでフォルダを開くボタンが表示されていません');
   await page.screenshot({ path: MOBILE_SHOT });
 
   console.log(`[PASS] file/edit/IndexedDB/build/run: ${output}`);
@@ -219,6 +233,7 @@ try {
   console.log('[PASS] structured error: line=4, list=true, gutter=true, wrong-line fault detected');
   console.log(`[PASS] ASM debug in editor: entry=8 next=9 bp=11 cs=${asmDebug.control.cs.toString(16).toUpperCase()} dots=1, non-mapped line rejected`);
   console.log(`[PASS] C debug in editor: STRLEN.C line 22 "${cDebug.sourceLine}" stop, resumed output "3"`);
+  console.log(`[PASS] file bar: folder controls visible, no overflow (desktop ${desktopBar.overflow}px / mobile ${mobileBar.overflow}px)`);
   console.log(`[PASS] responsive DOM: desktop editor/screen=${Math.round(desktopLayout.editor.width)}/${Math.round(desktopLayout.screen.width)} mobile=${Math.round(mobile.editor.width)}/${Math.round(mobile.screen.width)}`);
   console.log(`[SHOT] ${DESKTOP_SHOT}`);
   console.log(`[SHOT] ${MOBILE_SHOT}`);

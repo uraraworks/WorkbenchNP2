@@ -1,4 +1,4 @@
-function validatePath(path) {
+export function validatePath(path) {
   if (typeof path !== 'string' || !path.trim()) throw new TypeError('path must be a non-empty string');
   const normalized = path.trim().replace(/\\/g, '/').replace(/^\/+/, '');
   if (normalized.split('/').some((part) => !part || part === '.' || part === '..')) {
