@@ -6,6 +6,11 @@ export function answerDriveErrorRetry(engine) {
   return engine.pasteText('R');
 }
 
+/** DOSのドライブエラー選択へ1キーで中止を答える。改行は問い合わせ側が要求しない。 */
+export function answerDriveErrorAbort(engine) {
+  return engine.pasteText('A');
+}
+
 export function currentDosPrompt(screen) {
   if (!screen?.cursor) return null;
   const line = screen.lines[screen.cursor.row];

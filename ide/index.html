@@ -85,11 +85,18 @@
       </div>
       <div id="build-status" role="status">準備中…</div>
       <ul id="build-errors" aria-label="ビルドエラー"></ul>
+      <div class="disassembly-splitter" id="disassembly-splitter" role="separator"
+           aria-orientation="horizontal" tabindex="0"
+           aria-label="エディタと逆アセンブルの高さを調整"
+           title="エディタと逆アセンブルの高さを調整" hidden></div>
       <section id="disassembly-panel" class="disassembly-panel" aria-label="逆アセンブル" hidden>
         <h3>逆アセンブル</h3>
         <div id="disassembly"></div>
       </section>
     </section>
+    <div class="splitter" id="splitter" role="separator" aria-orientation="vertical"
+         tabindex="0" aria-label="エディタとPC-98画面の幅を調整"
+         title="ドラッグで幅を調整（ダブルクリックで既定に戻す）"></div>
     <section class="machine-card" aria-labelledby="machine-heading">
       <div class="panel-heading">
         <h2 id="machine-heading">PC-98</h2>

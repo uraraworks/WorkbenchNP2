@@ -326,6 +326,87 @@ try {
   assert.equal(tabFixture.renderedAfterClose, 1, '閉じたタブがDOMに残っています');
   assert.equal(tabFixture.lastCloseDisabled, true, '最後の1枚の閉じるボタンが無効ではありません');
 
+  const splitterMeta = await page.$eval('#splitter', (node) => ({
+    role: node.getAttribute('role'), orientation: node.getAttribute('aria-orientation'),
+    ariaLabel: node.getAttribute('aria-label'), title: node.title,
+  }));
+  assert.equal(splitterMeta.role, 'separator');
+  assert.equal(splitterMeta.orientation, 'vertical');
+  assert.ok(splitterMeta.ariaLabel && splitterMeta.title, 'スプリッタに説明がありません');
+
+  const splitEqual = await page.evaluate(() => {
+    const wb = window.pc98workbench;
+    const initial = wb.getSplit();
+    wb.setEditorWidth(initial.minEditorWidth);
+    return { ...wb.getSplit(), scaling: wb.getScreenScaling() };
+  });
+  assert.ok(splitEqual.screenScale >= 1,
+    `エディタ最小幅でPC-98画面が等倍に届きません: x${splitEqual.screenScale}`);
+  assert.ok(splitEqual.screenWidth >= 640,
+    `エディタ最小幅でPC-98画面が640pxに届きません: ${splitEqual.screenWidth}px`);
+
+  const splitWide = await page.evaluate(() => {
+    const wb = window.pc98workbench;
+    wb.setEditorWidth(900);
+    return { ...wb.getSplit(), scaling: wb.getScreenScaling() };
+  });
+  assert.ok(splitWide.editorWidth > splitEqual.editorWidth, '指定してもエディタ幅が広がりません');
+  assert.ok(splitWide.screenScale < 1, 'エディタを広げてもPC-98画面が縮小されません');
+  assert.equal(splitWide.scaling.smoothed, true, 'PC-98画面の縮小時に補間されません');
+
+  const splitClamp = await page.evaluate(() => {
+    const wb = window.pc98workbench;
+    wb.setEditorWidth(10);
+    const low = wb.getSplit();
+    wb.setEditorWidth(99999);
+    const high = wb.getSplit();
+    return { low, high };
+  });
+  // 画面幅が狭い環境でもPC-98画面を等倍まで広げられるよう、縮める側は止めない。
+  assert.ok(Math.abs(splitClamp.low.editorWidth - 10) <= 1,
+    `エディタ幅を10pxまで縮められません: ${JSON.stringify(splitClamp.low)}`);
+  assert.equal(splitClamp.low.minEditorWidth, 0, 'エディタ幅に下限が残っています');
+  assert.ok(Math.abs(splitClamp.high.editorWidth - splitClamp.high.maxEditorWidth) <= 1,
+    'エディタ幅が上限へ丸められません');
+
+  const splitKeyboardBefore = await page.evaluate(() => {
+    const wb = window.pc98workbench;
+    const limits = wb.getSplit();
+    wb.setEditorWidth((limits.minEditorWidth + limits.maxEditorWidth) / 2);
+    return {
+      split: wb.getSplit(), screen: wb.getScreenText().text,
+      stored: localStorage.getItem('pc98dev:split-editor'),
+    };
+  });
+  assert.ok(splitKeyboardBefore.stored, 'エディタ幅がlocalStorageへ保存されません');
+  await page.focus('#splitter');
+  await page.keyboard.press('ArrowLeft');
+  const splitKeyboardAfter = await page.evaluate(() => ({
+    split: window.pc98workbench.getSplit(), screen: window.pc98workbench.getScreenText().text,
+  }));
+  assert.ok(Math.abs(splitKeyboardAfter.split.editorWidth
+    - (splitKeyboardBefore.split.editorWidth - 16)) <= 1, 'ArrowLeftで幅が16px減りません');
+  assert.equal(splitKeyboardAfter.screen, splitKeyboardBefore.screen, 'スプリッタの矢印キーがゲストへ漏れました');
+  await page.keyboard.press('Home');
+  const splitHome = await page.evaluate(() => ({
+    split: window.pc98workbench.getSplit(), stored: localStorage.getItem('pc98dev:split-editor'),
+  }));
+  assert.equal(splitHome.stored, null, 'Homeで保存済みエディタ幅が消えません');
+
+  const splitSwapped = await page.evaluate(() => {
+    const wb = window.pc98workbench;
+    const limits = wb.getSplit();
+    wb.setEditorWidth((limits.minEditorWidth + limits.maxEditorWidth) / 2);
+    const before = wb.getSplit();
+    wb.setPanesSwapped(true);
+    const after = wb.getSplit();
+    wb.setPanesSwapped(false);
+    wb.setEditorWidth(null);
+    return { before, after };
+  });
+  assert.ok(Math.abs(splitSwapped.after.editorWidth - splitSwapped.before.editorWidth) <= 1,
+    'ペイン入替後に指定したエディタ幅が維持されません');
+
   const maximized = await page.evaluate(() => {
     const wb = window.pc98workbench;
     const measure = () => ({
@@ -334,6 +415,7 @@ try {
       editorHidden: document.querySelector('.editor-card').offsetParent === null,
       machineHidden: document.querySelector('.machine-card').offsetParent === null,
       sidebarHidden: document.querySelector('#sidebar').offsetParent === null,
+      splitterHidden: document.querySelector('#splitter').offsetParent === null,
       editorPressed: document.querySelector('#maximize-editor').getAttribute('aria-pressed'),
       machinePressed: document.querySelector('#maximize-machine').getAttribute('aria-pressed'),
     });
@@ -349,25 +431,29 @@ try {
   assert.equal(maximized.editor.pane, 'editor');
   assert.equal(maximized.editor.machineHidden, true, 'エディタ最大化時もPC-98カードが見えています');
   assert.equal(maximized.editor.sidebarHidden, true, 'エディタ最大化時もサイドバーが見えています');
+  assert.equal(maximized.editor.splitterHidden, true, 'エディタ最大化時もスプリッタが見えています');
   assert.ok(maximized.editor.editorWidth > maximized.normal.editorWidth, 'エディタ最大化時に幅が広がりません');
   assert.deepEqual([maximized.editor.editorPressed, maximized.editor.machinePressed], ['true', 'false']);
   assert.equal(maximized.machine.pane, 'machine');
   assert.equal(maximized.machine.editorHidden, true, 'PC-98最大化時もエディタカードが見えています');
   assert.equal(maximized.machine.sidebarHidden, true, 'PC-98最大化時もサイドバーが見えています');
+  assert.equal(maximized.machine.splitterHidden, true, 'PC-98最大化時もスプリッタが見えています');
   assert.ok(maximized.machine.machineWidth > maximized.normal.machineWidth, 'PC-98最大化時に幅が広がりません');
   assert.deepEqual([maximized.machine.editorPressed, maximized.machine.machinePressed], ['false', 'true']);
   assert.equal(maximized.restored.pane, null);
   assert.deepEqual([
     maximized.restored.editorHidden, maximized.restored.machineHidden,
     maximized.restored.sidebarHidden,
+    maximized.restored.splitterHidden,
     maximized.restored.editorPressed, maximized.restored.machinePressed,
-  ], [false, false, false, 'false', 'false'], '最大化解除後にサイドバーと両ペインが復帰しません');
+  ], [false, false, false, false, 'false', 'false'], '最大化解除後にサイドバー・スプリッタ・両ペインが復帰しません');
 
   const guardedSource = await page.evaluate(() => ({
     source: window.pc98workbench.getValue(), screen: window.pc98workbench.getScreenText().text,
     targets: window.pc98workbench.getGuardedKeyboardTargets(),
   }));
-  assert.deepEqual(guardedSource.targets, ['.sidebar', '.editor-card', '.debug-panel']);
+  assert.deepEqual(guardedSource.targets,
+    ['.sidebar', '.editor-card', '.debug-panel', '.splitter', '.disassembly-splitter']);
   await page.click('#editor .cm-content');
   await page.keyboard.type('QQQ');
   const editorGuard = await page.evaluate(() => ({
@@ -533,6 +619,51 @@ try {
     'デバッグ開始でWebNP2ヘッダの背景色が変わりました');
   assert.notEqual(asmDebug.footerBackground, theme.footerBackground,
     'デバッグ開始後もステータスバーの背景色が通常時と同じです');
+
+  const disassemblySplit = await page.evaluate(() => {
+    const wb = window.pc98workbench;
+    const splitter = document.querySelector('#disassembly-splitter');
+    const initial = wb.getSplit().disassemblyHeight;
+    wb.setDisassemblyHeight(300);
+    const requested = wb.getSplit().disassemblyHeight;
+    wb.setDisassemblyHeight(10);
+    const low = wb.getSplit().disassemblyHeight;
+    wb.setDisassemblyHeight(99999);
+    const high = wb.getSplit().disassemblyHeight;
+    wb.setDisassemblyHeight(300);
+    return {
+      initial, requested, low, high,
+      visible: splitter.offsetParent !== null,
+      role: splitter.getAttribute('role'), orientation: splitter.getAttribute('aria-orientation'),
+      ariaLabel: splitter.getAttribute('aria-label'), title: splitter.title,
+      screen: wb.getScreenText().text,
+    };
+  });
+  assert.equal(disassemblySplit.visible, true, 'デバッグ中に逆アセンブルのスプリッタが表示されません');
+  assert.deepEqual([disassemblySplit.role, disassemblySplit.orientation], ['separator', 'horizontal']);
+  assert.ok(disassemblySplit.ariaLabel && disassemblySplit.title, '逆アセンブルのスプリッタに説明がありません');
+  assert.notEqual(disassemblySplit.requested, disassemblySplit.initial, '逆アセンブルの高さが変わりません');
+  assert.ok(Math.abs(disassemblySplit.requested - 300) <= 1, '逆アセンブルを300pxへ設定できません');
+  assert.ok(Math.abs(disassemblySplit.low - 80) <= 1, '逆アセンブルの高さが80px下限へ丸められません');
+  assert.ok(Math.abs(disassemblySplit.high - 420) <= 1,
+    '逆アセンブルの高さが420px上限へ丸められません');
+  await page.focus('#disassembly-splitter');
+  await page.keyboard.press('ArrowUp');
+  const disassemblyKey = await page.evaluate(() => ({
+    height: window.pc98workbench.getSplit().disassemblyHeight,
+    screen: window.pc98workbench.getScreenText().text,
+  }));
+  assert.ok(Math.abs(disassemblyKey.height - 316) <= 1, 'ArrowUpで逆アセンブルの高さが16px変わりません');
+  assert.equal(disassemblyKey.screen, disassemblySplit.screen, '逆アセンブルのスプリッタ操作がゲストへ漏れました');
+  await page.keyboard.press('Home');
+  const disassemblyHome = await page.evaluate(() => ({
+    height: window.pc98workbench.getSplit().disassemblyHeight,
+    stored: localStorage.getItem('pc98dev:split-disassembly'),
+  }));
+  assert.ok(Math.abs(disassemblyHome.height - disassemblySplit.initial) <= 1,
+    'Homeで逆アセンブルの高さが既定値へ戻りません');
+  assert.equal(disassemblyHome.stored, null,
+    'Homeで逆アセンブルの高さが既定へ戻りません');
 
   const debugTabSwitch = await page.evaluate(() => {
     const wb = window.pc98workbench;
@@ -708,6 +839,8 @@ try {
   const asmResume = await page.evaluate(() => window.pc98workbench.stopDebug());
   assertRun(asmResume, output);
   assert.throws(() => assertRun(asmResume, 'Workbench typo!'));
+  assert.equal(await page.$eval('#disassembly-splitter', (node) => node.offsetParent === null), true,
+    'デバッグ終了後も逆アセンブルのスプリッタが表示されています');
   assert.deepEqual(await page.evaluate(() => ({
     mode: window.pc98workbench.getToolbarMode(),
     buildHidden: document.querySelector('#build-actions').hidden,
@@ -769,14 +902,19 @@ try {
   const forcedRecovery = await page.evaluate(async () => {
     const wb = window.pc98workbench;
     const retriesBefore = wb.getDriveErrorRetries();
+    const remountsBefore = wb.getDriveRemounts();
     wb.setFdSwapDelay(0);
     const forcedDelay = wb.getFdSwapDelay();
     try {
       await wb.openFile('sample', 'samples/second-run.asm');
       await wb.buildCurrent();
       const run = await wb.runCurrent();
+      const debug = await wb.startDebug();
+      const resumed = await wb.stopDebug();
       return {
-        run, forcedDelay, retriesBefore, retriesAfter: wb.getDriveErrorRetries(),
+        run, debug, resumed, forcedDelay,
+        retriesBefore, retriesAfter: wb.getDriveErrorRetries(),
+        remountsBefore, remountsAfter: wb.getDriveRemounts(),
       };
     } finally {
       wb.setFdSwapDelay(300);
@@ -784,9 +922,12 @@ try {
   });
   assert.equal(forcedRecovery.forcedDelay, 0, 'FD差し替え待ちを0msへ設定できません');
   assertRun(forcedRecovery.run.screen, 'Second debug run!');
+  assert.equal(forcedRecovery.debug.control.kind, 0, '待ち0のデバッグがCOMエントリで停止しません');
+  assertRun(forcedRecovery.resumed, 'Second debug run!');
   assert.equal(await page.evaluate(() => window.pc98workbench.getFdSwapDelay()), 300,
     '強制検証後にFD差し替え待ちが300msへ戻っていません');
   const forcedRetryCount = forcedRecovery.retriesAfter - forcedRecovery.retriesBefore;
+  const forcedRemountCount = forcedRecovery.remountsAfter - forcedRecovery.remountsBefore;
 
   await page.evaluate(() => window.pc98workbench.openFile('project', 'samples/hello.asm'));
   // サイドバー操作列とステータスバー自身がviewportを横へ押し広げないことを実測する。
@@ -835,6 +976,8 @@ try {
   });
   await page.evaluate(() => new Promise((resolveWait) => requestAnimationFrame(() => requestAnimationFrame(resolveWait))));
   const mobile = await page.evaluate(() => ({ ...window.pc98workbench.getLayout(), viewport: { width: innerWidth, height: innerHeight } }));
+  const mobileSplitterHidden = await page.$eval('#splitter', (node) => node.offsetParent === null
+    || node.getBoundingClientRect().width === 0);
   const visible = (rect) => rect.width > 0 && rect.height > 0 && rect.top < mobile.viewport.height && rect.bottom > 0;
   assert.equal(mobile.contentEditable, true);
   assert.ok(visible(mobile.editor) && mobile.editor.width <= 355 && mobile.editor.height >= 280,
@@ -844,6 +987,7 @@ try {
   assert.ok(mobileChrome.actions <= 1, `モバイルのサイドバー操作列がはみ出しています: ${mobileChrome.actions}px`);
   assert.ok(mobileChrome.footer <= 1, `モバイルのステータスバーがはみ出しています: ${mobileChrome.footer}px`);
   assert.equal(mobileChrome.folderOpen, true, 'モバイルでフォルダを開くボタンが表示されていません');
+  assert.equal(mobileSplitterHidden, true, '375px幅でスプリッタが非表示ではありません');
   // 等倍未満の縮小では補間、等倍以上ではドット感を残す（実測値で確認する）。
   const mobileScaling = await page.evaluate(() => ({
     ...window.pc98workbench.getScreenScaling(),
@@ -868,6 +1012,7 @@ try {
   console.log('[PASS] editor toolbar: 9 inline-SVG controls, accessible labels, build/debug mode swap and restore');
   console.log('[PASS] editor tabs: reuse, text/dirty/BP isolation, guarded close, debug-target lock/highlight');
   console.log('[PASS] pane maximize: editor/machine exclusive maximize, sidebar hidden, aria state and restore');
+  console.log(`[PASS] splitter: 640px at x${splitEqual.screenScale.toFixed(2)}, editor ${splitEqual.editorWidth}px / machine ${splitEqual.machineWidth}px`);
   console.log('[PASS] Explorer sidebar: tree open/selection sync, visibility API and responsive state');
   console.log('[PASS] WebNP2 header + VS Code Dark Modern workspace/status bar: measured colors and debug transition');
   console.log('[PASS] debug sections: 8 registers, breakpoint list/goto/remove/empty guide');
@@ -875,11 +1020,12 @@ try {
   console.log('[PASS] editor lock: real typing blocked while debugging and accepted after stop');
   console.log('[PASS] pane swap: desktop order reversed/restored and localStorage persisted');
   console.log(`[PASS] C debug in editor: STRLEN.C line 22 "${cDebug.sourceLine}" stop, resumed output "3"`);
-  if (forcedRetryCount > 0) {
-    console.log(`[PASS] FD swap self-recovery: delay=0ms retries=${forcedRetryCount} total=${forcedRecovery.retriesAfter}`);
+  if (forcedRetryCount > 0 || forcedRemountCount > 0) {
+    console.log(`[PASS] FD swap self-recovery: delay=0ms retries=${forcedRetryCount} remounts=${forcedRemountCount}`);
   } else {
     console.log('[INFO] FD swap self-recovery: この環境では待ち0でもドライブエラーを再現しなかったためスキップ');
   }
+  console.log('[PASS] disassembly splitter: visible in debug, 80-420px clamp, keyboard guard and restore');
   console.log(`[PASS] sidebar/status overflow: desktop ${desktopChrome.actions}/${desktopChrome.footer}px mobile ${mobileChrome.actions}/${mobileChrome.footer}px`);
   console.log(`[PASS] responsive DOM: desktop editor/screen=${Math.round(desktopLayout.editor.width)}/${Math.round(desktopLayout.screen.width)} mobile=${Math.round(mobile.editor.width)}/${Math.round(mobile.screen.width)}`);
   console.log(`[SHOT] ${DESKTOP_SHOT}`);

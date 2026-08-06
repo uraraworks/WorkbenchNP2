@@ -3,7 +3,7 @@ import { answerDriveErrorRetry, currentDosPrompt, DOS_DRIVE_ERROR_PATTERN } from
 export { answerDriveErrorRetry } from './dos-prompt.mjs';
 
 const sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
-/** 上限は無限ループ防止のための保険。厳しくすると稀な連続失敗でそのまま落ちる。 */
+/** 短い揺らぎだけRで吸収し、直らない場合は呼び出し側のメディア再交換へ早く渡す。 */
 const DRIVE_ERROR_RETRY_LIMIT = 8;
 const DRIVE_ERROR_RETRY_INTERVAL = 1_000;
 

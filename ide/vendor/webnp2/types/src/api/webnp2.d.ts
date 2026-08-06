@@ -160,7 +160,7 @@ export declare class WebNP2 extends TypedEmitter<WebNP2EventMap> {
     insertFdFromLibraryKey(drive: 1 | 2, sourceKey: string): Promise<{
         name: string;
     }>;
-    /** 未フォーマットの空FDを生成してFDドライブへ挿入する。 */
+    /** FAT12フォーマット済みですぐ使える空FDを生成してFDドライブへ挿入する。 */
     insertBlankFd(drive: 1 | 2): Promise<{
         name: string;
     }>;
@@ -224,6 +224,16 @@ export declare class WebNP2 extends TypedEmitter<WebNP2EventMap> {
      * IndexedDB に同 sourceKey の保存があればそちらを優先ロードする（前回の続き優先）。
      */
     insertFd(drive: 1 | 2, file: DiskFile, sourceKey: string, url?: string): Promise<void>;
+    /**
+     * FDドライブが読み書きできる状態になるまで待つ。
+     *
+     * NP2kai は挿入から 20 フレーム(約0.4秒)を Not Ready として模倣する(実機どおり)。
+     * この遅延は **エミュレート1フレームごと** に減るので、実時間での sleep では
+     * 足りる保証がない。挿入直後にゲストへコマンドを投げる用途では必ずこれで待つこと。
+     * @param drive 1|2
+     * @param timeoutMs 上限(既定10秒)。超えたら false を返す(例外にはしない)
+     */
+    waitForFddReady(drive: 1 | 2, timeoutMs?: number): Promise<boolean>;
     /** 実行中の FD ドライブからイメージを排出する。 */
     ejectFd(drive: 1 | 2): Promise<void>;
     /** 'fd1'|'fd2' 以外(hdd等)が渡された場合にErrorを投げる。FAT操作はFDのみ対応。 */
@@ -277,7 +287,7 @@ export declare class WebNP2 extends TypedEmitter<WebNP2EventMap> {
     private putLibraryImage;
     /**
      * FD経由のゲスト転送に使うFDが指定ドライブに無ければ、同梱のツールFD(FAT12フォーマット済み)を
-     * 挿入して用意する。ブランクFD(insertBlankFd)は未フォーマットでFATとして使えないため使わない。
+     * 挿入して用意する。転送用ツール(COPY等)を同梱している同梱ツールFDを使う。
      * 既にマウント中ならそのイメージ名をそのまま返す(挿入しない)。
      */
     private ensureTransferFd;
@@ -320,7 +330,7 @@ export declare class WebNP2 extends TypedEmitter<WebNP2EventMap> {
         base64?: string;
         size?: number;
     }>;
-    /** セーブ用の未フォーマット1.25MB(2HD)ベタイメージを生成する。DOS側でFORMATが必要。 */
+    /** セーブ用の1.25MB(2HD)ベタイメージを生成する。FAT12フォーマット済みですぐ使える。 */
     createBlankFd(): DiskFile;
     private primaryEntry;
     /** 現在の実行状態を statsave しIndexedDBへ保存する。キーは主ディスク(hdd→fd1→fd2)のsourceKeyから決める。 */

@@ -8,7 +8,7 @@ export const CONTROL = {
   execReturnIp: 42, waitIp: 44, childReturn: 46, exitReadyIp: 48, size: 50,
 };
 const CONTROL_VERSION = 3;
-/** 上限は無限ループ防止のための保険。厳しくすると稀な連続失敗でそのまま落ちる。 */
+/** 短い揺らぎだけRで吸収し、直らない場合は呼び出し側のメディア再交換へ早く渡す。 */
 const DRIVE_ERROR_RETRY_LIMIT = 8;
 const DRIVE_ERROR_RETRY_INTERVAL = 1_000;
 
