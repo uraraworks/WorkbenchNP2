@@ -112,6 +112,13 @@ try {
   assert.deepEqual(await page.evaluate(() => window.pc98workbench.getState()), {
     currentPath: 'samples/hello.asm', currentOrigin: 'sample', dirty: false, errors: [], built: null,
   });
+  const initialTabs = await page.evaluate(() => ({
+    tabs: window.pc98workbench.getTabs(),
+    rendered: document.querySelectorAll('#tab-strip .tab-item').length,
+  }));
+  assert.equal(initialTabs.tabs.length, 1, '初期タブが1枚ではありません');
+  assert.equal(initialTabs.tabs[0].active, true, '初期タブがアクティブではありません');
+  assert.equal(initialTabs.rendered, 1, '初期タブがタブ列へ1枚描画されていません');
   const toolButtonIds = [
     'build', 'run', 'debug', 'debug-continue', 'debug-step-over', 'debug-step-into',
     'debug-step-instruction', 'debug-restart', 'debug-stop',
@@ -183,6 +190,107 @@ try {
   }
   assert.ok(separators >= 2,
     `連続実行の区切り行が2本未満です: ${separators}本 / ${JSON.stringify(secondRun.screen.lines.slice(-8))}`);
+
+  // --- 複数ファイルタブ: 本文・dirty・BPをファイル単位で保持する ---
+  const tabFixture = await page.evaluate(async () => {
+    const wb = window.pc98workbench;
+    const source = wb.getValue();
+    const first = wb.getTabs().find((tab) => tab.active);
+    await wb.openFile('sample', 'samples/second-run.asm');
+    const second = wb.getTabs().find((tab) => tab.active);
+    const countBeforeDuplicate = wb.getTabs().length;
+    await wb.openFile('sample', 'samples/second-run.asm');
+    const countAfterDuplicate = wb.getTabs().length;
+
+    wb.activateTab(first.id);
+    wb.setValue(`${source}\n; tab retention`);
+    wb.activateTab(second.id);
+    const whileSecond = wb.getTabs();
+    wb.activateTab(first.id);
+    const retained = wb.getValue();
+    const dirtyPresentation = [...document.querySelectorAll('#tab-strip .tab-item')].map((item) => ({
+      id: Number(item.querySelector('.tab').dataset.tabId),
+      dirty: !item.querySelector('.tab-dirty').hidden,
+    }));
+    wb.setValue(source);
+    await wb.buildCurrent();
+    wb.toggleBreakpoint(11);
+    wb.activateTab(second.id);
+    const secondMarks = wb.getEditorMarks();
+    wb.activateTab(first.id);
+    const firstMarks = wb.getEditorMarks();
+    const withBreakpoints = wb.getTabs();
+    wb.toggleBreakpoint(11);
+
+    wb.activateTab(second.id);
+    wb.setValue(`${wb.getValue()}\n; unsaved close`);
+    wb.setConfirm(() => false);
+    const cancelled = await wb.closeTab(second.id);
+    const afterCancel = wb.getTabs();
+    wb.setConfirm(() => true);
+    const closed = await wb.closeTab(second.id);
+    wb.setConfirm((message) => window.confirm(message));
+    return {
+      first, second, countBeforeDuplicate, countAfterDuplicate, whileSecond, retained,
+      dirtyPresentation, secondMarks, firstMarks, withBreakpoints,
+      cancelled, afterCancel, closed, afterClose: wb.getTabs(),
+      renderedAfterClose: document.querySelectorAll('#tab-strip .tab-item').length,
+      lastCloseDisabled: document.querySelector('#tab-strip .tab-close').disabled,
+    };
+  });
+  assert.equal(tabFixture.countBeforeDuplicate, 2, '別ファイルを開いてもタブが2枚になりません');
+  assert.equal(tabFixture.countAfterDuplicate, 2, '同じファイルを再度開いてタブが増えました');
+  assert.equal(tabFixture.whileSecond.find((tab) => tab.id === tabFixture.first.id).dirty, true,
+    'タブAの未保存状態が保持されません');
+  assert.equal(tabFixture.whileSecond.find((tab) => tab.id === tabFixture.second.id).dirty, false,
+    '編集していないタブBがdirtyです');
+  assert.ok(tabFixture.retained.endsWith('; tab retention'), 'タブ切替後にタブAの編集内容が失われました');
+  assert.deepEqual(tabFixture.dirtyPresentation.filter((tab) => tab.dirty).map((tab) => tab.id),
+    [tabFixture.first.id], 'dirty印がタブAだけに表示されていません');
+  assert.equal(tabFixture.secondMarks.breakpointDots, 0, 'タブBへタブAのBP印が漏れました');
+  assert.equal(tabFixture.firstMarks.breakpointDots, 1, 'タブAへ戻ってもBP印が復元されません');
+  assert.deepEqual(tabFixture.withBreakpoints.find((tab) => tab.id === tabFixture.first.id).breakpoints, [11]);
+  assert.deepEqual(tabFixture.withBreakpoints.find((tab) => tab.id === tabFixture.second.id).breakpoints, []);
+  assert.equal(tabFixture.cancelled, false, '未保存タブの閉じる操作がキャンセルされません');
+  assert.equal(tabFixture.afterCancel.length, 2, 'キャンセルした未保存タブが閉じられました');
+  assert.equal(tabFixture.closed, true, '確認後も未保存タブを閉じられません');
+  assert.equal(tabFixture.afterClose.length, 1, 'タブを閉じても最後の1枚だけになりません');
+  assert.equal(tabFixture.afterClose[0].active, true, '残ったタブがアクティブではありません');
+  assert.equal(tabFixture.renderedAfterClose, 1, '閉じたタブがDOMに残っています');
+  assert.equal(tabFixture.lastCloseDisabled, true, '最後の1枚の閉じるボタンが無効ではありません');
+
+  const maximized = await page.evaluate(() => {
+    const wb = window.pc98workbench;
+    const measure = () => ({
+      editorWidth: document.querySelector('.editor-card').getBoundingClientRect().width,
+      machineWidth: document.querySelector('.machine-card').getBoundingClientRect().width,
+      editorHidden: document.querySelector('.editor-card').offsetParent === null,
+      machineHidden: document.querySelector('.machine-card').offsetParent === null,
+      editorPressed: document.querySelector('#maximize-editor').getAttribute('aria-pressed'),
+      machinePressed: document.querySelector('#maximize-machine').getAttribute('aria-pressed'),
+    });
+    const normal = measure();
+    wb.setMaximizedPane('editor');
+    const editor = { pane: wb.getMaximizedPane(), ...measure() };
+    wb.setMaximizedPane('machine');
+    const machine = { pane: wb.getMaximizedPane(), ...measure() };
+    wb.setMaximizedPane(null);
+    const restored = { pane: wb.getMaximizedPane(), ...measure() };
+    return { normal, editor, machine, restored };
+  });
+  assert.equal(maximized.editor.pane, 'editor');
+  assert.equal(maximized.editor.machineHidden, true, 'エディタ最大化時もPC-98カードが見えています');
+  assert.ok(maximized.editor.editorWidth > maximized.normal.editorWidth, 'エディタ最大化時に幅が広がりません');
+  assert.deepEqual([maximized.editor.editorPressed, maximized.editor.machinePressed], ['true', 'false']);
+  assert.equal(maximized.machine.pane, 'machine');
+  assert.equal(maximized.machine.editorHidden, true, 'PC-98最大化時もエディタカードが見えています');
+  assert.ok(maximized.machine.machineWidth > maximized.normal.machineWidth, 'PC-98最大化時に幅が広がりません');
+  assert.deepEqual([maximized.machine.editorPressed, maximized.machine.machinePressed], ['false', 'true']);
+  assert.equal(maximized.restored.pane, null);
+  assert.deepEqual([
+    maximized.restored.editorHidden, maximized.restored.machineHidden,
+    maximized.restored.editorPressed, maximized.restored.machinePressed,
+  ], [false, false, 'false', 'false'], '最大化解除後に両ペインが復帰しません');
 
   const guardedSource = await page.evaluate(() => ({
     source: window.pc98workbench.getValue(), screen: window.pc98workbench.getScreenText().text,
@@ -351,6 +459,25 @@ try {
   assert.notEqual(asmDebug.statusAfter, asmDebug.statusBefore, 'デバッグ開始後に統合状況表示が変化しません');
   assert.notEqual(asmDebug.headerBackground, theme.normalHeaderBackground,
     'デバッグ開始後もヘッダの背景色がWebNP2通常時と同じです');
+
+  const debugTabSwitch = await page.evaluate(() => {
+    const wb = window.pc98workbench;
+    const target = wb.getTabs().find((tab) => tab.active);
+    const other = wb.getTabs().find((tab) => tab.id !== target.id);
+    wb.activateTab(other.id);
+    const away = { marks: wb.getEditorMarks(), state: wb.getState() };
+    wb.activateTab(target.id);
+    const returned = { marks: wb.getEditorMarks(), state: wb.getState() };
+    return { target, other, away, returned };
+  });
+  assert.equal(debugTabSwitch.away.marks.currentLine, null,
+    'デバッグ対象外タブに停止行強調が表示されています');
+  assert.equal(debugTabSwitch.away.marks.readOnly, false,
+    'デバッグ対象外タブが編集ロックされています');
+  assert.equal(debugTabSwitch.returned.marks.currentLine, 11,
+    'デバッグ対象タブへ戻っても停止行強調が復元されません');
+  assert.equal(debugTabSwitch.returned.marks.readOnly, true,
+    'デバッグ対象タブへ戻っても編集ロックされません');
 
   const debugSections = await page.evaluate(() => ({
     registersExists: Boolean(document.querySelector('#section-registers')),
@@ -644,6 +771,8 @@ try {
   console.log('[PASS] structured error: line=4, list=true, gutter=true, wrong-line fault detected');
   console.log(`[PASS] ASM debug in editor: entry=8 next=9 bp=11 cs=${asmDebug.control.cs.toString(16).toUpperCase()} dots=1, non-mapped line rejected`);
   console.log('[PASS] editor toolbar: 9 inline-SVG controls, accessible labels, build/debug mode swap and restore');
+  console.log('[PASS] editor tabs: reuse, text/dirty/BP isolation, guarded close, debug-target lock/highlight');
+  console.log('[PASS] pane maximize: editor/machine exclusive maximize, aria state and restore');
   console.log('[PASS] WebNP2 outer chrome + VS Code Dark Modern workspace: measured colors and debugging header transition');
   console.log('[PASS] debug sections: 8 registers, breakpoint list/goto/remove/empty guide');
   console.log('[PASS] workbench disassembly: rows visible while debugging and hidden after stop');

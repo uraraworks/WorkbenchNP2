@@ -24,8 +24,11 @@ const nodes = {
   newFile: document.querySelector('#new-file'), save: document.querySelector('#save-file'),
   saveState: document.querySelector('#save-state'), currentPath: document.querySelector('#current-path'),
   editLock: document.querySelector('#edit-lock'),
+  tabStrip: document.querySelector('#tab-strip'),
   folderOpen: document.querySelector('#folder-open'), folderDisconnect: document.querySelector('#folder-disconnect'),
   swapPanes: document.querySelector('#swap-panes'), folderState: document.querySelector('#folder-state'),
+  editorCard: document.querySelector('.editor-card'), machineCard: document.querySelector('.machine-card'),
+  maximizeEditor: document.querySelector('#maximize-editor'), maximizeMachine: document.querySelector('#maximize-machine'),
   editor: document.querySelector('#editor'), build: document.querySelector('#build'), run: document.querySelector('#run'),
   buildActions: document.querySelector('#build-actions'), debugActions: document.querySelector('#debug-actions'),
   buildStatus: document.querySelector('#build-status'), errors: document.querySelector('#build-errors'),
@@ -45,12 +48,12 @@ const readOnly = new Compartment();
 const projectFS = new IndexedDbProjectFS();
 const engine = createWebNP2(document.querySelector('#screen'));
 const debugController = createDebugger(engine);
-let currentPath;
-let currentOrigin = 'sample';
-let dirty = false;
 let loadingDocument = false;
-let lastBuild;
-let lastErrors = [];
+let tabs = [];
+let activeTabId;
+let nextTabId = 1;
+let debugTabId;
+let confirmTabClose = (message) => window.confirm(message);
 let freeDos;
 let runSequence = 0;
 let FD_SWAP_MS = 300;
@@ -65,14 +68,12 @@ const prewarm = new Promise((resolve, reject) => {
 // readyより前から公開するが、利用者がawaitするまでの未処理rejectionは発生させない。
 prewarm.catch(() => {});
 let session;
-let debugMap;
 let disassemblyView;
 let directoryFS;
 let directoryListing;
-let currentEncoding = 'utf-8';
 let panesSwapped = false;
+let maximizedPane = null;
 let lastShortcut = null;
-const breakpointLines = new Set();
 const PANES_SWAPPED_KEY = 'pc98dev:panes-swapped';
 const DEBUG_SECTION_KEYS = [
   [nodes.sectionRegisters, 'pc98dev:section:registers'],
@@ -109,10 +110,29 @@ function setPanesSwapped(value) {
 
 function getPanesSwapped() { return panesSwapped; }
 
-function setSaveState(value) {
-  dirty = value;
-  nodes.saveState.textContent = value ? '未保存の変更あり' : '保存済み';
-  nodes.saveState.classList.toggle('dirty', value);
+function setMaximizedPane(pane) {
+  if (pane !== 'editor' && pane !== 'machine' && pane !== null) {
+    throw new TypeError('最大化対象は editor / machine / null で指定してください');
+  }
+  maximizedPane = pane;
+  document.body.classList.toggle('maximized-editor', pane === 'editor');
+  document.body.classList.toggle('maximized-machine', pane === 'machine');
+  nodes.maximizeEditor.setAttribute('aria-pressed', String(pane === 'editor'));
+  nodes.maximizeMachine.setAttribute('aria-pressed', String(pane === 'machine'));
+  return maximizedPane;
+}
+
+function getMaximizedPane() { return maximizedPane; }
+
+function activeTab() { return tabs.find((tab) => tab.id === activeTabId); }
+function debugTab() { return tabs.find((tab) => tab.id === debugTabId); }
+function isTabDirty(tab) { return Boolean(tab && tab.text !== tab.savedText); }
+
+function updateSaveState() {
+  const dirty = isTabDirty(activeTab());
+  nodes.saveState.textContent = dirty ? '未保存の変更あり' : '保存済み';
+  nodes.saveState.classList.toggle('dirty', dirty);
+  renderTabs();
 }
 
 /**
@@ -204,8 +224,12 @@ const breakpointGutter = [
 ];
 
 function syncDebugMarks(currentLine = null) {
+  const tab = activeTab();
   editor.dispatch({
-    effects: setDebugMarks.of({ breakpoints: [...breakpointLines].sort((a, b) => a - b), currentLine }),
+    effects: setDebugMarks.of({
+      breakpoints: [...(tab?.breakpoints ?? [])].sort((a, b) => a - b),
+      currentLine: tab?.id === debugTabId ? currentLine : null,
+    }),
   });
 }
 
@@ -245,10 +269,19 @@ const editor = new EditorView({
       lintGutter(), EditorView.lineWrapping,
       language.of([]),
       EditorView.updateListener.of((update) => {
-        if (update.docChanged && !loadingDocument) {
-          setSaveState(true); lastBuild = undefined;
+        const tab = activeTab();
+        if (!loadingDocument && tab && (update.docChanged || update.selectionSet)) {
+          tab.text = update.state.doc.toString();
+          tab.cursor = update.state.selection.main.head;
+        }
+        if (update.docChanged && !loadingDocument && tab) {
+          tab.build = undefined;
+          tab.debugMap = undefined;
+          updateSaveState();
           // 実行中の対象はビルド時のバイト列のままなので、編集で行印が古くなったことを明示する。
-          if (session?.isStarted()) setDebugStatus('編集後のソースはまだ実行対象ではありません（再ビルドが必要）');
+          if (session?.isStarted() && tab.id === debugTabId) {
+            setDebugStatus('編集後のソースはまだ実行対象ではありません（再ビルドが必要）');
+          }
         }
       }),
     ],
@@ -256,9 +289,156 @@ const editor = new EditorView({
   parent: nodes.editor,
 });
 
+function tabName(tab) { return tab.path.split(/[\\/]/).pop() ?? tab.path; }
+
+function makeCloseIcon() {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('width', '16');
+  svg.setAttribute('height', '16');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.setAttribute('focusable', 'false');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '1.5');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('fill', 'none');
+  const first = document.createElementNS(svg.namespaceURI, 'path');
+  first.setAttribute('d', 'M7 7l10 10M17 7 7 17');
+  svg.append(first);
+  return svg;
+}
+
+function renderTabs() {
+  nodes.tabStrip.replaceChildren(...tabs.map((tab) => {
+    const item = document.createElement('div');
+    item.className = `tab-item${tab.id === activeTabId ? ' active' : ''}`;
+
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'tab';
+    button.dataset.tabId = String(tab.id);
+    button.setAttribute('role', 'tab');
+    button.setAttribute('aria-selected', String(tab.id === activeTabId));
+    button.title = `${ORIGIN_LABELS[tab.origin]} / ${tab.path}`;
+    button.addEventListener('click', () => activateTab(tab.id));
+
+    const name = document.createElement('span');
+    name.className = 'tab-name';
+    name.textContent = tabName(tab);
+    const dirty = document.createElement('span');
+    dirty.className = 'tab-dirty';
+    dirty.setAttribute('aria-hidden', 'true');
+    dirty.textContent = '●';
+    dirty.hidden = !isTabDirty(tab);
+    button.append(name, dirty);
+
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'tab-close';
+    close.dataset.tabId = String(tab.id);
+    close.setAttribute('aria-label', `${tabName(tab)} を閉じる`);
+    close.disabled = tabs.length === 1;
+    close.append(makeCloseIcon());
+    close.addEventListener('click', () => {
+      closeTab(tab.id).catch((error) => setMachineStatus(error.message, true));
+    });
+    item.append(button, close);
+    return item;
+  }));
+}
+
+function stashActiveTab() {
+  const tab = activeTab();
+  if (!tab) return;
+  tab.text = currentText();
+  tab.cursor = editor.state.selection.main.head;
+}
+
+function syncFileSelectValue() {
+  const tab = activeTab();
+  if (!tab) return;
+  const selected = `${tab.origin}:${tab.path}`;
+  if ([...nodes.fileSelect.options].some((option) => option.value === selected)) {
+    nodes.fileSelect.value = selected;
+  }
+}
+
+function renderBuildState() {
+  const tab = activeTab();
+  nodes.buildStatus.classList.toggle('error', Boolean(tab?.errors.length));
+  if (tab?.errors.length) nodes.buildStatus.textContent = `${tab.errors.length}件のエラー`;
+  else if (tab?.build) nodes.buildStatus.textContent = `${tab.build.dosName}: ${tab.build.output.byteLength} bytes / FAT12 FD生成完了`;
+  else nodes.buildStatus.textContent = '.asm / .c を自動判別します';
+}
+
+function activateTab(id) {
+  const next = tabs.find((tab) => tab.id === Number(id));
+  if (!next) return false;
+  if (activeTabId !== next.id) {
+    stashActiveTab();
+    activeTabId = next.id;
+    loadingDocument = true;
+    try {
+      // 本文とカーソルは1つのトランザクションで渡す。分けると、更新中に再入したときに
+      // 先の変更が保留されて editor.state が古いままになり、短い文書へ長い方の位置を
+      // クランプしてしまう（実測: RangeError: Position 134 is out of range ...）。
+      // transaction内のselectionは「変更後の文書」基準なので、次の本文の長さで丸める。
+      editor.dispatch({
+        changes: { from: 0, to: editor.state.doc.length, insert: next.text },
+        selection: { anchor: Math.min(next.cursor ?? 0, next.text.length) },
+        effects: language.reconfigure(extensionFor(next.path) === 'c' ? cpp() : []),
+      });
+    } finally {
+      loadingDocument = false;
+    }
+  }
+  applyDiagnostics(next.errors);
+  const debugLine = session?.isStarted() && session.isPaused() && next.id === debugTabId
+    ? session.currentLine() : null;
+  syncDebugMarks(debugLine);
+  setCurrentPathLabel();
+  syncFileSelectValue();
+  renderBuildState();
+  renderBreakpointList();
+  setDebugControls(Boolean(session?.isStarted()));
+  updateSaveState();
+  return true;
+}
+
+async function closeTab(id) {
+  const index = tabs.findIndex((tab) => tab.id === Number(id));
+  if (index < 0 || tabs.length === 1) return false;
+  if (tabs[index].id === activeTabId) stashActiveTab();
+  const tab = tabs[index];
+  if (isTabDirty(tab) && !confirmTabClose(`${tabName(tab)} の未保存の変更を破棄しますか？`)) return false;
+  if (tab.id === debugTabId && session?.isStarted()) await stopDebug();
+  tabs.splice(index, 1);
+  if (tab.id === activeTabId) {
+    activeTabId = undefined;
+    activateTab(tabs[Math.min(index, tabs.length - 1)].id);
+  } else {
+    renderTabs();
+  }
+  return true;
+}
+
+function setConfirm(fn) {
+  if (typeof fn !== 'function') throw new TypeError('確認処理は関数で指定してください');
+  confirmTabClose = fn;
+}
+
+function getTabs() {
+  return tabs.map((tab) => ({
+    id: tab.id, origin: tab.origin, path: tab.path, name: tabName(tab),
+    dirty: isTabDirty(tab), active: tab.id === activeTabId,
+    breakpoints: [...tab.breakpoints].sort((a, b) => a - b),
+  }));
+}
+
 function getBreakpointList() {
-  const fileName = currentPath?.split(/[\\/]/).pop() ?? '';
-  return [...breakpointLines].sort((a, b) => a - b)
+  const tab = activeTab();
+  const fileName = tab ? tabName(tab) : '';
+  return [...(tab?.breakpoints ?? [])].sort((a, b) => a - b)
     .map((line) => ({ line, label: `${fileName}:${line}` }));
 }
 
@@ -307,22 +487,31 @@ function renderBreakpointList() {
   }));
 }
 
-function clearDiagnostics() {
-  lastErrors = [];
-  editor.dispatch(setDiagnostics(editor.state, []));
-  nodes.errors.replaceChildren();
-}
-
-function showErrors(errors) {
-  lastErrors = errors;
-  const diagnostics = errors.filter((error) => Number.isInteger(error.line) && error.line > 0).map((error) => {
-    const lineNumber = Math.min(error.line, editor.state.doc.lines);
-    const line = editor.state.doc.line(lineNumber);
-    const column = Math.max(0, (error.column ?? 1) - 1);
-    const from = Math.min(line.to, line.from + column);
-    return { from, to: Math.max(from, line.to), severity: 'error', message: error.message, source: error.stage };
+/**
+ * 位置は editor.state ではなく「対象の本文」から直接求める。タブ切替の最中は
+ * 本文差し替えのトランザクションがまだ反映されておらず、editor.state が前のタブの
+ * 長い文書のままになることがあり、短い文書へ範囲外の位置を渡してしまう
+ * （実測: RangeError: Position 134 is out of range for changeset of length 83）。
+ */
+/**
+ * lint表示の位置は「反映が終わったあとの文書」から求める。タブ切替では本文差し替えの
+ * トランザクションが保留されることがあり、その最中に計算すると別の文書を基準にしてしまい
+ * 範囲外になる（実測: RangeError: Position 134 is out of range for changeset of length 83）。
+ * そこでCodeMirrorへの反映だけmicrotaskへ遅らせ、そのとき現に開いている文書で位置を出す。
+ */
+function applyDiagnostics(errors = []) {
+  const tabId = activeTabId;
+  queueMicrotask(() => {
+    if (activeTabId !== tabId) return;
+    const { doc } = editor.state;
+    const diagnostics = errors.filter((error) => Number.isInteger(error.line) && error.line > 0).map((error) => {
+      const line = doc.line(Math.min(error.line, doc.lines));
+      const column = Math.max(0, (error.column ?? 1) - 1);
+      const from = Math.min(line.to, line.from + column);
+      return { from, to: Math.max(from, line.to), severity: 'error', message: error.message, source: error.stage };
+    });
+    editor.dispatch(setDiagnostics(editor.state, diagnostics));
   });
-  editor.dispatch(setDiagnostics(editor.state, diagnostics));
   nodes.errors.replaceChildren(...errors.map((error) => {
     const item = document.createElement('li');
     item.dataset.errorLine = String(error.line ?? 0);
@@ -331,13 +520,25 @@ function showErrors(errors) {
   }));
 }
 
+function clearDiagnostics() {
+  const tab = activeTab();
+  if (tab) tab.errors = [];
+  applyDiagnostics([]);
+}
+
+function showErrors(errors) {
+  const tab = activeTab();
+  if (tab) tab.errors = errors;
+  applyDiagnostics(errors);
+}
+
 const ORIGIN_LABELS = { sample: 'サンプル', project: 'IndexedDB', directory: 'フォルダ' };
 
 /** 書き込み先は「フォルダを繋いでいればフォルダ、でなければIndexedDB」。両者を同期はしない。 */
 function writableOrigin() { return directoryFS ? 'directory' : 'project'; }
 function backendFor(origin) { return origin === 'directory' ? directoryFS : projectFS; }
 
-async function refreshFileSelect(selected = `${currentOrigin}:${currentPath}`) {
+async function refreshFileSelect(selected = activeTab() ? `${activeTab().origin}:${activeTab().path}` : undefined) {
   const makeGroup = (label, files, origin) => {
     const group = document.createElement('optgroup'); group.label = label;
     for (const file of files) {
@@ -360,8 +561,13 @@ async function refreshFileSelect(selected = `${currentOrigin}:${currentPath}`) {
 }
 
 async function openFile(origin, path) {
+  const opened = tabs.find((tab) => tab.origin === origin && tab.path === path);
+  if (opened) {
+    activateTab(opened.id);
+    return;
+  }
   let content;
-  currentEncoding = 'utf-8';
+  let encoding = 'utf-8';
   if (origin === 'sample') {
     const sample = SAMPLE_FILES.find((entry) => entry.path === path);
     if (!sample) throw new Error(`${path}は同梱サンプルではありません`);
@@ -372,36 +578,42 @@ async function openFile(origin, path) {
     const record = await backend.read(path);
     if (!record) throw new Error(`${path}が${ORIGIN_LABELS[origin]}にありません`);
     content = record.content;
-    currentEncoding = record.encoding ?? 'utf-8';
+    encoding = record.encoding ?? 'utf-8';
   }
-  currentPath = path; currentOrigin = origin;
-  loadingDocument = true;
-  editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: content } });
-  loadingDocument = false;
-  editor.dispatch({ effects: language.reconfigure(extensionFor(path) === 'c' ? cpp() : []) });
-  // BP行は行番号そのものなので、別ファイルへ持ち越さずセッションごと畳む。
-  breakpointLines.clear();
-  session?.detach(); session = undefined; debugMap = undefined;
-  syncDebugMarks(null); renderBreakpointList(); setDebugControls(false);
-  clearDiagnostics(); lastBuild = undefined; setSaveState(false);
-  setCurrentPathLabel();
-  nodes.buildStatus.textContent = '.asm / .c を自動判別します'; nodes.buildStatus.classList.remove('error');
+  const tab = {
+    id: nextTabId++, origin, path, encoding, text: content, savedText: content,
+    breakpoints: new Set(), build: undefined, debugMap: undefined, cursor: 0, errors: [],
+  };
+  tabs.push(tab);
+  activateTab(tab.id);
   await refreshFileSelect(`${origin}:${path}`);
 }
 
 function setCurrentPathLabel() {
-  const encoding = currentEncoding === 'utf-8' ? '' : `（${currentEncoding}）`;
-  nodes.currentPath.textContent = `${ORIGIN_LABELS[currentOrigin]} / ${currentPath}${encoding}`;
+  const tab = activeTab();
+  if (!tab) { nodes.currentPath.textContent = ''; return; }
+  const encoding = tab.encoding === 'utf-8' ? '' : `（${tab.encoding}）`;
+  nodes.currentPath.textContent = `${ORIGIN_LABELS[tab.origin]} / ${tab.path}${encoding}`;
 }
 
 async function saveFile() {
-  if (!currentPath) throw new Error('保存対象がありません');
+  const tab = activeTab();
+  if (!tab) throw new Error('保存対象がありません');
+  tab.text = currentText();
   // サンプルは読み取り専用なので、保存すると書き込み可能なバックエンドへ複製される。
-  const target = currentOrigin === 'sample' ? writableOrigin() : currentOrigin;
-  await backendFor(target).write(currentPath, currentText());
-  currentOrigin = target; currentEncoding = 'utf-8'; setSaveState(false);
-  setCurrentPathLabel();
-  await refreshFileSelect(`${target}:${currentPath}`);
+  const target = tab.origin === 'sample' ? writableOrigin() : tab.origin;
+  await backendFor(target).write(tab.path, tab.text);
+  tab.origin = target;
+  tab.encoding = 'utf-8';
+  tab.savedText = tab.text;
+  renderTabs();
+  if (activeTabId === tab.id) {
+    updateSaveState();
+    setCurrentPathLabel();
+    await refreshFileSelect(`${target}:${tab.path}`);
+  } else {
+    await refreshFileSelect();
+  }
 }
 
 async function createFile(path) {
@@ -414,26 +626,35 @@ async function createFile(path) {
 }
 
 async function buildCurrent() {
-  if (!currentPath) throw new Error('ビルド対象がありません');
+  const tab = activeTab();
+  if (!tab) throw new Error('ビルド対象がありません');
   nodes.build.disabled = true; nodes.run.disabled = true; nodes.debug.disabled = true;
-  nodes.buildStatus.textContent = `${currentPath} をビルド中…`; nodes.buildStatus.classList.remove('error');
-  setMachineStatus(`${currentPath} をビルド中です`);
+  nodes.buildStatus.textContent = `${tab.path} をビルド中…`; nodes.buildStatus.classList.remove('error');
+  setMachineStatus(`${tab.path} をビルド中です`);
   clearDiagnostics();
   try {
     await saveFile();
-    const result = await buildSource(currentPath, currentText());
+    const result = await buildSource(tab.path, tab.text);
     if (!result.ok) {
-      showErrors(result.errors);
-      nodes.buildStatus.textContent = `${result.errors.length}件のエラー`; nodes.buildStatus.classList.add('error');
+      tab.errors = result.errors;
+      if (activeTabId === tab.id) {
+        showErrors(result.errors);
+        nodes.buildStatus.textContent = `${result.errors.length}件のエラー`;
+        nodes.buildStatus.classList.add('error');
+      }
       setMachineStatus(`ビルドに失敗しました（${result.errors.length}件）`, true);
-      lastBuild = undefined;
+      tab.build = undefined;
+      tab.debugMap = undefined;
       return result;
     }
-    lastBuild = result;
+    tab.build = result;
     // 行マップはビルド時点で確定させる。どの行にBPを張れるかを実行前に答えられるようにする。
-    debugMap = debugMapForBuild(result);
-    syncDebugMarks(session?.isStarted() ? session.currentLine() : null);
-    nodes.buildStatus.textContent = `${result.dosName}: ${result.output.byteLength} bytes / FAT12 FD生成完了`;
+    tab.debugMap = debugMapForBuild(result);
+    renderTabs();
+    if (activeTabId === tab.id) {
+      syncDebugMarks(session?.isStarted() && tab.id === debugTabId ? session.currentLine() : null);
+      nodes.buildStatus.textContent = `${result.dosName}: ${result.output.byteLength} bytes / FAT12 FD生成完了`;
+    }
     setMachineStatus('ビルド完了。実行できます');
     return result;
   } finally {
@@ -512,24 +733,24 @@ async function mountProgramFd(built) {
   // 排出してからメディア交換として挿入する。
   // 排出と挿入の間はゲストを走らせたまま待つ必要がある。CPUを止めて交換するとゲストが
   // 「ディスクが無い」中間状態を一度も観測せず、交換に気付かないまま古いFATを使う（実測で失敗）。
+  // 連続実行の区切りは、**メディア交換より前**に入れる。交換直後はDOSがドライブを
+  // 読めない瞬間があり、そこへキーを送ると入力がドライブエラーの選択待ちへ吸われて
+  // 再試行が空回りする（実測で再試行が上限に達した）。ディスクが安定している間に済ませる。
+  const beforeSeparator = engine.getScreenText();
+  await engine.pasteText('\r\r\r');
+  const screen = await waitForCurrentDosPrompt(engine, { baseline: beforeSeparator.text, timeout: 30_000 });
+  nodes.screenText.textContent = screen.text;
+
   setMachineStatus('作業用ディスクを挿入しています…');
   await engine.ejectFd(2);
   await settle(FD_SWAP_MS);
   await engine.insertFd(2, { name, bytes: built.fd }, key);
   await settle(FD_SWAP_MS);
-  const inserted = engine.getScreenText();
-  nodes.screenText.textContent = inserted.text;
-  // 連続実行の区切りが分かるよう、コマンド投入前に空のプロンプト行を入れておく。
-  // 空行が描画し終わるまで待ってから返さないと、呼び出し側のbaselineが古くなり、
-  // プログラム実行前のプロンプトを「実行完了」と誤認してしまう。
-  await engine.pasteText('\r\r\r');
-  const screen = await waitForCurrentDosPrompt(engine, { baseline: inserted.text, timeout: 30_000 });
-  nodes.screenText.textContent = screen.text;
   return screen;
 }
 
 async function runCurrent() {
-  const built = lastBuild ?? await buildCurrent();
+  const built = activeTab()?.build ?? await buildCurrent();
   if (!built?.ok) return built;
   if (session?.isStarted()) await stopDebug();
   const baseline = await mountProgramFd(built);
@@ -569,19 +790,20 @@ function setEditorReadOnly(value) {
 }
 
 function setDebugControls(active) {
+  const targetActive = active && activeTabId === debugTabId;
   nodes.buildActions.hidden = active;
   nodes.debugActions.hidden = !active;
   nodes.debugPanel.hidden = !active;
   nodes.disassemblyPanel.hidden = !active;
-  nodes.editLock.hidden = !active;
+  nodes.editLock.hidden = !targetActive;
   document.body.classList.toggle('debugging', active);
-  setEditorReadOnly(active);
+  setEditorReadOnly(targetActive);
   const paused = active && session?.isPaused();
   nodes.continue.disabled = !paused;
   nodes.stepOver.disabled = !paused;
   nodes.stepInto.disabled = !paused;
   nodes.stepInstruction.disabled = !paused;
-  nodes.restart.disabled = !active || !lastBuild;
+  nodes.restart.disabled = !active || !activeTab()?.build;
   nodes.stopDebug.disabled = !active;
 }
 
@@ -616,37 +838,41 @@ function refreshDebugViews() {
 
 /** BP行の集合を1つの真実として持ち、セッション中は即座にハードウェアBPへ反映する。 */
 function toggleBreakpoint(line) {
-  const previous = new Set(breakpointLines);
-  const adding = !breakpointLines.has(line);
-  if (adding && debugMap && !debugMap.isDebuggable(line)) {
+  const tab = activeTab();
+  if (!tab) return false;
+  const previous = new Set(tab.breakpoints);
+  const adding = !tab.breakpoints.has(line);
+  if (adding && tab.debugMap && !tab.debugMap.isDebuggable(line)) {
     setDebugStatus(`${line}行には生成アドレスがないためBPを張れません`, true);
     renderBreakpointList();
     return false;
   }
-  if (adding) breakpointLines.add(line); else breakpointLines.delete(line);
-  if (session?.isStarted()) {
+  if (adding) tab.breakpoints.add(line); else tab.breakpoints.delete(line);
+  if (session?.isStarted() && tab.id === debugTabId) {
     try {
-      session.setBreakpointLines([...breakpointLines]);
+      session.setBreakpointLines([...tab.breakpoints]);
     } catch (error) {
-      breakpointLines.clear();
-      for (const kept of previous) breakpointLines.add(kept);
-      session.setBreakpointLines([...breakpointLines]);
+      tab.breakpoints.clear();
+      for (const kept of previous) tab.breakpoints.add(kept);
+      session.setBreakpointLines([...tab.breakpoints]);
       setDebugStatus(error.message, true);
       syncDebugMarks(session.currentLine());
       renderBreakpointList();
       return false;
     }
   }
-  syncDebugMarks(session?.isStarted() ? session.currentLine() : null);
+  syncDebugMarks(session?.isStarted() && tab.id === debugTabId ? session.currentLine() : null);
   setDebugControls(Boolean(session?.isStarted()));
   renderBreakpointList();
+  renderTabs();
   return true;
 }
 
 async function startDebug() {
-  const built = lastBuild ?? await buildCurrent();
+  const tab = activeTab();
+  const built = tab?.build ?? await buildCurrent();
   if (!built?.ok) return built;
-  if (!debugMap) throw new Error('行マップを生成できませんでした');
+  if (!tab?.debugMap) throw new Error('行マップを生成できませんでした');
   if (session?.isStarted()) await stopDebug();
   if (!disassemblyView) {
     disassemblyView = mountDisassemblyView(nodes.disassembly, {
@@ -660,16 +886,17 @@ async function startDebug() {
   await mountProgramFd(built);
   session = createDebugSession(debugController);
   const started = await session.start(
-    engine, `B:\\${LOADER_NAME} B:\\${built.dosName}`, debugMap, built.kind,
+    engine, `B:\\${LOADER_NAME} B:\\${built.dosName}`, tab.debugMap, built.kind,
   );
+  debugTabId = tab.id;
   const recoveredDriveError = recordDriveErrorRetries(started.driveErrorRetries);
-  const unmapped = [...breakpointLines].filter((line) => !debugMap.isDebuggable(line));
+  const unmapped = [...tab.breakpoints].filter((line) => !tab.debugMap.isDebuggable(line));
   if (unmapped.length > 0) {
     // 張れないBPを黙って捨てると「効かないBP」になるため、外した行を明示してから続行する。
-    for (const line of unmapped) breakpointLines.delete(line);
+    for (const line of unmapped) tab.breakpoints.delete(line);
     setDebugStatus(`生成アドレスのない ${unmapped.join(', ')} 行のBPを解除しました`, true);
   }
-  session.setBreakpointLines([...breakpointLines]);
+  session.setBreakpointLines([...tab.breakpoints]);
   const view = refreshDebugViews();
   if (unmapped.length === 0 && !recoveredDriveError) {
     setDebugStatus(`${built.dosName} エントリ停止 CS:IP=${HEX(started.control.cs, 4)}:${HEX(started.control.ip, 4)}`);
@@ -738,7 +965,7 @@ function runTargetToLoaderExit() {
 
 /** BPが無ければ停止を解除し、通常の「続行」と同じくプログラム終了まで走らせる。 */
 async function continueOrRun() {
-  if (breakpointLines.size > 0) return continueToBreakpoint();
+  if ((debugTab()?.breakpoints.size ?? 0) > 0) return continueToBreakpoint();
   return stopDebug();
 }
 
@@ -746,6 +973,7 @@ async function continueOrRun() {
 async function stopDebug() {
   requireSession().detach();
   session = undefined;
+  debugTabId = undefined;
   syncDebugMarks(null);
   setDebugControls(false);
   // 停止していないCPUのレジスタを表示し続けると嘘になるので、復帰と同時に消す。
@@ -792,7 +1020,7 @@ async function disconnectDirectory() {
   await clearDirectoryHandle().catch(() => {});
   setDirectoryLabel('フォルダ未接続');
   // 開いていたのがフォルダのファイルなら、参照先を失うので同梱サンプルへ戻す。
-  if (currentOrigin === 'directory') await openFile('sample', 'samples/hello.asm');
+  if (activeTab()?.origin === 'directory') await openFile('sample', 'samples/hello.asm');
   else await refreshFileSelect();
 }
 
@@ -842,6 +1070,8 @@ nodes.save.addEventListener('click', () => saveFile().catch((error) => showError
 nodes.folderOpen.addEventListener('click', () => openFolder().catch((error) => setDirectoryLabel(error.message)));
 nodes.folderDisconnect.addEventListener('click', () => disconnectDirectory().catch((error) => setDirectoryLabel(error.message)));
 nodes.swapPanes.addEventListener('click', () => setPanesSwapped(!panesSwapped));
+nodes.maximizeEditor.addEventListener('click', () => setMaximizedPane(maximizedPane === 'editor' ? null : 'editor'));
+nodes.maximizeMachine.addEventListener('click', () => setMaximizedPane(maximizedPane === 'machine' ? null : 'machine'));
 nodes.build.addEventListener('click', () => buildCurrent());
 nodes.run.addEventListener('click', () => runCurrent());
 nodes.debug.addEventListener('click', () => startDebug().catch((error) => setDebugStatus(error.message, true)));
@@ -895,16 +1125,19 @@ ready.catch((error) => {
 window.pc98workbench = {
   prewarm,
   ready, openFile, createFile, saveFile, buildCurrent, runCurrent,
+  getTabs, activateTab, closeTab, setConfirm,
   startDebug, stopDebug, toggleBreakpoint, stepInstruction, stepOverLine, stepInto,
   continueToBreakpoint, continueOrRun, setPanesSwapped, getPanesSwapped,
+  setMaximizedPane, getMaximizedPane,
   getLastShortcut: () => lastShortcut,
   getScreenScaling: syncScreenScaling,
   getGuardedKeyboardTargets: () => [...GUARDED_KEYBOARD_TARGETS],
   getDebugState: () => ({
     started: Boolean(session?.isStarted()), paused: Boolean(session?.isPaused()),
-    kind: debugMap?.kind ?? null, breakpoints: [...breakpointLines].sort((a, b) => a - b),
+    kind: activeTab()?.debugMap?.kind ?? null,
+    breakpoints: [...(activeTab()?.breakpoints ?? [])].sort((a, b) => a - b),
     currentLine: session?.isStarted() ? session.currentLine() : null,
-    control: session?.control ?? null, debuggableLines: debugMap?.debuggableLines() ?? [],
+    control: session?.control ?? null, debuggableLines: activeTab()?.debugMap?.debuggableLines() ?? [],
   }),
   getRegisters: () => (session?.isStarted() ? session.registers() : undefined),
   getBreakpointList,
@@ -914,7 +1147,7 @@ window.pc98workbench = {
   setFdSwapDelay,
   getFdSwapDelay: () => FD_SWAP_MS,
   getDriveErrorRetries: () => driveErrorRetries,
-  getBuiltOutput: () => (lastBuild?.output ? Array.from(lastBuild.output) : null),
+  getBuiltOutput: () => (activeTab()?.build?.output ? Array.from(activeTab().build.output) : null),
   readGuestMemory: (address, length) => Array.from(debugController.readMemory(address, length)),
   disassembleAt: (segment, offset, count) => debugController.disassemble(segment, offset, count),
   getLoaderControl: () => {
@@ -935,7 +1168,13 @@ window.pc98workbench = {
     editor.focus();
     editor.dispatch({ selection: { anchor: line.to } });
   },
-  getState: () => ({ currentPath, currentOrigin, dirty, errors: lastErrors, built: lastBuild?.dosName ?? null }),
+  getState: () => {
+    const tab = activeTab();
+    return {
+      currentPath: tab?.path, currentOrigin: tab?.origin, dirty: isTabDirty(tab),
+      errors: tab?.errors ?? [], built: tab?.build?.dosName ?? null,
+    };
+  },
   listProjectFiles: () => projectFS.list(),
   connectDirectory, disconnectDirectory,
   getDirectoryState: () => ({

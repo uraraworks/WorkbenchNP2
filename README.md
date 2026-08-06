@@ -84,6 +84,9 @@ IndexedDBプロジェクト、ローカルフォルダを開き、新規作成�
 VS CodeのDark Modernを維持し、両方のテーマ色を`ide/workbench.css`の`:root`へ
 `--np2-*`／`--vsc-*`カスタムプロパティとして集約している。
 
+エディタは複数ファイルをタブで開き、編集中の本文・未保存状態・ブレークポイントをファイルごとに
+保持する。エディタとPC-98画面は各見出しのボタンで一時的に片方だけを最大化できる。
+
 ### ローカルフォルダ（File System Access）
 
 `ide/index.html`の「フォルダを開く」は`showDirectoryPicker({mode:'readwrite'})`を呼び、選んだフォルダを

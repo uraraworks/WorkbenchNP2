@@ -23,7 +23,13 @@
   </nav>
   <main class="workspace-grid">
     <section class="editor-card" aria-labelledby="editor-heading">
-      <div class="panel-heading"><div><h2 id="editor-heading">エディタ</h2><span id="current-path"></span><span id="edit-lock" class="edit-lock" hidden>デバッグ中は編集できません</span></div></div>
+      <div class="panel-heading">
+        <div><h2 id="editor-heading">エディタ</h2><span id="current-path"></span><span id="edit-lock" class="edit-lock" hidden>デバッグ中は編集できません</span></div>
+        <button class="pane-maximize" id="maximize-editor" aria-pressed="false" title="エディタを最大化" aria-label="エディタを最大化">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"><rect x="5" y="5" width="14" height="14" rx="1"/><path d="M9 5H5v4M15 19h4v-4M5 9l5-5M19 15l-5 5"/></svg>
+        </button>
+      </div>
+      <div class="tab-strip" id="tab-strip" role="tablist" aria-label="開いているファイル"></div>
       <div id="editor" aria-label="ソースエディタ"></div>
       <div class="editor-toolbar">
         <div class="tool-group" id="build-actions">
@@ -66,7 +72,12 @@
       </section>
     </section>
     <section class="machine-card" aria-labelledby="machine-heading">
-      <div class="panel-heading"><h2 id="machine-heading">PC-98</h2></div>
+      <div class="panel-heading">
+        <h2 id="machine-heading">PC-98</h2>
+        <button class="pane-maximize" id="maximize-machine" aria-pressed="false" title="PC-98画面を最大化" aria-label="PC-98画面を最大化">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"><rect x="5" y="5" width="14" height="14" rx="1"/><path d="M9 5H5v4M15 19h4v-4M5 9l5-5M19 15l-5 5"/></svg>
+        </button>
+      </div>
       <div id="machine-status" role="status">初期化中…</div>
       <div class="screen-shell"><canvas id="screen" width="640" height="400" tabindex="0"></canvas></div>
       <section id="debug-panel" class="debug-panel" aria-label="デバッグ" hidden>
