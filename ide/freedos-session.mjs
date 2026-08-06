@@ -3,6 +3,8 @@ import { answerDriveErrorRetry, currentDosPrompt, DOS_DRIVE_ERROR_PATTERN } from
 export { answerDriveErrorRetry } from './dos-prompt.mjs';
 
 const sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
+/** 上限は無限ループ防止のための保険。厳しくすると稀な連続失敗でそのまま落ちる。 */
+const DRIVE_ERROR_RETRY_LIMIT = 8;
 const DRIVE_ERROR_RETRY_INTERVAL = 1_000;
 
 export async function waitForCurrentDosPrompt(engine, opts = {}) {
@@ -26,7 +28,7 @@ export async function waitForCurrentDosPrompt(engine, opts = {}) {
         await sleep(100);
         continue;
       }
-      if (!recoverDriveErrors || driveErrorRetries >= 3) {
+      if (!recoverDriveErrors || driveErrorRetries >= DRIVE_ERROR_RETRY_LIMIT) {
         const error = new Error('DOSがドライブ未準備エラーの選択待ちになりました');
         error.code = 'DOS_DRIVE_ERROR';
         error.screen = screen;

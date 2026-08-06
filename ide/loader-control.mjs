@@ -8,6 +8,8 @@ export const CONTROL = {
   execReturnIp: 42, waitIp: 44, childReturn: 46, exitReadyIp: 48, size: 50,
 };
 const CONTROL_VERSION = 3;
+/** 上限は無限ループ防止のための保険。厳しくすると稀な連続失敗でそのまま落ちる。 */
+const DRIVE_ERROR_RETRY_LIMIT = 8;
 const DRIVE_ERROR_RETRY_INTERVAL = 1_000;
 
 const sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
@@ -59,8 +61,8 @@ export async function waitForLoaderControl(debug, opts = {}) {
           await sleep(100);
           continue;
         }
-        if (driveErrorRetries >= 3) {
-          const error = new Error('デバッガローダ待機中のDOSドライブエラー再試行が3回を超えました');
+        if (driveErrorRetries >= DRIVE_ERROR_RETRY_LIMIT) {
+          const error = new Error('デバッガローダ待機中のDOSドライブエラー再試行が上限を超えました');
           error.code = 'DOS_DRIVE_ERROR';
           error.screen = screen;
           error.driveErrorRetries = driveErrorRetries;

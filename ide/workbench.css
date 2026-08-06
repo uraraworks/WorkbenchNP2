@@ -1,71 +1,113 @@
-:root { color-scheme: dark; font-family: Inter, system-ui, sans-serif; background: #0b1015; color: #e9f0f5; }
-* { box-sizing: border-box; }
-body { display: flex; flex-direction: column; margin: 0; min-height: 100vh; background: radial-gradient(circle at 10% 0, #18293a 0, #0b1015 42%); }
+:root {
+  color-scheme: dark;
+  font-family: Inter, system-ui, sans-serif;
+  --vsc-editor-bg: #1f1f1f;
+  --vsc-ui-bg: #181818;
+  --vsc-border: #2b2b2b;
+  --vsc-fg: #cccccc;
+  --vsc-muted: #9d9d9d;
+  --vsc-accent: #0078d4;
+  --vsc-accent-hover: #026ec1;
+  --vsc-focus: #0078d4;
+  --vsc-link: #4daafc;
+  --vsc-input-bg: #313131;
+  --vsc-input-border: #3c3c3c;
+  --vsc-list-hover: #2a2d2e;
+  --vsc-toolbar-hover: rgba(90, 93, 94, .31);
+  --vsc-editor-error: #f14c4c;
+  --vsc-error: #f85149;
+  --vsc-warning: #cca700;
+  --vsc-line-number: #6e7681;
+  --vsc-line-number-active: #cccccc;
+  --vsc-selection: #264f78;
+  --vsc-caret: #aeafad;
+  --vsc-breakpoint: #e51400;
+  --vsc-stack-frame: rgba(255, 255, 0, .2);
+  --vsc-widget-bg: #202020;
+  --vsc-scrollbar: rgba(121, 121, 121, .4);
+  --vsc-debugging: #0078d4;
+  --vsc-debug-fg: #ffffff;
+  --vsc-transparent: transparent;
+  background: var(--vsc-editor-bg);
+  color: var(--vsc-fg);
+}
+* { box-sizing: border-box; scrollbar-color: var(--vsc-scrollbar) var(--vsc-transparent); }
+*::-webkit-scrollbar-thumb { background: var(--vsc-scrollbar); }
+*::-webkit-scrollbar-track { background: var(--vsc-transparent); }
+body { display: flex; flex-direction: column; margin: 0; min-height: 100vh; color: var(--vsc-fg); background: var(--vsc-editor-bg); }
 button, input, select { font: inherit; }
-button { border: 1px solid #456175; border-radius: 6px; padding: 7px 11px; color: #eff8ff; background: #203747; }
-button:hover { background: #29495f; }
+button { border: 1px solid var(--vsc-transparent); border-radius: 4px; padding: 7px 11px; color: var(--vsc-fg); background: var(--vsc-transparent); }
+button:hover { background: var(--vsc-toolbar-hover); }
 button:disabled { opacity: .45; }
-.app-header { min-height: 76px; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; padding: 14px 20px; border-bottom: 1px solid #263846; }
-body.debugging .app-header { background: #6b3410; border-bottom-color: #cc6633; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 1px solid var(--vsc-focus); outline-offset: 1px; }
+input, select { border: 1px solid var(--vsc-input-border); color: var(--vsc-fg); background: var(--vsc-input-bg); }
+.app-header { min-height: 76px; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; padding: 14px 20px; border-bottom: 1px solid var(--vsc-border); background: var(--vsc-ui-bg); }
+body.debugging .app-header { color: var(--vsc-debug-fg); background: var(--vsc-debugging); border-bottom-color: var(--vsc-debugging); }
 .app-title-row { display: flex; align-items: center; gap: 10px; }
 .app-header h1 { margin: 0; font-size: 24px; letter-spacing: .04em; }
-.app-tagline { margin: 3px 0 0; color: #8fa9b9; font-size: 13px; }
-.file-bar { display: flex; align-items: end; gap: 8px; padding: 10px 20px; background: rgba(9, 16, 22, .84); border-bottom: 1px solid #263846; }
-.file-bar label { display: grid; gap: 3px; min-width: min(420px, 38vw); color: #91a9b8; font-size: 11px; }
-.file-bar select, .file-bar input { min-height: 34px; border: 1px solid #385263; border-radius: 5px; color: #eef7fc; background: #111d26; padding: 5px 8px; }
+.app-tagline { margin: 3px 0 0; color: var(--vsc-muted); font-size: 13px; }
+body.debugging .app-tagline { color: var(--vsc-debug-fg); }
+.file-bar { display: flex; align-items: end; gap: 8px; padding: 10px 20px; background: var(--vsc-ui-bg); border-bottom: 1px solid var(--vsc-border); }
+.file-bar label { display: grid; gap: 3px; min-width: min(420px, 38vw); color: var(--vsc-muted); font-size: 11px; }
+.file-bar select, .file-bar input { min-height: 34px; border-radius: 4px; padding: 5px 8px; }
 #new-path { width: min(260px, 26vw); }
-#folder-state { max-width: 34vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #8fa9b9; font: 12px ui-monospace, monospace; }
-#save-state { margin-left: auto; color: #8fa9b9; font-size: 12px; }
-#save-state.dirty { color: #ffd479; }
+#folder-state { max-width: 34vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--vsc-muted); font: 12px ui-monospace, monospace; }
+#save-state { margin-left: auto; color: var(--vsc-muted); font-size: 12px; }
+#save-state.dirty { color: var(--vsc-warning); }
 .workspace-grid { display: grid; flex: 1; grid-template-columns: minmax(430px, 1fr) minmax(480px, 1fr); gap: 12px; padding: 12px 20px 20px; }
 body.panes-swapped .workspace-grid { grid-template-columns: minmax(480px, 1fr) minmax(430px, 1fr); }
 body.panes-swapped .editor-card { order: 2; }
 body.panes-swapped .machine-card { order: 1; }
-.editor-card, .machine-card { min-width: 0; border: 1px solid #314857; border-radius: 10px; background: rgba(16, 26, 34, .94); overflow: hidden; }
-.panel-heading { min-height: 51px; display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 9px 12px; border-bottom: 1px solid #2a3e4c; }
+.editor-card, .machine-card { min-width: 0; border: 1px solid var(--vsc-border); border-radius: 8px; background: var(--vsc-editor-bg); overflow: hidden; }
+.panel-heading { min-height: 51px; display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 9px 12px; border-bottom: 1px solid var(--vsc-border); background: var(--vsc-ui-bg); }
 .panel-heading h2 { margin: 0; font-size: 14px; }
-.panel-heading span { color: #8fa9b9; font: 11px ui-monospace, monospace; }
-.panel-heading .edit-lock { display: inline-block; margin-left: 7px; padding: 2px 7px; border-radius: 4px; background: #6b3410; color: #ffd7b0; font-size: 11px; }
+.panel-heading span { color: var(--vsc-muted); font: 11px ui-monospace, monospace; }
+.panel-heading .edit-lock { display: inline-block; margin-left: 7px; padding: 2px 7px; border-radius: 4px; background: var(--vsc-debugging); color: var(--vsc-debug-fg); font-size: 11px; }
 .panel-heading .edit-lock[hidden] { display: none; }
-.build-actions { display: flex; gap: 6px; }
-#run { background: #176044; border-color: #2c926d; }
 #editor { height: min(62vh, 610px); min-height: 360px; }
-.cm-editor { height: 100%; background: #0c141a; font-size: 13px; }
-body.debugging .cm-editor { background: #0e1218; }
-body.debugging .cm-content { caret-color: transparent; }
+.editor-toolbar { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px; border-top: 1px solid var(--vsc-border); background: var(--vsc-ui-bg); }
+.tool-group { display: flex; flex-wrap: wrap; gap: 6px; }
+.tool-group[hidden] { display: none; }
+.editor-toolbar button { display: inline-grid; place-items: center; min-width: 38px; height: 34px; padding: 0 9px; }
+.editor-toolbar svg { display: block; }
+#run, #debug-continue { color: var(--vsc-debug-fg); background: var(--vsc-accent); }
+#run:hover, #debug-continue:hover { background: var(--vsc-accent-hover); }
+#debug { border-color: var(--vsc-accent); color: var(--vsc-link); }
+#debug:hover { background: var(--vsc-toolbar-hover); }
+#debug-stop { color: var(--vsc-error); }
+.cm-editor { height: 100%; color: var(--vsc-fg); background: var(--vsc-editor-bg); font-size: 13px; }
+body.debugging .cm-content { caret-color: var(--vsc-transparent); }
 .cm-scroller { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-.cm-gutters { background: #111e27 !important; border-right-color: #263d4c !important; }
-.cm-activeLine, .cm-activeLineGutter { background: rgba(67, 137, 177, .18) !important; }
-/* drawSelection()は素のcaretを消して自前で描くが、既定色が黒なので暗色背景だと見えない。 */
-.cm-cursor, .cm-cursor-primary { border-left-color: #eff8ff !important; border-left-width: 2px !important; }
-.cm-selectionBackground, .cm-content ::selection { background: #2b4d66 !important; }
-.cm-focused .cm-selectionBackground { background: #35617f !important; }
+.cm-gutters { color: var(--vsc-line-number); background: var(--vsc-editor-bg) !important; border-right-color: var(--vsc-border) !important; }
+.cm-activeLine { background: var(--vsc-list-hover) !important; }
+.cm-activeLineGutter { color: var(--vsc-line-number-active) !important; background: var(--vsc-list-hover) !important; }
+/* drawSelection()は素のcaretを消して自前で描くため、Dark Modernのキャレット色を明示する。 */
+.cm-cursor, .cm-cursor-primary { border-left-color: var(--vsc-caret) !important; border-left-width: 2px !important; }
+.cm-selectionBackground, .cm-content ::selection, .cm-focused .cm-selectionBackground { background: var(--vsc-selection) !important; }
 .cm-breakpoint-gutter { width: 16px; cursor: pointer; }
-.cm-breakpoint-gutter .cm-gutterElement:hover { background: rgba(255, 120, 120, .18); }
-.cm-breakpoint-dot { display: block; color: #ff6b6b; font-size: 11px; line-height: 1.4; text-align: center; }
+.cm-breakpoint-gutter .cm-gutterElement:hover { background: var(--vsc-toolbar-hover); }
+.cm-breakpoint-dot { display: block; color: var(--vsc-breakpoint); font-size: 11px; line-height: 1.4; text-align: center; }
 .cm-breakpoint-spacer { display: block; visibility: hidden; font-size: 11px; line-height: 1.4; }
-.cm-debug-current { background: rgba(255, 212, 121, .17); box-shadow: inset 3px 0 0 #ffd479; }
-.debug-panel { margin: 0 12px 12px; padding: 9px 10px; border: 1px solid #2d4351; border-radius: 8px; background: rgba(9, 17, 23, .8); }
-.debug-actions { display: flex; flex-wrap: wrap; gap: 6px; }
-.debug-actions button { display: inline-grid; place-items: center; min-width: 36px; height: 34px; padding: 0 8px; font-size: 17px; line-height: 1; }
-#debug-continue { background: #176044; border-color: #2c926d; }
-#debug { background: #4a3a12; border-color: #8a6a24; }
-.ide-registers { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; margin-top: 8px; }
-.ide-register { display: flex; justify-content: space-between; gap: 5px; padding: 3px 6px; border-radius: 4px; background: #111e27; font: 11px ui-monospace, monospace; }
-.ide-register span { color: #7e9aaa; }
-#build-status { min-height: 34px; padding: 8px 12px; border-top: 1px solid #293d4a; color: #95bad0; font-size: 12px; }
-#build-status.error { color: #ff9f9f; }
-#machine-status { min-height: 34px; padding: 8px 12px; border-bottom: 1px solid #293d4a; color: #95bad0; font-size: 12px; }
-#machine-status.error { color: #ff9f9f; }
-#build-errors { min-height: 0; max-height: 110px; overflow: auto; margin: 0; padding: 0 12px 8px 34px; color: #ffb2b2; font: 12px/1.45 ui-monospace, monospace; }
-.disassembly-panel { max-height: 190px; overflow: auto; margin: 0; padding: 8px 12px 12px; border-top: 1px solid #293d4a; color: #a9c0ce; background: #0a1116; }
-.disassembly-panel h3 { margin: 0 0 6px; color: #95bad0; font-size: 12px; }
-.disassembly-panel .debugger-disasm-list { border-color: #293d4a; }
-.screen-shell { margin: 12px; display: flex; justify-content: center; border: 1px solid #23313a; background: #030405; }
+.cm-debug-current { background: var(--vsc-stack-frame); box-shadow: inset 3px 0 0 var(--vsc-debugging); }
+.debug-panel { margin: 0 12px 12px; padding: 9px 10px; border: 1px solid var(--vsc-border); border-radius: 8px; background: var(--vsc-widget-bg); }
+.ide-registers { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
+.ide-register { display: flex; justify-content: space-between; gap: 5px; padding: 3px 6px; border-radius: 4px; background: var(--vsc-input-bg); font: 11px ui-monospace, monospace; }
+.ide-register span { color: var(--vsc-muted); }
+#build-status { min-height: 34px; padding: 8px 12px; border-top: 1px solid var(--vsc-border); color: var(--vsc-muted); background: var(--vsc-ui-bg); font-size: 12px; }
+#build-status.error { color: var(--vsc-editor-error); }
+#machine-status { min-height: 34px; padding: 8px 12px; border-bottom: 1px solid var(--vsc-border); color: var(--vsc-muted); background: var(--vsc-ui-bg); font-size: 12px; }
+#machine-status.error { color: var(--vsc-error); }
+#build-errors { min-height: 0; max-height: 110px; overflow: auto; margin: 0; padding: 0 12px 8px 34px; color: var(--vsc-editor-error); font: 12px/1.45 ui-monospace, monospace; }
+.disassembly-panel { max-height: 190px; overflow: auto; margin: 0; padding: 8px 12px 12px; border-top: 1px solid var(--vsc-border); color: var(--vsc-muted); background: var(--vsc-widget-bg); }
+.disassembly-panel h3 { margin: 0 0 6px; color: var(--vsc-fg); font-size: 12px; }
+.disassembly-panel .debugger-disasm-list { border-color: var(--vsc-border); }
+.screen-shell { margin: 12px; display: flex; justify-content: center; border: 1px solid var(--vsc-border); background: var(--vsc-widget-bg); }
 #screen { display: block; width: min(100%, 640px); height: auto; aspect-ratio: 8 / 5; image-rendering: pixelated; }
-#screen-text { margin: 0 12px 12px; height: 112px; overflow: auto; color: #7e9aaa; background: #0a1116; font: 10px/1.25 ui-monospace, monospace; white-space: pre-wrap; }
-.app-footer { flex: 0 0 auto; padding: 8px 16px; border-top: 1px solid #263846; color: #7890a0; background: rgba(9, 16, 22, .92); font-size: 11px; text-align: center; }
-.app-footer a { color: #91b9d0; text-decoration: none; }
+/* 等倍未満へ縮小されるとドットが潰れて文字が読めないので、そのときだけ補間を効かせる。 */
+#screen.smoothed { image-rendering: auto; }
+#screen-text { margin: 0 12px 12px; height: 112px; overflow: auto; color: var(--vsc-muted); background: var(--vsc-widget-bg); font: 10px/1.25 ui-monospace, monospace; white-space: pre-wrap; }
+.app-footer { flex: 0 0 auto; padding: 8px 16px; border-top: 1px solid var(--vsc-border); color: var(--vsc-muted); background: var(--vsc-ui-bg); font-size: 11px; text-align: center; }
+.app-footer a { color: var(--vsc-link); text-decoration: none; }
 .app-footer a:hover { text-decoration: underline; }
 @media (max-width: 820px) {
   .app-header { min-height: 58px; padding: 8px 10px; }
@@ -79,6 +121,7 @@ body.debugging .cm-content { caret-color: transparent; }
   body.panes-swapped .workspace-grid { grid-template-columns: 1fr; }
   .panel-heading { min-height: 42px; padding: 5px 8px; }
   #editor { height: 285px; min-height: 285px; }
+  .editor-toolbar { padding: 5px 8px; }
   #build-status { min-height: 29px; padding: 5px 8px; }
   #machine-status { min-height: 29px; padding: 5px 8px; }
   #build-errors { max-height: 56px; }

@@ -76,6 +76,13 @@ addressは近傍行へ寄せず`null`を返す。誤った行を示さないこ�
 IndexedDBプロジェクト、ローカルフォルダを開き、新規作成・編集・保存できる。保存APIは
 `ProjectFS`として切り離し、`IndexedDbProjectFS`と`DirectoryProjectFS`を実装する。
 
+操作ボタンはエディタ直下の1本のツールバーへまとめ、通常時のビルド／実行／デバッグ操作と、
+デバッグ開始後の続行／ステップ／再実行／停止操作をモードに応じて入れ替える。9個のアイコンは
+環境依存の記号文字を使わないinline SVGで、意味は同一文言の`title`と`aria-label`で示す。
+
+配色はVS CodeのDark Modernに合わせ、値はvscode.devの実CSS変数から採取した。
+テーマ色は`ide/workbench.css`の`:root`へ`--vsc-*`カスタムプロパティとして集約している。
+
 ### ローカルフォルダ（File System Access）
 
 `ide/index.html`の「フォルダを開く」は`showDirectoryPicker({mode:'readwrite'})`を呼び、選んだフォルダを

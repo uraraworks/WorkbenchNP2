@@ -81,11 +81,22 @@ try {
       .some((link) => new URL(link.href).pathname.endsWith(`/debug${'.'}html`)),
     footerHrefs: [...document.querySelectorAll('footer.app-footer a')].map((link) => link.href),
   }));
+  const theme = await page.evaluate(() => {
+    const rootStyle = getComputedStyle(document.documentElement);
+    return {
+      editorBackground: rootStyle.getPropertyValue('--vsc-editor-bg').trim(),
+      uiBackground: rootStyle.getPropertyValue('--vsc-ui-bg').trim(),
+      debuggingBackground: rootStyle.getPropertyValue('--vsc-debugging').trim(),
+      normalHeaderBackground: getComputedStyle(document.querySelector('.app-header')).backgroundColor,
+    };
+  });
   assert.ok(shell.machineStatus.trim(), 'ready直後の統合状況表示が空です');
   assert.equal(shell.runtimeStatusExists, false, '#runtime-statusが残っています');
   assert.equal(shell.debugStatusExists, false, '#debug-statusが残っています');
   assert.equal(shell.hasDebugPageLink, false, 'ヘッダに削除済みデバッガページへのリンクがあります');
   assert.equal(shell.footerHrefs.length, 7, 'フッタのライセンスリンクが7件ではありません');
+  assert.ok(theme.editorBackground && theme.uiBackground && theme.debuggingBackground,
+    ':rootのVS Codeテーマ変数が定義されていません');
   for (const href of shell.footerHrefs) {
     const response = await fetch(href);
     assert.equal(response.status, 200, `フッタリンクがHTTP 200ではありません: ${href}`);
@@ -96,6 +107,36 @@ try {
   assert.deepEqual(await page.evaluate(() => window.pc98workbench.getState()), {
     currentPath: 'samples/hello.asm', currentOrigin: 'sample', dirty: false, errors: [], built: null,
   });
+  const toolButtonIds = [
+    'build', 'run', 'debug', 'debug-continue', 'debug-step-over', 'debug-step-into',
+    'debug-step-instruction', 'debug-restart', 'debug-stop',
+  ];
+  const readToolbar = () => page.$$eval('.editor-toolbar button', (buttons) => buttons.map((button) => {
+    const svg = button.querySelector('svg');
+    return {
+      id: button.id, disabled: button.disabled, title: button.title,
+      ariaLabel: button.getAttribute('aria-label'), insideToolbar: Boolean(button.closest('.editor-toolbar')),
+      hasSvg: Boolean(svg), svgWidth: svg?.getBoundingClientRect().width ?? 0,
+      text: button.textContent.trim(),
+    };
+  }));
+  const normalToolbar = await readToolbar();
+  const normalToolbarMode = await page.evaluate(() => ({
+    mode: window.pc98workbench.getToolbarMode(),
+    buildHidden: document.querySelector('#build-actions').hidden,
+    debugHidden: document.querySelector('#debug-actions').hidden,
+    buildWidth: document.querySelector('#build-actions').getBoundingClientRect().width,
+  }));
+  assert.deepEqual(normalToolbar.map((button) => button.id), toolButtonIds, 'ツールバーの9ボタン構成が不一致です');
+  assert.ok(normalToolbar.every((button) => button.title && button.ariaLabel), 'ツールバーに説明の無いアイコンがあります');
+  assert.ok(normalToolbar.every((button) => button.title === button.ariaLabel), 'titleとaria-labelの説明が一致しません');
+  assert.ok(normalToolbar.every((button) => button.insideToolbar && button.hasSvg && button.text === ''),
+    'SVGだけを本文に持つツールバーボタンではありません');
+  assert.deepEqual({
+    mode: normalToolbarMode.mode, buildHidden: normalToolbarMode.buildHidden,
+    debugHidden: normalToolbarMode.debugHidden,
+  }, { mode: 'build', buildHidden: false, debugHidden: true });
+  assert.ok(normalToolbarMode.buildWidth > 0, '通常モードのビルド操作が可視ではありません');
 
   const output = 'Workbench edit!';
   await page.evaluate((text) => {
@@ -247,6 +288,7 @@ try {
       hit: { line: hit.line, eip: hit.registers.eip, cs: hit.registers.cs },
       atBreakpoint: { state: wb.getDebugState(), marks: wb.getEditorMarks() },
       cpuPaused: wb.isCpuPaused(), statusBefore, statusAfter,
+      headerBackground: getComputedStyle(document.querySelector('.app-header')).backgroundColor,
     };
   });
   assert.equal(asmDebug.control.kind, 0, 'ASM対象がCOMとして通知されていません');
@@ -270,6 +312,8 @@ try {
   assert.ok(asmDebug.atBreakpoint.marks.disassemblyRows > 0, '逆アセンブル行が描画されていません');
   assert.equal(asmDebug.cpuPaused, true, 'BP停止中なのにCPUが動いています');
   assert.notEqual(asmDebug.statusAfter, asmDebug.statusBefore, 'デバッグ開始後に統合状況表示が変化しません');
+  assert.notEqual(asmDebug.headerBackground, theme.normalHeaderBackground,
+    'デバッグ開始後もヘッダの背景色が通常時と同じです');
 
   const lockedSource = await page.evaluate(() => ({
     source: window.pc98workbench.getValue(), screen: window.pc98workbench.getScreenText().text,
@@ -292,17 +336,26 @@ try {
   assert.equal(lockedEditor.lockVisible, true);
   assert.equal(lockedEditor.debugging, true);
 
-  const toolbar = await page.$$eval('.debug-actions button', (buttons) => buttons.map((button) => ({
-    id: button.id, disabled: button.disabled, title: button.title,
-    ariaLabel: button.getAttribute('aria-label'),
-  })));
-  assert.deepEqual(toolbar.map((button) => button.id), [
-    'debug-continue', 'debug-step-over', 'debug-step-into',
-    'debug-step-instruction', 'debug-restart', 'debug-stop',
-  ], 'デバッグツールバーの構成が期待と不一致です');
-  assert.ok(toolbar.every((button) => !button.disabled), 'デバッグ中に無効なツールバーボタンがあります');
-  assert.ok(toolbar.every((button) => button.title && button.ariaLabel), 'ツールバーに説明の無いアイコンがあります');
-  assert.ok(toolbar.every((button) => button.title === button.ariaLabel), 'titleとaria-labelの説明が一致しません');
+  const debugToolbar = await readToolbar();
+  const debugToolbarMode = await page.evaluate(() => ({
+    mode: window.pc98workbench.getToolbarMode(),
+    buildHidden: document.querySelector('#build-actions').hidden,
+    debugHidden: document.querySelector('#debug-actions').hidden,
+    debugWidth: document.querySelector('#debug-actions').getBoundingClientRect().width,
+    debugPanelVisible: !document.querySelector('#debug-panel').hidden,
+  }));
+  assert.deepEqual(debugToolbar.map((button) => button.id), toolButtonIds, 'デバッグ中にツールバー構成が変わりました');
+  assert.ok(debugToolbar.slice(3).every((button) => !button.disabled), 'デバッグ中に無効なデバッグ操作があります');
+  assert.deepEqual({
+    mode: debugToolbarMode.mode, buildHidden: debugToolbarMode.buildHidden,
+    debugHidden: debugToolbarMode.debugHidden, debugPanelVisible: debugToolbarMode.debugPanelVisible,
+  }, { mode: 'debug', buildHidden: true, debugHidden: false, debugPanelVisible: true });
+  assert.ok(debugToolbarMode.debugWidth > 0, 'デバッグモードのデバッグ操作が可視ではありません');
+  for (const id of toolButtonIds) {
+    const normal = normalToolbar.find((button) => button.id === id);
+    const debugging = debugToolbar.find((button) => button.id === id);
+    assert.ok(Math.max(normal.svgWidth, debugging.svgWidth) > 0, `${id}のSVGが描画されていません`);
+  }
 
   const swapButton = await page.$eval('#swap-panes', (button) => ({
     title: button.title, ariaLabel: button.getAttribute('aria-label'),
@@ -374,6 +427,11 @@ try {
   const asmResume = await page.evaluate(() => window.pc98workbench.stopDebug());
   assertRun(asmResume, output);
   assert.throws(() => assertRun(asmResume, 'Workbench typo!'));
+  assert.deepEqual(await page.evaluate(() => ({
+    mode: window.pc98workbench.getToolbarMode(),
+    buildHidden: document.querySelector('#build-actions').hidden,
+    debugHidden: document.querySelector('#debug-actions').hidden,
+  })), { mode: 'build', buildHidden: false, debugHidden: true }, 'デバッグ停止後に通常ツールバーへ戻りません');
   // 通常実行へ戻したら停止行強調とレジスタは消す。BPは利用者の意図なので次のデバッグまで残す。
   assert.deepEqual(await page.evaluate(() => window.pc98workbench.getEditorMarks()),
     {
@@ -464,6 +522,14 @@ try {
   const desktopLayout = await page.evaluate(() => window.pc98workbench.getLayout());
   assert.equal(desktopLayout.contentEditable, true, 'CodeMirrorがcontentEditableではありません');
   assert.ok(desktopLayout.editor.width > 500 && desktopLayout.screen.width > 500, 'デスクトップのエディタ/画面幅が不足しています');
+  const desktopScaling = await page.evaluate(() => ({
+    ...window.pc98workbench.getScreenScaling(),
+    rendering: getComputedStyle(document.querySelector('#screen')).imageRendering,
+  }));
+  assert.ok(desktopScaling.scale >= 1, `デスクトップで等倍以上になっていません: ${desktopScaling.scale}`);
+  assert.equal(desktopScaling.smoothed, false, '等倍以上なのに補間が有効です');
+  assert.equal(desktopScaling.rendering, 'pixelated', '等倍以上でドット感が失われています');
+
   await page.setViewport({ width: 375, height: 812, deviceScaleFactor: 1 });
   await page.evaluate(() => new Promise((resolveWait) => requestAnimationFrame(() => requestAnimationFrame(resolveWait))));
   const mobile = await page.evaluate(() => ({ ...window.pc98workbench.getLayout(), viewport: { width: innerWidth, height: innerHeight } }));
@@ -476,7 +542,16 @@ try {
   const mobileBar = await fileBar();
   assert.ok(mobileBar.overflow <= 1, `モバイルのファイルバーがはみ出しています: ${mobileBar.overflow}px`);
   assert.equal(mobileBar.folderOpen, true, 'モバイルでフォルダを開くボタンが表示されていません');
+  // 等倍未満の縮小では補間、等倍以上ではドット感を残す（実測値で確認する）。
+  const mobileScaling = await page.evaluate(() => ({
+    ...window.pc98workbench.getScreenScaling(),
+    rendering: getComputedStyle(document.querySelector('#screen')).imageRendering,
+  }));
+  assert.ok(mobileScaling.scale < 1, `モバイルで等倍未満になっていません: ${mobileScaling.scale}`);
+  assert.equal(mobileScaling.smoothed, true, '等倍未満なのに補間が有効になっていません');
+  assert.notEqual(mobileScaling.rendering, 'pixelated', '縮小時にimage-renderingがpixelatedのままです');
   await page.screenshot({ path: MOBILE_SHOT });
+  console.log(`[PASS] screen scaling: desktop x${desktopScaling.scale.toFixed(2)} pixelated / mobile x${mobileScaling.scale.toFixed(2)} ${mobileScaling.rendering}`);
 
   console.log(`[PASS] file/edit/IndexedDB/build/run: ${output}`);
   console.log('[PASS] machine status/prewarm: one status line, asynchronous boot completed, build/debug transitions');
@@ -487,7 +562,8 @@ try {
   console.log('[PASS] .c auto build: HELLO-C.EXE');
   console.log('[PASS] structured error: line=4, list=true, gutter=true, wrong-line fault detected');
   console.log(`[PASS] ASM debug in editor: entry=8 next=9 bp=11 cs=${asmDebug.control.cs.toString(16).toUpperCase()} dots=1, non-mapped line rejected`);
-  console.log('[PASS] debugger toolbar: 6 accessible icon controls, step-into/instruction, F10/F11 shortcuts, continue without BP');
+  console.log('[PASS] editor toolbar: 9 inline-SVG controls, accessible labels, build/debug mode swap and restore');
+  console.log('[PASS] VS Code Dark Modern theme: --vsc-* variables and debugging header transition');
   console.log('[PASS] workbench disassembly: rows visible while debugging and hidden after stop');
   console.log('[PASS] editor lock: real typing blocked while debugging and accepted after stop');
   console.log('[PASS] pane swap: desktop order reversed/restored and localStorage persisted');

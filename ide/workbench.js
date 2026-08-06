@@ -27,6 +27,7 @@ const nodes = {
   folderOpen: document.querySelector('#folder-open'), folderDisconnect: document.querySelector('#folder-disconnect'),
   swapPanes: document.querySelector('#swap-panes'), folderState: document.querySelector('#folder-state'),
   editor: document.querySelector('#editor'), build: document.querySelector('#build'), run: document.querySelector('#run'),
+  buildActions: document.querySelector('#build-actions'), debugActions: document.querySelector('#debug-actions'),
   buildStatus: document.querySelector('#build-status'), errors: document.querySelector('#build-errors'),
   disassemblyPanel: document.querySelector('#disassembly-panel'), disassembly: document.querySelector('#disassembly'),
   machineStatus: document.querySelector('#machine-status'), screenText: document.querySelector('#screen-text'),
@@ -96,6 +97,27 @@ function setSaveState(value) {
   nodes.saveState.textContent = value ? '未保存の変更あり' : '保存済み';
   nodes.saveState.classList.toggle('dirty', value);
 }
+
+/**
+ * 等倍以上ではドット感を残し、等倍未満へ縮小されるときだけ補間を効かせる。
+ * 潰れたドットは文字が読めなくなるため。ゲストが解像度を切り替えるとcanvasの
+ * width/height属性自体が変わり、これはResizeObserverでは拾えないのでMutationObserverも要る。
+ */
+const screenCanvas = document.querySelector('#screen');
+function syncScreenScaling() {
+  const intrinsic = screenCanvas.width || 640;
+  const rendered = screenCanvas.getBoundingClientRect().width;
+  const ratio = `${screenCanvas.width} / ${screenCanvas.height}`;
+  // 監視対象の寸法を毎回書き戻すとResizeObserverが回り続けるので、変化したときだけ触る。
+  if (screenCanvas.style.aspectRatio !== ratio) screenCanvas.style.aspectRatio = ratio;
+  const smoothed = rendered > 0 && rendered < intrinsic;
+  screenCanvas.classList.toggle('smoothed', smoothed);
+  return { intrinsic, rendered, scale: rendered / intrinsic, smoothed };
+}
+new ResizeObserver(syncScreenScaling).observe(screenCanvas);
+new MutationObserver(syncScreenScaling).observe(screenCanvas, {
+  attributes: true, attributeFilter: ['width', 'height'],
+});
 
 function currentText() { return editor.state.doc.toString(); }
 function extensionFor(path) { return path?.match(/\.([^.]+)$/)?.[1].toLowerCase(); }
@@ -459,6 +481,8 @@ function setEditorReadOnly(value) {
 }
 
 function setDebugControls(active) {
+  nodes.buildActions.hidden = active;
+  nodes.debugActions.hidden = !active;
   nodes.debugPanel.hidden = !active;
   nodes.disassemblyPanel.hidden = !active;
   nodes.editLock.hidden = !active;
@@ -781,6 +805,7 @@ window.pc98workbench = {
   startDebug, stopDebug, toggleBreakpoint, stepInstruction, stepOverLine, stepInto,
   continueToBreakpoint, continueOrRun, setPanesSwapped, getPanesSwapped,
   getLastShortcut: () => lastShortcut,
+  getScreenScaling: syncScreenScaling,
   getGuardedKeyboardTargets: () => [...GUARDED_KEYBOARD_TARGETS],
   getDebugState: () => ({
     started: Boolean(session?.isStarted()), paused: Boolean(session?.isPaused()),
@@ -790,6 +815,7 @@ window.pc98workbench = {
   }),
   getRegisters: () => (session?.isStarted() ? session.registers() : undefined),
   getMachineStatus: () => nodes.machineStatus.textContent,
+  getToolbarMode: () => (nodes.debugActions.hidden ? 'build' : 'debug'),
   setFdSwapDelay,
   getFdSwapDelay: () => FD_SWAP_MS,
   getDriveErrorRetries: () => driveErrorRetries,
