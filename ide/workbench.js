@@ -20,11 +20,12 @@ import { IndexedDbProjectFS } from './project-fs.mjs';
 import { SAMPLE_FILES, loadSample } from './sample-manifest.mjs';
 
 const nodes = {
-  fileSelect: document.querySelector('#file-select'), newPath: document.querySelector('#new-path'),
+  fileTree: document.querySelector('#file-tree'), newPath: document.querySelector('#new-path'),
   newFile: document.querySelector('#new-file'), save: document.querySelector('#save-file'),
   saveState: document.querySelector('#save-state'), currentPath: document.querySelector('#current-path'),
   editLock: document.querySelector('#edit-lock'),
   tabStrip: document.querySelector('#tab-strip'),
+  sidebar: document.querySelector('#sidebar'), toggleSidebar: document.querySelector('#toggle-sidebar'),
   folderOpen: document.querySelector('#folder-open'), folderDisconnect: document.querySelector('#folder-disconnect'),
   swapPanes: document.querySelector('#swap-panes'), folderState: document.querySelector('#folder-state'),
   editorCard: document.querySelector('.editor-card'), machineCard: document.querySelector('.machine-card'),
@@ -73,13 +74,16 @@ let directoryFS;
 let directoryListing;
 let panesSwapped = false;
 let maximizedPane = null;
+let sidebarVisible = false;
+let sidebarPreference = null;
 let lastShortcut = null;
 const PANES_SWAPPED_KEY = 'pc98dev:panes-swapped';
+const SIDEBAR_KEY = 'pc98dev:sidebar';
 const DEBUG_SECTION_KEYS = [
   [nodes.sectionRegisters, 'pc98dev:section:registers'],
   [nodes.sectionBreakpoints, 'pc98dev:section:breakpoints'],
 ];
-const GUARDED_KEYBOARD_TARGETS = ['.file-bar', '.editor-card', '.debug-panel'];
+const GUARDED_KEYBOARD_TARGETS = ['.sidebar', '.editor-card', '.debug-panel'];
 
 for (const [section, key] of DEBUG_SECTION_KEYS) {
   try {
@@ -109,6 +113,31 @@ function setPanesSwapped(value) {
 }
 
 function getPanesSwapped() { return panesSwapped; }
+
+function loadSidebarPreference() {
+  try {
+    const stored = localStorage.getItem(SIDEBAR_KEY);
+    return stored === null ? null : stored === '1';
+  } catch { return null; }
+}
+
+function setSidebarVisible(value, { persist = true } = {}) {
+  sidebarVisible = Boolean(value);
+  document.body.classList.toggle('sidebar-hidden', !sidebarVisible);
+  nodes.toggleSidebar.setAttribute('aria-pressed', String(sidebarVisible));
+  if (persist) {
+    sidebarPreference = sidebarVisible;
+    try { localStorage.setItem(SIDEBAR_KEY, sidebarVisible ? '1' : '0'); } catch {}
+  }
+  return sidebarVisible;
+}
+
+function getSidebarVisible() { return sidebarVisible; }
+
+const sidebarMedia = window.matchMedia('(max-width: 820px)');
+sidebarMedia.addEventListener?.('change', (event) => {
+  if (sidebarPreference === null) setSidebarVisible(!event.matches, { persist: false });
+});
 
 function setMaximizedPane(pane) {
   if (pane !== 'editor' && pane !== 'machine' && pane !== null) {
@@ -345,6 +374,7 @@ function renderTabs() {
     item.append(button, close);
     return item;
   }));
+  syncFileTreeState();
 }
 
 function stashActiveTab() {
@@ -354,12 +384,16 @@ function stashActiveTab() {
   tab.cursor = editor.state.selection.main.head;
 }
 
-function syncFileSelectValue() {
+function syncFileTreeState() {
   const tab = activeTab();
-  if (!tab) return;
-  const selected = `${tab.origin}:${tab.path}`;
-  if ([...nodes.fileSelect.options].some((option) => option.value === selected)) {
-    nodes.fileSelect.value = selected;
+  for (const entry of nodes.fileTree.querySelectorAll('.file-entry')) {
+    const active = Boolean(tab && entry.dataset.origin === tab.origin && entry.dataset.path === tab.path);
+    const open = tabs.some((candidate) => (
+      candidate.origin === entry.dataset.origin && candidate.path === entry.dataset.path
+    ));
+    entry.classList.toggle('active', active);
+    entry.classList.toggle('open', open);
+    entry.setAttribute('aria-selected', String(active));
   }
 }
 
@@ -397,7 +431,7 @@ function activateTab(id) {
     ? session.currentLine() : null;
   syncDebugMarks(debugLine);
   setCurrentPathLabel();
-  syncFileSelectValue();
+  syncFileTreeState();
   renderBuildState();
   renderBreakpointList();
   setDebugControls(Boolean(session?.isStarted()));
@@ -538,12 +572,29 @@ const ORIGIN_LABELS = { sample: 'サンプル', project: 'IndexedDB', directory:
 function writableOrigin() { return directoryFS ? 'directory' : 'project'; }
 function backendFor(origin) { return origin === 'directory' ? directoryFS : projectFS; }
 
-async function refreshFileSelect(selected = activeTab() ? `${activeTab().origin}:${activeTab().path}` : undefined) {
+async function refreshFileTree() {
   const makeGroup = (label, files, origin) => {
-    const group = document.createElement('optgroup'); group.label = label;
+    if (files.length === 0) return null;
+    const group = document.createElement('div');
+    group.className = 'file-group';
+    group.setAttribute('role', 'group');
+    const heading = document.createElement('div');
+    heading.className = 'file-group-heading';
+    heading.textContent = label;
+    group.append(heading);
     for (const file of files) {
-      const option = document.createElement('option'); option.value = `${origin}:${file.path}`;
-      option.textContent = file.path; group.append(option);
+      const entry = document.createElement('button');
+      entry.type = 'button';
+      entry.className = 'file-entry';
+      entry.setAttribute('role', 'treeitem');
+      entry.dataset.origin = origin;
+      entry.dataset.path = file.path;
+      entry.title = `${ORIGIN_LABELS[origin]} / ${file.path}`;
+      entry.textContent = file.path;
+      entry.addEventListener('click', () => {
+        openFile(origin, file.path).catch((error) => setMachineStatus(error.message, true));
+      });
+      group.append(entry);
     }
     return group;
   };
@@ -551,13 +602,15 @@ async function refreshFileSelect(selected = activeTab() ? `${activeTab().origin}
   if (directoryFS) {
     const listing = await directoryFS.listDetailed();
     directoryListing = listing;
-    const suffix = listing.truncated ? `（先頭${listing.files.length}件のみ）` : '';
-    groups.push(makeGroup(`フォルダ ${directoryFS.name}${suffix}`, listing.files, 'directory'));
+    const notes = [`${listing.files.length}件`];
+    if (listing.skipped > 0) notes.push(`対象外${listing.skipped}件`);
+    if (listing.truncated) notes.push('上限で打切り');
+    groups.push(makeGroup(`フォルダ ${directoryFS.name}（${notes.join(' / ')}）`, listing.files, 'directory'));
   }
   groups.push(makeGroup('IndexedDB プロジェクト', await projectFS.list(), 'project'));
   groups.push(makeGroup('同梱サンプル', SAMPLE_FILES, 'sample'));
-  nodes.fileSelect.replaceChildren(...groups);
-  if ([...nodes.fileSelect.options].some((option) => option.value === selected)) nodes.fileSelect.value = selected;
+  nodes.fileTree.replaceChildren(...groups.filter(Boolean));
+  syncFileTreeState();
 }
 
 async function openFile(origin, path) {
@@ -586,7 +639,7 @@ async function openFile(origin, path) {
   };
   tabs.push(tab);
   activateTab(tab.id);
-  await refreshFileSelect(`${origin}:${path}`);
+  await refreshFileTree();
 }
 
 function setCurrentPathLabel() {
@@ -610,9 +663,9 @@ async function saveFile() {
   if (activeTabId === tab.id) {
     updateSaveState();
     setCurrentPathLabel();
-    await refreshFileSelect(`${target}:${tab.path}`);
+    await refreshFileTree();
   } else {
-    await refreshFileSelect();
+    await refreshFileTree();
   }
 }
 
@@ -991,7 +1044,6 @@ async function stopDebug() {
 function setDirectoryLabel(message) {
   nodes.folderState.textContent = message;
   nodes.folderDisconnect.hidden = !directoryFS;
-  nodes.folderOpen.textContent = directoryFS ? '別のフォルダ' : 'フォルダを開く';
 }
 
 /**
@@ -1010,7 +1062,7 @@ async function connectDirectory(handle, { persist = true } = {}) {
   if (listing.skipped > 0) notes.push(`対象外${listing.skipped}件`);
   if (listing.truncated) notes.push('上限で打切り');
   setDirectoryLabel(`${directoryFS.name}（${notes.join(' / ')}）`);
-  await refreshFileSelect();
+  await refreshFileTree();
   return { name: directoryFS.name, permission, ...listing };
 }
 
@@ -1021,7 +1073,7 @@ async function disconnectDirectory() {
   setDirectoryLabel('フォルダ未接続');
   // 開いていたのがフォルダのファイルなら、参照先を失うので同梱サンプルへ戻す。
   if (activeTab()?.origin === 'directory') await openFile('sample', 'samples/hello.asm');
-  else await refreshFileSelect();
+  else await refreshFileTree();
 }
 
 /** 再読込後のハンドルは許可が prompt へ落ちることがあり、再許可には利用者ジェスチャが要る。 */
@@ -1035,7 +1087,6 @@ async function restoreDirectory() {
     return;
   }
   setDirectoryLabel(`${handle.name}（再接続には許可が必要）`);
-  nodes.folderOpen.textContent = 'フォルダを再接続';
   nodes.folderOpen.dataset.restoreHandle = 'true';
 }
 
@@ -1046,6 +1097,8 @@ async function openFolder() {
 }
 
 async function initialize() {
+  sidebarPreference = loadSidebarPreference();
+  setSidebarVisible(sidebarPreference ?? !sidebarMedia.matches, { persist: false });
   setPanesSwapped(loadPanesSwapped());
   await projectFS.open();
   const response = await fetch('./freedos/fd98_2hd.xdf');
@@ -1055,20 +1108,16 @@ async function initialize() {
   startPrewarm();
   // フォルダ復元に失敗しても、同梱サンプルだけで動く状態までは必ず立ち上げる。
   await restoreDirectory().catch((error) => setDirectoryLabel(`フォルダ復元に失敗: ${error.message}`));
-  await refreshFileSelect();
+  await refreshFileTree();
   await openFile('sample', 'samples/hello.asm');
   nodes.buildStatus.textContent = '準備完了';
 }
 
-nodes.fileSelect.addEventListener('change', () => {
-  const separator = nodes.fileSelect.value.indexOf(':');
-  openFile(nodes.fileSelect.value.slice(0, separator), nodes.fileSelect.value.slice(separator + 1))
-    .catch((error) => { nodes.buildStatus.textContent = error.message; nodes.buildStatus.classList.add('error'); });
-});
 nodes.newFile.addEventListener('click', () => createFile(nodes.newPath.value).catch((error) => showErrors([{ stage: 'input', line: 0, message: error.message }])));
 nodes.save.addEventListener('click', () => saveFile().catch((error) => showErrors([{ stage: 'save', line: 0, message: error.message }])));
 nodes.folderOpen.addEventListener('click', () => openFolder().catch((error) => setDirectoryLabel(error.message)));
 nodes.folderDisconnect.addEventListener('click', () => disconnectDirectory().catch((error) => setDirectoryLabel(error.message)));
+nodes.toggleSidebar.addEventListener('click', () => setSidebarVisible(!sidebarVisible));
 nodes.swapPanes.addEventListener('click', () => setPanesSwapped(!panesSwapped));
 nodes.maximizeEditor.addEventListener('click', () => setMaximizedPane(maximizedPane === 'editor' ? null : 'editor'));
 nodes.maximizeMachine.addEventListener('click', () => setMaximizedPane(maximizedPane === 'machine' ? null : 'machine'));
@@ -1129,6 +1178,7 @@ window.pc98workbench = {
   startDebug, stopDebug, toggleBreakpoint, stepInstruction, stepOverLine, stepInto,
   continueToBreakpoint, continueOrRun, setPanesSwapped, getPanesSwapped,
   setMaximizedPane, getMaximizedPane,
+  setSidebarVisible, getSidebarVisible,
   getLastShortcut: () => lastShortcut,
   getScreenScaling: syncScreenScaling,
   getGuardedKeyboardTargets: () => [...GUARDED_KEYBOARD_TARGETS],

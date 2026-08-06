@@ -7,27 +7,46 @@
   <link rel="stylesheet" href="./vendor/webnp2/style.css">
   <link rel="stylesheet" href="./workbench.css">
 </head>
-<body>
+<body class="sidebar-hidden">
   <header class="app-header">
     <div class="app-title-row"><h1>PC98Dev</h1></div>
     <p class="app-tagline">ブラウザだけで書いて、ビルドして、PC-98で動かす。</p>
+    <button id="toggle-sidebar" aria-pressed="false" title="エクスプローラーの表示を切り替える" aria-label="エクスプローラーの表示を切り替える">
+      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"><rect x="4" y="5" width="16" height="14" rx="1"/><path d="M9 5v14"/></svg>
+    </button>
   </header>
-  <nav class="file-bar" aria-label="ファイル操作">
-    <label>ファイル<select id="file-select" aria-label="ファイルを開く"></select></label>
-    <input id="new-path" aria-label="新規ファイル名" placeholder="project/main.asm">
-    <button id="new-file">新規</button><button id="save-file">保存</button>
-    <button id="folder-open">フォルダを開く</button><button id="folder-disconnect" hidden>切断</button>
-    <button id="swap-panes" title="エディタとPC-98画面の配置を入れ替える" aria-label="エディタとPC-98画面の配置を入れ替える" aria-pressed="false">⇄</button>
-    <span id="folder-state">フォルダ未接続</span>
-    <span id="save-state">未保存の変更なし</span>
-  </nav>
   <main class="workspace-grid">
+    <aside class="sidebar" id="sidebar" aria-label="エクスプローラー">
+      <div class="sidebar-heading">エクスプローラー</div>
+      <div class="sidebar-actions">
+        <input id="new-path" aria-label="新規ファイル名" placeholder="project/main.asm">
+        <button id="new-file" title="新規ファイル" aria-label="新規ファイル">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"><path d="M6 3h8l4 4v14H6zM14 3v5h5M12 11v6M9 14h6"/></svg>
+        </button>
+        <button id="save-file" title="保存" aria-label="保存">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"><path d="M5 4h12l2 2v14H5zM8 4v6h8V4M8 20v-6h8v6"/></svg>
+        </button>
+        <button id="folder-open" title="フォルダを開く" aria-label="フォルダを開く">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"><path d="M3 7h7l2 2h9l-2 10H5zM3 7v12h2"/></svg>
+        </button>
+        <button id="folder-disconnect" title="フォルダを切断" aria-label="フォルダを切断" hidden>
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"><path d="M3 7h7l2 2h9l-2 10H5zM4 4l16 16"/></svg>
+        </button>
+      </div>
+      <div id="folder-state">フォルダ未接続</div>
+      <div id="file-tree" role="tree" aria-label="ファイル"></div>
+    </aside>
     <section class="editor-card" aria-labelledby="editor-heading">
       <div class="panel-heading">
-        <div><h2 id="editor-heading">エディタ</h2><span id="current-path"></span><span id="edit-lock" class="edit-lock" hidden>デバッグ中は編集できません</span></div>
-        <button class="pane-maximize" id="maximize-editor" aria-pressed="false" title="エディタを最大化" aria-label="エディタを最大化">
-          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"><rect x="5" y="5" width="14" height="14" rx="1"/><path d="M9 5H5v4M15 19h4v-4M5 9l5-5M19 15l-5 5"/></svg>
-        </button>
+        <div><h2 id="editor-heading">エディタ</h2><span id="edit-lock" class="edit-lock" hidden>デバッグ中は編集できません</span></div>
+        <div class="panel-actions">
+          <button id="swap-panes" title="エディタとPC-98画面の配置を入れ替える" aria-label="エディタとPC-98画面の配置を入れ替える" aria-pressed="false">
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"><path d="M4 8h14m-4-4 4 4-4 4M20 16H6m4-4-4 4 4 4"/></svg>
+          </button>
+          <button class="pane-maximize" id="maximize-editor" aria-pressed="false" title="エディタを最大化" aria-label="エディタを最大化">
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"><rect x="5" y="5" width="14" height="14" rx="1"/><path d="M9 5H5v4M15 19h4v-4M5 9l5-5M19 15l-5 5"/></svg>
+          </button>
+        </div>
       </div>
       <div class="tab-strip" id="tab-strip" role="tablist" aria-label="開いているファイル"></div>
       <div id="editor" aria-label="ソースエディタ"></div>
@@ -94,13 +113,16 @@
     </section>
   </main>
   <footer class="app-footer">
-    <a href="https://www.urara-works.jp/" target="_blank" rel="noopener">© URARA-works</a> /
-    <a href="./core/LICENSE.NP2kai">NP2kai (GPLv2+)</a> /
-    <a href="./vendor/webnp2/LICENSE.WebNP2">WebNP2</a> /
-    <a href="./freedos/README.txt">FreeDOS(98)</a> /
-    <a href="./vendor/codemirror/LICENSE.CodeMirror">CodeMirror (MIT)</a> /
-    <a href="../toolchain/nasm-src/LICENSE">NASM (BSD-2)</a> /
-    <a href="../toolchain/smlrc-wasm/LICENSE.SmallerC">SmallerC (BSD-2)</a>
+    <div class="status-left"><span id="save-state">未保存の変更なし</span><span id="current-path"></span></div>
+    <div class="status-links">
+      <a href="https://www.urara-works.jp/" target="_blank" rel="noopener">© URARA-works</a> ･
+      <a href="./core/LICENSE.NP2kai">NP2kai (GPLv2+)</a> ･
+      <a href="./vendor/webnp2/LICENSE.WebNP2">WebNP2</a> ･
+      <a href="./freedos/README.txt">FreeDOS(98)</a> ･
+      <a href="./vendor/codemirror/LICENSE.CodeMirror">CodeMirror (MIT)</a> ･
+      <a href="../toolchain/nasm-src/LICENSE">NASM (BSD-2)</a> ･
+      <a href="../toolchain/smlrc-wasm/LICENSE.SmallerC">SmallerC (BSD-2)</a>
+    </div>
   </footer>
   <script src="../toolchain/nasm-wasm/nasm.js"></script>
   <script src="../toolchain/smlrc-wasm/smlrpp.js"></script>

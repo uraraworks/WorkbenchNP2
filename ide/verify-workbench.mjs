@@ -100,8 +100,8 @@ try {
   assert.ok(theme.editorBackground && theme.uiBackground && theme.debuggingBackground,
     ':rootのVS Codeテーマ変数が定義されていません');
   assert.equal(theme.normalHeaderBackground, 'rgb(12, 12, 12)', 'ヘッダ背景がWebNP2実測値ではありません');
-  assert.equal(theme.footerBackground, 'rgb(236, 236, 236)', 'フッタ背景がWebNP2実測値ではありません');
-  assert.equal(theme.bodyBackground, 'rgb(250, 250, 250)', 'ページ背景がWebNP2実測値ではありません');
+  assert.equal(theme.footerBackground, 'rgb(24, 24, 24)', 'ステータスバー背景がVS Code配色ではありません');
+  assert.equal(theme.bodyBackground, 'rgb(31, 31, 31)', 'ページ背景がVS Codeエディタ背景ではありません');
   for (const href of shell.footerHrefs) {
     const response = await fetch(href);
     assert.equal(response.status, 200, `フッタリンクがHTTP 200ではありません: ${href}`);
@@ -119,6 +119,48 @@ try {
   assert.equal(initialTabs.tabs.length, 1, '初期タブが1枚ではありません');
   assert.equal(initialTabs.tabs[0].active, true, '初期タブがアクティブではありません');
   assert.equal(initialTabs.rendered, 1, '初期タブがタブ列へ1枚描画されていません');
+  const initialTabId = initialTabs.tabs[0].id;
+  const sidebarVisibility = await page.evaluate(() => {
+    const wb = window.pc98workbench;
+    const measure = () => ({
+      visible: wb.getSidebarVisible(),
+      hidden: document.querySelector('#sidebar').offsetParent === null,
+      pressed: document.querySelector('#toggle-sidebar').getAttribute('aria-pressed'),
+    });
+    const initial = measure();
+    wb.setSidebarVisible(false);
+    const hidden = measure();
+    wb.setSidebarVisible(true);
+    const restored = measure();
+    return { initial, hidden, restored };
+  });
+  assert.deepEqual(sidebarVisibility.initial, { visible: true, hidden: false, pressed: 'true' });
+  assert.deepEqual(sidebarVisibility.hidden, { visible: false, hidden: true, pressed: 'false' });
+  assert.deepEqual(sidebarVisibility.restored, { visible: true, hidden: false, pressed: 'true' });
+
+  const initialTree = await page.evaluate(() => ({
+    groups: [...document.querySelectorAll('#file-tree .file-group-heading')].map((node) => node.textContent),
+    samples: document.querySelectorAll('#file-tree .file-entry[data-origin="sample"]').length,
+  }));
+  assert.deepEqual(initialTree.groups, ['同梱サンプル'], '空のファイルグループが表示されています');
+  assert.ok(initialTree.samples > 1, '同梱サンプルがファイルツリーへ出ていません');
+  await page.click('#file-tree .file-entry[data-origin="sample"][data-path="samples/second-run.asm"]');
+  await page.waitForFunction(() => window.pc98workbench.getState().currentPath === 'samples/second-run.asm');
+  const selectedTreeEntry = await page.evaluate(() => ({
+    tabs: window.pc98workbench.getTabs(),
+    selectedPath: document.querySelector('#file-tree .file-entry[aria-selected="true"]')?.dataset.path,
+  }));
+  assert.equal(selectedTreeEntry.tabs.length, 2, 'ファイルツリーのクリックでタブが開きません');
+  assert.equal(selectedTreeEntry.selectedPath, 'samples/second-run.asm', '開いたファイルがツリーで選択されません');
+  const switchedTreeEntry = await page.evaluate((id) => {
+    window.pc98workbench.activateTab(id);
+    return document.querySelector('#file-tree .file-entry[aria-selected="true"]')?.dataset.path;
+  }, initialTabId);
+  assert.equal(switchedTreeEntry, 'samples/hello.asm', 'タブ切替へファイルツリーの選択が追従しません');
+  await page.evaluate(async () => {
+    const extra = window.pc98workbench.getTabs().find((tab) => tab.path === 'samples/second-run.asm');
+    await window.pc98workbench.closeTab(extra.id);
+  });
   const toolButtonIds = [
     'build', 'run', 'debug', 'debug-continue', 'debug-step-over', 'debug-step-into',
     'debug-step-instruction', 'debug-restart', 'debug-stop',
@@ -156,11 +198,36 @@ try {
     window.pc98workbench.setValue(source);
   }, output);
   assert.equal((await page.evaluate(() => window.pc98workbench.getState())).dirty, true);
+  assert.deepEqual(await page.evaluate(() => ({
+    inFooter: Boolean(document.querySelector('footer.app-footer #save-state')),
+    dirty: document.querySelector('#save-state').classList.contains('dirty'),
+  })), { inFooter: true, dirty: true }, 'ステータスバーへ未保存状態が反映されません');
   await page.evaluate(() => window.pc98workbench.saveFile());
   const files = await page.evaluate(() => window.pc98workbench.listProjectFiles());
   assert.equal(files.length, 1);
   assert.equal(files[0].path, 'samples/hello.asm');
   assert.ok(files[0].content.includes(output));
+  assert.deepEqual(await page.$$eval('#file-tree .file-group-heading', (nodes) => nodes.map((node) => node.textContent)),
+    ['IndexedDB プロジェクト', '同梱サンプル'], 'フォルダ未接続時のファイルツリーが2グループではありません');
+  const connectedTreeGroups = await page.evaluate(async () => {
+    const root = await navigator.storage.getDirectory();
+    for await (const [name] of root.entries()) await root.removeEntry(name, { recursive: true });
+    const file = await root.getFileHandle('tree.asm', { create: true });
+    const writable = await file.createWritable();
+    await writable.write('CPU 8086\nBITS 16\nORG 100h\nret\n');
+    await writable.close();
+    await window.pc98workbench.connectDirectory(root, { persist: false });
+    const connected = [...document.querySelectorAll('#file-tree .file-group-heading')]
+      .map((node) => node.textContent);
+    await window.pc98workbench.disconnectDirectory();
+    const disconnected = [...document.querySelectorAll('#file-tree .file-group-heading')]
+      .map((node) => node.textContent);
+    return { connected, disconnected };
+  });
+  assert.equal(connectedTreeGroups.connected.length, 3, 'フォルダ接続時のファイルツリーが3グループではありません');
+  assert.ok(connectedTreeGroups.connected[0].startsWith('フォルダ '), 'フォルダグループが先頭にありません');
+  assert.deepEqual(connectedTreeGroups.disconnected,
+    ['IndexedDB プロジェクト', '同梱サンプル'], 'フォルダ切断後のツリーが2グループへ戻りません');
 
   const beforeBuildStatus = await page.evaluate(() => window.pc98workbench.getMachineStatus());
   const firstBuild = await page.evaluate(() => window.pc98workbench.buildCurrent());
@@ -266,6 +333,7 @@ try {
       machineWidth: document.querySelector('.machine-card').getBoundingClientRect().width,
       editorHidden: document.querySelector('.editor-card').offsetParent === null,
       machineHidden: document.querySelector('.machine-card').offsetParent === null,
+      sidebarHidden: document.querySelector('#sidebar').offsetParent === null,
       editorPressed: document.querySelector('#maximize-editor').getAttribute('aria-pressed'),
       machinePressed: document.querySelector('#maximize-machine').getAttribute('aria-pressed'),
     });
@@ -280,23 +348,26 @@ try {
   });
   assert.equal(maximized.editor.pane, 'editor');
   assert.equal(maximized.editor.machineHidden, true, 'エディタ最大化時もPC-98カードが見えています');
+  assert.equal(maximized.editor.sidebarHidden, true, 'エディタ最大化時もサイドバーが見えています');
   assert.ok(maximized.editor.editorWidth > maximized.normal.editorWidth, 'エディタ最大化時に幅が広がりません');
   assert.deepEqual([maximized.editor.editorPressed, maximized.editor.machinePressed], ['true', 'false']);
   assert.equal(maximized.machine.pane, 'machine');
   assert.equal(maximized.machine.editorHidden, true, 'PC-98最大化時もエディタカードが見えています');
+  assert.equal(maximized.machine.sidebarHidden, true, 'PC-98最大化時もサイドバーが見えています');
   assert.ok(maximized.machine.machineWidth > maximized.normal.machineWidth, 'PC-98最大化時に幅が広がりません');
   assert.deepEqual([maximized.machine.editorPressed, maximized.machine.machinePressed], ['false', 'true']);
   assert.equal(maximized.restored.pane, null);
   assert.deepEqual([
     maximized.restored.editorHidden, maximized.restored.machineHidden,
+    maximized.restored.sidebarHidden,
     maximized.restored.editorPressed, maximized.restored.machinePressed,
-  ], [false, false, 'false', 'false'], '最大化解除後に両ペインが復帰しません');
+  ], [false, false, false, 'false', 'false'], '最大化解除後にサイドバーと両ペインが復帰しません');
 
   const guardedSource = await page.evaluate(() => ({
     source: window.pc98workbench.getValue(), screen: window.pc98workbench.getScreenText().text,
     targets: window.pc98workbench.getGuardedKeyboardTargets(),
   }));
-  assert.deepEqual(guardedSource.targets, ['.file-bar', '.editor-card', '.debug-panel']);
+  assert.deepEqual(guardedSource.targets, ['.sidebar', '.editor-card', '.debug-panel']);
   await page.click('#editor .cm-content');
   await page.keyboard.type('QQQ');
   const editorGuard = await page.evaluate(() => ({
@@ -434,6 +505,7 @@ try {
       atBreakpoint: { state: wb.getDebugState(), marks: wb.getEditorMarks() },
       cpuPaused: wb.isCpuPaused(), statusBefore, statusAfter,
       headerBackground: getComputedStyle(document.querySelector('.app-header')).backgroundColor,
+      footerBackground: getComputedStyle(document.querySelector('footer.app-footer')).backgroundColor,
     };
   });
   assert.equal(asmDebug.control.kind, 0, 'ASM対象がCOMとして通知されていません');
@@ -457,8 +529,10 @@ try {
   assert.ok(asmDebug.atBreakpoint.marks.disassemblyRows > 0, '逆アセンブル行が描画されていません');
   assert.equal(asmDebug.cpuPaused, true, 'BP停止中なのにCPUが動いています');
   assert.notEqual(asmDebug.statusAfter, asmDebug.statusBefore, 'デバッグ開始後に統合状況表示が変化しません');
-  assert.notEqual(asmDebug.headerBackground, theme.normalHeaderBackground,
-    'デバッグ開始後もヘッダの背景色がWebNP2通常時と同じです');
+  assert.equal(asmDebug.headerBackground, theme.normalHeaderBackground,
+    'デバッグ開始でWebNP2ヘッダの背景色が変わりました');
+  assert.notEqual(asmDebug.footerBackground, theme.footerBackground,
+    'デバッグ開始後もステータスバーの背景色が通常時と同じです');
 
   const debugTabSwitch = await page.evaluate(() => {
     const wb = window.pc98workbench;
@@ -715,16 +789,24 @@ try {
   const forcedRetryCount = forcedRecovery.retriesAfter - forcedRecovery.retriesBefore;
 
   await page.evaluate(() => window.pc98workbench.openFile('project', 'samples/hello.asm'));
-  // フォルダ操作を足した後もファイルバーが横にはみ出さないことを、実測値で確認する。
-  const fileBar = () => page.$eval('.file-bar', (node) => ({
-    overflow: node.scrollWidth - node.clientWidth,
-    folderOpen: node.querySelector('#folder-open').getBoundingClientRect().width > 0,
-    folderState: node.querySelector('#folder-state').textContent,
-  }));
-  const desktopBar = await fileBar();
-  assert.ok(desktopBar.overflow <= 1, `デスクトップのファイルバーがはみ出しています: ${desktopBar.overflow}px`);
-  assert.equal(desktopBar.folderOpen, true, 'フォルダを開くボタンが表示されていません');
-  assert.equal(desktopBar.folderState, 'フォルダ未接続', '未接続時のフォルダ表示が期待と不一致です');
+  // サイドバー操作列とステータスバー自身がviewportを横へ押し広げないことを実測する。
+  const chromeOverflow = () => page.evaluate(() => {
+    const actions = document.querySelector('.sidebar-actions');
+    const footer = document.querySelector('footer.app-footer');
+    return {
+      actions: actions.scrollWidth - actions.clientWidth,
+      footer: footer.scrollWidth - footer.clientWidth,
+      folderOpen: document.querySelector('#folder-open').getBoundingClientRect().width > 0,
+      folderState: document.querySelector('#folder-state').textContent,
+    };
+  });
+  const desktopChrome = await chromeOverflow();
+  assert.ok(desktopChrome.actions <= 1, `デスクトップのサイドバー操作列がはみ出しています: ${desktopChrome.actions}px`);
+  assert.ok(desktopChrome.footer <= 1, `デスクトップのステータスバーがはみ出しています: ${desktopChrome.footer}px`);
+  assert.equal(desktopChrome.folderOpen, true, 'フォルダを開くボタンが表示されていません');
+  assert.equal(desktopChrome.folderState, 'フォルダ未接続', '未接続時のフォルダ表示が期待と不一致です');
+  await page.evaluate(() => window.pc98workbench.setSidebarVisible(false));
+  await page.evaluate(() => new Promise((resolveWait) => requestAnimationFrame(resolveWait)));
 
   const desktopLayout = await page.evaluate(() => window.pc98workbench.getLayout());
   assert.equal(desktopLayout.contentEditable, true, 'CodeMirrorがcontentEditableではありません');
@@ -738,6 +820,19 @@ try {
   assert.equal(desktopScaling.rendering, 'pixelated', '等倍以上でドット感が失われています');
 
   await page.setViewport({ width: 375, height: 812, deviceScaleFactor: 1 });
+  const mobileChrome = await page.evaluate(() => {
+    const wb = window.pc98workbench;
+    wb.setSidebarVisible(true);
+    const actions = document.querySelector('.sidebar-actions');
+    const footer = document.querySelector('footer.app-footer');
+    const measured = {
+      actions: actions.scrollWidth - actions.clientWidth,
+      footer: footer.scrollWidth - footer.clientWidth,
+      folderOpen: document.querySelector('#folder-open').getBoundingClientRect().width > 0,
+    };
+    wb.setSidebarVisible(false);
+    return measured;
+  });
   await page.evaluate(() => new Promise((resolveWait) => requestAnimationFrame(() => requestAnimationFrame(resolveWait))));
   const mobile = await page.evaluate(() => ({ ...window.pc98workbench.getLayout(), viewport: { width: innerWidth, height: innerHeight } }));
   const visible = (rect) => rect.width > 0 && rect.height > 0 && rect.top < mobile.viewport.height && rect.bottom > 0;
@@ -746,9 +841,9 @@ try {
     `モバイルeditorが使用可能領域にありません: ${JSON.stringify(mobile.editor)}`);
   assert.ok(visible(mobile.screen) && mobile.screen.width >= 330,
     `モバイルPC-98画面がviewportにありません: ${JSON.stringify(mobile.screen)}`);
-  const mobileBar = await fileBar();
-  assert.ok(mobileBar.overflow <= 1, `モバイルのファイルバーがはみ出しています: ${mobileBar.overflow}px`);
-  assert.equal(mobileBar.folderOpen, true, 'モバイルでフォルダを開くボタンが表示されていません');
+  assert.ok(mobileChrome.actions <= 1, `モバイルのサイドバー操作列がはみ出しています: ${mobileChrome.actions}px`);
+  assert.ok(mobileChrome.footer <= 1, `モバイルのステータスバーがはみ出しています: ${mobileChrome.footer}px`);
+  assert.equal(mobileChrome.folderOpen, true, 'モバイルでフォルダを開くボタンが表示されていません');
   // 等倍未満の縮小では補間、等倍以上ではドット感を残す（実測値で確認する）。
   const mobileScaling = await page.evaluate(() => ({
     ...window.pc98workbench.getScreenScaling(),
@@ -762,9 +857,9 @@ try {
 
   console.log(`[PASS] file/edit/IndexedDB/build/run: ${output}`);
   console.log('[PASS] machine status/prewarm: one status line, asynchronous boot completed, build/debug transitions');
-  console.log('[PASS] header/footer: WebNP2 colors, retired debugger link absent, 7 license links returned HTTP 200');
+  console.log('[PASS] header/status bar: WebNP2 header, VS Code status colors, 7 license links returned HTTP 200');
   console.log(`[PASS] run separator: ${separators} blank prompt lines before a consecutive run`);
-  console.log('[PASS] 実キー入力 guard: editor/file bar stay local, canvas reaches guest DOS');
+  console.log('[PASS] 実キー入力 guard: editor/sidebar stay local, canvas reaches guest DOS');
   console.log(`[PASS] Tab/caret: real tab at cursor (tab-size ${tabbed.tabSize}), caret drawn in ${tabbed.cursor.color}`);
   console.log(`[PASS] syntax colors: ${syntax.length} tokens, min contrast ${Math.min(...syntax.map((t) => t.ratio))}:1 on the dark editor`);
   console.log('[PASS] .c auto build: HELLO-C.EXE');
@@ -772,8 +867,9 @@ try {
   console.log(`[PASS] ASM debug in editor: entry=8 next=9 bp=11 cs=${asmDebug.control.cs.toString(16).toUpperCase()} dots=1, non-mapped line rejected`);
   console.log('[PASS] editor toolbar: 9 inline-SVG controls, accessible labels, build/debug mode swap and restore');
   console.log('[PASS] editor tabs: reuse, text/dirty/BP isolation, guarded close, debug-target lock/highlight');
-  console.log('[PASS] pane maximize: editor/machine exclusive maximize, aria state and restore');
-  console.log('[PASS] WebNP2 outer chrome + VS Code Dark Modern workspace: measured colors and debugging header transition');
+  console.log('[PASS] pane maximize: editor/machine exclusive maximize, sidebar hidden, aria state and restore');
+  console.log('[PASS] Explorer sidebar: tree open/selection sync, visibility API and responsive state');
+  console.log('[PASS] WebNP2 header + VS Code Dark Modern workspace/status bar: measured colors and debug transition');
   console.log('[PASS] debug sections: 8 registers, breakpoint list/goto/remove/empty guide');
   console.log('[PASS] workbench disassembly: rows visible while debugging and hidden after stop');
   console.log('[PASS] editor lock: real typing blocked while debugging and accepted after stop');
@@ -784,7 +880,7 @@ try {
   } else {
     console.log('[INFO] FD swap self-recovery: この環境では待ち0でもドライブエラーを再現しなかったためスキップ');
   }
-  console.log(`[PASS] file bar: folder controls visible, no overflow (desktop ${desktopBar.overflow}px / mobile ${mobileBar.overflow}px)`);
+  console.log(`[PASS] sidebar/status overflow: desktop ${desktopChrome.actions}/${desktopChrome.footer}px mobile ${mobileChrome.actions}/${mobileChrome.footer}px`);
   console.log(`[PASS] responsive DOM: desktop editor/screen=${Math.round(desktopLayout.editor.width)}/${Math.round(desktopLayout.screen.width)} mobile=${Math.round(mobile.editor.width)}/${Math.round(mobile.screen.width)}`);
   console.log(`[SHOT] ${DESKTOP_SHOT}`);
   console.log(`[SHOT] ${MOBILE_SHOT}`);
