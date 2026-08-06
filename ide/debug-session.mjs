@@ -1,15 +1,17 @@
-import { releaseLoaderAtEntry, waitForLoaderControl } from './loader-control.mjs';
+import { CONTROL, parseLoaderControl, releaseLoaderAtEntry, waitForLoaderControl } from './loader-control.mjs';
 
 /**
  * ハードウェアBP枠の割り当て。7番は4B01h返却CS:IPで対象1命令目の手前に止めるためローダ解放が使い、
  * 6番は「次の行まで実行」の一時BP専用にする。利用者BPは0〜5の6本まで。
+ * ローダ終了BPは、対象エントリ到達時に解除済みの7番を時分割で再利用する。
+ * 同時に有効にならないため、利用者BP 6本を減らさない。
  */
-export const BREAKPOINT_SLOTS = { user: [0, 1, 2, 3, 4, 5], stepOver: 6, entry: 7 };
+export const BREAKPOINT_SLOTS = { user: [0, 1, 2, 3, 4, 5], stepOver: 6, entry: 7, loaderExit: 7 };
 const KIND = { COM: 0, EXE: 1 };
 
 /**
  * 4B01hローダ経由で対象を起動し、エントリ停止・行BP・行送りまでを1つの状態として持つ。
- * debug.html の実証コードと同じ制御ブロック契約のまま、対象と行マップだけを差し替えられる。
+ * 4B01hローダの制御ブロック契約を保ち、対象と行マップを差し替えられる。
  */
 export function createDebugSession(debug) {
   let control;
@@ -138,6 +140,28 @@ export function createDebugSession(debug) {
     setPaused(paused) {
       debug.setPaused(paused);
       return debug.isPaused();
+    },
+
+    /** 解除済みのエントリBP枠を再利用し、ローダ自身のAH=4Ch直前で止める。 */
+    runToLoaderExit(maxSteps = 5_000_000) {
+      const active = requireStarted();
+      const slot = BREAKPOINT_SLOTS.loaderExit;
+      // このAPIはローダ終了だけを観測するため、利用者BPは一時的に外して後で戻す。
+      for (const item of assignments) debug.setBreakpoint(item.slot, active.cs, item.offset, false);
+      debug.setBreakpoint(slot, active.loaderPsp, active.exitReadyIp, true);
+      let hit;
+      try {
+        hit = debug.runUntilBreakpoint(maxSteps);
+      } finally {
+        debug.setBreakpoint(slot, active.loaderPsp, active.exitReadyIp, false);
+        for (const item of assignments) debug.setBreakpoint(item.slot, active.cs, item.offset, true);
+      }
+      if (hit !== slot) throw new Error(`ローダ終了直前へ到達できませんでした (hit=${hit})`);
+      const fresh = parseLoaderControl(debug.readMemory(active.address, CONTROL.size), 0);
+      return {
+        registers: registers(),
+        loaderControl: { ...fresh, address: active.address },
+      };
     },
 
     /** BPを全て外して通常実行へ戻す。セッションは終了扱いにする。 */

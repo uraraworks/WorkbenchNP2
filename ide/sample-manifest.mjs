@@ -1,5 +1,6 @@
 export const SAMPLE_FILES = [
   { path: 'samples/hello.asm', url: '../samples/hello.asm' },
+  { path: 'samples/second-run.asm', url: '../samples/second-run.asm' },
   { path: 'samples/hello-c.c', url: '../samples/hello-c.c' },
   { path: 'samples/minimal.c', url: '../samples/minimal.c' },
   { path: 'samples/legacy/kensyuu/STRLEN.C', url: '../samples/legacy/kensyuu/STRLEN.C' },

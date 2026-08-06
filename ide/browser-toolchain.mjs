@@ -20,11 +20,30 @@ export const LOADER_NAME = 'E0LOAD';
 
 let cResourcesPromise;
 let debugLoaderPromise;
+let loaderOnlyFdPromise;
 
 /** デバッガローダは対象と同じFDへ常に同梱する。実行・デバッグでFDを作り分けない。 */
 function loadDebugLoader() {
-  if (!debugLoaderPromise) debugLoaderPromise = assembleDebugLoader().then((result) => result.output);
+  if (!debugLoaderPromise) {
+    debugLoaderPromise = assembleDebugLoader().then((result) => result.output).catch((error) => {
+      debugLoaderPromise = undefined;
+      throw error;
+    });
+  }
   return debugLoaderPromise;
+}
+
+/** FreeDOSのプリウォーム用に、ローダだけを収録したB:イメージを1度だけ生成する。 */
+export function makeLoaderOnlyFd() {
+  if (!loaderOnlyFdPromise) {
+    loaderOnlyFdPromise = loadDebugLoader().then((loader) => makeFd([
+      { name: LOADER_NAME, ext: 'COM', data: loader },
+    ])).catch((error) => {
+      loaderOnlyFdPromise = undefined;
+      throw error;
+    });
+  }
+  return loaderOnlyFdPromise;
 }
 
 const fetchBytes = async (url) => {

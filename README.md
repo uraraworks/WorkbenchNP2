@@ -41,7 +41,7 @@ docs/
   masm-to-nasm.md    MASM→NASM 変換規則（自動変換ツールの仕様書を兼ねる）
 ide/                CodeMirrorエディタ＋WebNP2実行画面
   index.html          実用workbench（編集・IndexedDB保存・ビルド・実行・デバッグ）
-  debug.html          CPU／ソース行デバッガ実証（HELLO.COM固定の回帰検証用）
+  verify-loader.mjs   workbenchのローダ状態・再実行・終了コード検証
   project-fs.mjs      保存先を差し替え可能にするProjectFS抽象
   directory-fs.mjs    File System AccessのディレクトリハンドルをProjectFSとして扱う
   debug-map.mjs       ASM listing / C source mapを1つの行マップ契約へ寄せる層
@@ -112,18 +112,17 @@ CodeMirrorは`codemirror@6.0.2`、`@codemirror/lang-cpp@6.0.3`を入口に、直
 bundleは458,609 bytes（gzip -9で148,865 bytes）。`ide/vendor/codemirror/build.sh`がnpm install
 からbundle・ライセンス収集までを再現する。CDNは使用しない。
 
-デバッガ実証UIは`ide/debug.html`へHELLO.COM固定の回帰検証用として残し、既存`verify-ide.mjs`の
-9項目はそのままアサーションを維持する。workbenchへのデバッガ統合（UI第2段）は完了しており、
+デバッガ機能と回帰検証はworkbenchへ統合済みであり、
 `index.html`の「デバッグ」ボタンからビルド済み対象を4B01hローダ経由で起動し、対象の1命令目
 手前で停止する。BPはCodeMirrorの専用gutterをクリックして張り、停止行はエディタ本体の行
-decorationで強調する（デバッガ実証画面のような別ソース一覧は使わない）。行マップはビルド
+decorationで強調する（別ソース一覧は使わない）。行マップはビルド
 時点で確定するため、実行前に「どの行へBPを張れるか」が決まり、生成アドレスのない行へのBPは
 拒否する（黙って無視しない）。ハードウェアBP枠は0〜5を利用者BP、6を「次の行まで実行」の
 一時BP、7を4B01hのエントリ停止用に割り当てる。C の1行が複数の非連続区間を持つ場合は全区間へ
 張り、枠を超えるとエラーにする。レジスタはIDE独自の8本表示。通常実行へ復帰すると停止行強調と
 レジスタ表示は消えるが、BPは次のデバッグまで残す。別ファイルを開くとBPは持ち越さない。
 
-コアはページごとに1回しか起動できないため、FreeDOSは1度だけ起動し、以後はビルドのたびに
+コアはページごとに1回しか起動できないため、ローダだけのB:を使ってFreeDOSを先に起動し、以後はビルドのたびに
 B:のFDだけ差し替える。差し替えは「排出→間隔→挿入→間隔」のメディア交換手順が必要で、
 挿入だけだとDOSがFATキャッシュを持ち越して「ドライブの準備ができていません」になることを
 実測した。デバッガローダ`E0LOAD.COM`は実行用・デバッグ用でFDを作り分けず、常に対象と同じ
@@ -141,13 +140,11 @@ FAT12 FDへ同梱する。
 > **現在の制約:** デバッガローダが使うDOS EXEC 4B01hは、同梱FreeDOS(98)・NEC日本語MS-DOS 3.3C・
 > 1996年当時のHDD環境の3つで実地確認済み（下表）。ただしこれは手元にあるイメージの範囲であり、
 > すべてのDOSでの対応を保証するものではない。非対応DOSではこの方式を利用できない。
-> `debug.html`自体は回帰検証を安定させるためHELLO.COM固定である。任意ファイルの編集・実行と
-> デバッガ統合（UI第2段）は`index.html`のworkbenchが担当する。
+> 任意ファイルの編集・実行・デバッグと回帰検証は`index.html`のworkbenchが担当する。
 
 > **終了復帰:** 4B01h load-only後に対象へfar jumpしても、対象のAH=4Ch終了後に
 > ローダ自身をAH=4Chで終了してFreeDOSのプロンプトへ戻る。同一セッションで
 > 「デバッグ実行→プロンプト復帰→別対象を再度デバッグ実行」できることを実測済み。
-> C実行の第9チェックは、状態を一意に保つ回帰検証として独立FreeDOS/NP2セッションを維持する。
 
 `ide/` は `samples/hello.asm` をブラウザのwasm NASMでアセンブルし、行マップとFAT12 FDを
 その場で生成して、IDEが用意したcanvas上のNP2kaiへ渡す。ソース行クリックBP、現在行強調、
@@ -171,10 +168,13 @@ WebNP2から埋め込み成果物とコアを同期してから、実ブラウ�
 ```bash
 ../WebNP2/scripts/export-embed.sh
 node ide/verify-workbench.mjs
+node ide/verify-loader.mjs
 node ide/verify-directory-fs.mjs
-node ide/verify-ide.mjs
 node ide/verify-debug-map.mjs
 ```
+
+`ide/verify-loader.mjs`はworkbenchで、ロード済み対象のビルド出力一致、ローダ終了直前の内部状態、
+同一DOSセッションで2本目の終了コード37がCOMMAND.COMへ伝播することを確認する。
 
 `ide/verify-directory-fs.mjs`は、ネイティブダイアログのため自動化できない`showDirectoryPicker()`の代わりに、
 OPFSの`navigator.storage.getDirectory()`が返す本物の`FileSystemDirectoryHandle`を使い、モックなしで13項目を
@@ -184,14 +184,9 @@ Shift_JIS復号とUTF-8判定、存在しないパスの`null`、Shift_JIS上書
 フォルダのファイルを開く、ビルド、実行画面の出力、`saveFile()`後のハンドルからの直接読取り、切断までを確認する。
 出力を1文字変えるとFAILすることも確認する。
 
-検証は、28-byteの無改変hello、対象1命令目での初期レジスタ一致と未出力、クリックBPと停止・強調行、
-次行への遷移、IDE独自レジスタ表示、実行後のTVRAM出力を確認する。停止IPを+1した値や、実行済みの
-画面文字列を同じエントリ検証関数へ渡すとFAILすることも確認し、空回りを防ぐ。
-さらに同一セッションでプロンプト復帰後に`SECOND.COM`を再びローダ経由でエントリ停止・実行し、
-TVRAM出力、EXEC復帰2回、AH=4Dhの`0025h`、COMMAND.COMの`ERRORLEVEL 37`を確認する。
-独立したFreeDOS/WebNP2セッションへC生成物のFAT12 FDを挿入し、`HELLOC.EXE`の
-`Hello from C on PC-98!`をTVRAMから読む。続けて`STRLEN.EXE`をローダ経由で開始し、
-22行目`Len++;`でのBP停止・原文一致、再開後の出力行`3`を確認する第9チェックも含む。
+workbench検証はASM/Cのエントリ停止、行BP、行送り、レジスタ・逆アセンブル表示とTVRAM出力を確認する。
+ローダ検証は無改変helloのロードバイト、EXEC復帰2回、子終了コードと同一セッションでの再実行、
+COMMAND.COMへの`ERRORLEVEL 37`伝播を確認し、故障注入でも空回りを防ぐ。
 `PC98DEV_URL` と `CHROME_PATH` で起動先を上書きできる。
 
 同期物の `ide/vendor/webnp2/LICENSE.WebNP2` はWebNP2由来コードの出所を、

@@ -8,9 +8,10 @@ import {
 } from './vendor/codemirror/codemirror.js';
 import { createDebugger, createWebNP2, mountDisassemblyView } from './vendor/webnp2/webnp2-embed.js';
 import { bootFreeDos, waitForCurrentDosPrompt } from './freedos-session.mjs';
-import { LOADER_NAME, buildSource } from './browser-toolchain.mjs';
+import { LOADER_NAME, buildSource, makeLoaderOnlyFd } from './browser-toolchain.mjs';
 import { debugMapForBuild } from './debug-map.mjs';
 import { createDebugSession } from './debug-session.mjs';
+import { CONTROL, parseLoaderControl } from './loader-control.mjs';
 import {
   DirectoryProjectFS, clearDirectoryHandle, isDirectoryPickerAvailable, loadDirectoryHandle,
   pickDirectory, saveDirectoryHandle,
@@ -28,12 +29,12 @@ const nodes = {
   editor: document.querySelector('#editor'), build: document.querySelector('#build'), run: document.querySelector('#run'),
   buildStatus: document.querySelector('#build-status'), errors: document.querySelector('#build-errors'),
   disassemblyPanel: document.querySelector('#disassembly-panel'), disassembly: document.querySelector('#disassembly'),
-  runtimeStatus: document.querySelector('#runtime-status'), screenText: document.querySelector('#screen-text'),
+  machineStatus: document.querySelector('#machine-status'), screenText: document.querySelector('#screen-text'),
   debug: document.querySelector('#debug'), continue: document.querySelector('#debug-continue'),
   stepOver: document.querySelector('#debug-step-over'), stepInto: document.querySelector('#debug-step-into'),
   stepInstruction: document.querySelector('#debug-step-instruction'), restart: document.querySelector('#debug-restart'),
   stopDebug: document.querySelector('#debug-stop'), debugPanel: document.querySelector('#debug-panel'),
-  debugStatus: document.querySelector('#debug-status'), registers: document.querySelector('#registers'),
+  registers: document.querySelector('#registers'),
 };
 const language = new Compartment();
 const readOnly = new Compartment();
@@ -49,6 +50,14 @@ let lastErrors = [];
 let freeDos;
 let runSequence = 0;
 let booted;
+let resolvePrewarm;
+let rejectPrewarm;
+const prewarm = new Promise((resolve, reject) => {
+  resolvePrewarm = resolve;
+  rejectPrewarm = reject;
+});
+// readyより前から公開するが、利用者がawaitするまでの未処理rejectionは発生させない。
+prewarm.catch(() => {});
 let session;
 let debugMap;
 let disassemblyView;
@@ -296,6 +305,7 @@ async function buildCurrent() {
   if (!currentPath) throw new Error('ビルド対象がありません');
   nodes.build.disabled = true; nodes.run.disabled = true; nodes.debug.disabled = true;
   nodes.buildStatus.textContent = `${currentPath} をビルド中…`; nodes.buildStatus.classList.remove('error');
+  setMachineStatus(`${currentPath} をビルド中です`);
   clearDiagnostics();
   try {
     await saveFile();
@@ -303,6 +313,7 @@ async function buildCurrent() {
     if (!result.ok) {
       showErrors(result.errors);
       nodes.buildStatus.textContent = `${result.errors.length}件のエラー`; nodes.buildStatus.classList.add('error');
+      setMachineStatus(`ビルドに失敗しました（${result.errors.length}件）`, true);
       lastBuild = undefined;
       return result;
     }
@@ -311,6 +322,7 @@ async function buildCurrent() {
     debugMap = debugMapForBuild(result);
     syncDebugMarks(session?.isStarted() ? session.currentLine() : null);
     nodes.buildStatus.textContent = `${result.dosName}: ${result.output.byteLength} bytes / FAT12 FD生成完了`;
+    setMachineStatus('ビルド完了。実行できます');
     return result;
   } finally {
     nodes.build.disabled = false; nodes.run.disabled = false; nodes.debug.disabled = false;
@@ -322,26 +334,56 @@ async function buildCurrent() {
  * 以後はビルドのたびにB:のFDだけ差し替える。ビルド→実行→デバッグを何度でも繰り返せる。
  */
 /** メディア交換はDOS側が気付くまで待つ必要がある。排出後と挿入後の両方で間隔を空ける。 */
-const FD_SWAP_MS = 300;
+const FD_SWAP_MS = 800;
 const settle = (ms) => new Promise((resolveSettle) => { setTimeout(resolveSettle, ms); });
+
+function startBoot(programFd, programName, programKey) {
+  setMachineStatus('エミュレータを起動しています…');
+  let tracked;
+  tracked = bootFreeDos(engine, {
+    freeDos, freeDosKey: 'workbench:freedos', programFd, programName, programKey,
+    onScreen: (screen) => { nodes.screenText.textContent = screen.text; },
+  }).then((screen) => {
+    setMachineStatus('エミュレータ起動しました。実行の準備ができています');
+    return screen;
+  }).catch((error) => {
+    if (booted === tracked) booted = undefined;
+    setMachineStatus(`エミュレータの起動に失敗しました: ${error.message}`, true);
+    throw error;
+  });
+  booted = tracked;
+  return tracked;
+}
+
+function startPrewarm() {
+  setMachineStatus('エミュレータを起動しています…');
+  const attempt = makeLoaderOnlyFd().then((fd) => (
+    startBoot(fd, 'loader-only.xdf', 'workbench:loader-only')
+  )).catch((error) => {
+    setMachineStatus(`エミュレータの起動に失敗しました: ${error.message}`, true);
+    throw error;
+  });
+  attempt.then(resolvePrewarm, rejectPrewarm);
+  return attempt;
+}
 
 async function mountProgramFd(built) {
   const name = `${built.dosName}.xdf`;
   const key = `workbench:${built.dosName}:${runSequence++}`;
   if (!booted) {
     // 初回はB:へFDを入れた状態で起動する。空のB:で起動するとDOSがドライブ未準備を覚えてしまう。
-    nodes.runtimeStatus.textContent = 'FreeDOSを起動中…';
-    booted = bootFreeDos(engine, {
-      freeDos, freeDosKey: 'workbench:freedos', programFd: built.fd, programName: name, programKey: key,
-      onScreen: (screen) => { nodes.screenText.textContent = screen.text; },
-    }).catch((error) => { booted = undefined; throw error; });
-    return booted;
+    return startBoot(built.fd, name, key);
   }
-  await booted;
+  try { await booted; } catch {}
+  // プリウォーム失敗後の最初の操作は、対象入りFDでブートそのものを再試行する。
+  if (!booted) return startBoot(built.fd, name, key);
   // drive=2 は fd2 スロット、すなわち B:。1 を渡すと FreeDOS 側の A: を差し替えてしまう。
-  // 差し替えるだけではDOSがFATキャッシュを持ち越して「ドライブの準備ができていません」になるため、
-  // embedの書き戻しと同じく 排出→間隔→挿入 のメディア交換手順を踏む。
-  // 排出せず挿入だけだとDOSがキャッシュを持ち越して「準備ができていません」になることを実測した。
+  // 挿入だけだとDOSがFATキャッシュを持ち越して「ドライブの準備ができていません」になるため、
+  // 排出してからメディア交換として挿入する。
+  // 排出と挿入の間はゲストを走らせたまま待つ必要がある。CPUを止めて交換するとゲストが
+  // 「ディスクが無い」中間状態を一度も観測せず、交換に気付かないまま古いFATを使う（実測で失敗）。
+  // 待ち時間は実測で決めた。同一セッションでの2回目の差し替えは300msでは失敗し、800msで通る。
+  setMachineStatus('プログラムを挿入しています…');
   await engine.ejectFd(2);
   await settle(FD_SWAP_MS);
   await engine.insertFd(2, { name, bytes: built.fd }, key);
@@ -356,20 +398,22 @@ async function runCurrent() {
   if (!built?.ok) return built;
   if (session?.isStarted()) await stopDebug();
   const baseline = await mountProgramFd(built);
-  nodes.runtimeStatus.textContent = `${built.dosName}を実行中…`;
+  setMachineStatus(`${built.dosName}を実行中…`);
   await engine.pasteText(`B:\\${built.dosName}\r`);
   const screen = await waitForCurrentDosPrompt(engine, { baseline: baseline.text, timeout: 60_000 });
   nodes.screenText.textContent = screen.text;
-  nodes.runtimeStatus.textContent = `${built.dosName} 終了・DOSプロンプト復帰`;
+  setMachineStatus(`${built.dosName} 終了・DOSプロンプト復帰`);
   return { ...built, screen };
 }
 
 const HEX = (value, width) => (value >>> 0).toString(16).toUpperCase().padStart(width, '0');
 
-function setDebugStatus(message, error = false) {
-  nodes.debugStatus.textContent = message;
-  nodes.debugStatus.classList.toggle('error', error);
+function setMachineStatus(message, error = false) {
+  nodes.machineStatus.textContent = message;
+  nodes.machineStatus.classList.toggle('error', error);
 }
+
+const setDebugStatus = setMachineStatus;
 
 /**
  * contentEditableを保ったまま利用者入力だけを止め、BP gutter、プログラム的な差し替え、
@@ -478,7 +522,6 @@ async function startDebug() {
   }
   session.setBreakpointLines([...breakpointLines]);
   const view = refreshDebugViews();
-  nodes.runtimeStatus.textContent = `${built.dosName} エントリ停止`;
   if (unmapped.length === 0) {
     setDebugStatus(`${built.dosName} エントリ停止 CS:IP=${HEX(started.control.cs, 4)}:${HEX(started.control.ip, 4)}`);
   }
@@ -529,6 +572,20 @@ function continueToBreakpoint() {
   return result;
 }
 
+/** 対象の終了後、ローダ自身が終了コードを返す直前の診断値を取得する。 */
+function runTargetToLoaderExit() {
+  const diagnostic = requireSession().runToLoaderExit();
+  const { registers, loaderControl } = diagnostic;
+  refreshDebugViews();
+  return {
+    registers,
+    loaderControl,
+    screen: engine.getScreenText(),
+    disassembly: debugController.disassemble(registers.cs, registers.eip, 4),
+    waitDisassembly: debugController.disassemble(loaderControl.loaderPsp, loaderControl.waitIp, 2),
+  };
+}
+
 /** BPが無ければ停止を解除し、通常の「続行」と同じくプログラム終了まで走らせる。 */
 async function continueOrRun() {
   if (breakpointLines.size > 0) return continueToBreakpoint();
@@ -543,11 +600,10 @@ async function stopDebug() {
   setDebugControls(false);
   // 停止していないCPUのレジスタを表示し続けると嘘になるので、復帰と同時に消す。
   nodes.registers.replaceChildren();
-  setDebugStatus('通常実行へ復帰しました');
-  nodes.runtimeStatus.textContent = '通常実行中…';
+  setMachineStatus('通常実行中…');
   const screen = await waitForCurrentDosPrompt(engine, { timeout: 60_000 });
   nodes.screenText.textContent = screen.text;
-  nodes.runtimeStatus.textContent = '実行終了・DOSプロンプト復帰';
+  setMachineStatus('実行終了・DOSプロンプト復帰');
   return screen;
 }
 
@@ -614,6 +670,8 @@ async function initialize() {
   const response = await fetch('./freedos/fd98_2hd.xdf');
   if (!response.ok) throw new Error(`FreeDOS: HTTP ${response.status}`);
   freeDos = new Uint8Array(await response.arrayBuffer());
+  // ローダだけのB:を入れて起動を始めるが、エディタ初期化は完了を待たずに進める。
+  startPrewarm();
   // フォルダ復元に失敗しても、同梱サンプルだけで動く状態までは必ず立ち上げる。
   await restoreDirectory().catch((error) => setDirectoryLabel(`フォルダ復元に失敗: ${error.message}`));
   await refreshFileSelect();
@@ -676,8 +734,13 @@ document.addEventListener('keydown', (event) => {
 });
 
 const ready = initialize();
-ready.catch((error) => { nodes.buildStatus.textContent = error.message; nodes.buildStatus.classList.add('error'); });
+ready.catch((error) => {
+  nodes.buildStatus.textContent = error.message; nodes.buildStatus.classList.add('error');
+  setMachineStatus(error.message, true);
+  rejectPrewarm(error);
+});
 window.pc98workbench = {
+  prewarm,
   ready, openFile, createFile, saveFile, buildCurrent, runCurrent,
   startDebug, stopDebug, toggleBreakpoint, stepInstruction, stepOverLine, stepInto,
   continueToBreakpoint, continueOrRun, setPanesSwapped, getPanesSwapped,
@@ -690,6 +753,18 @@ window.pc98workbench = {
     control: session?.control ?? null, debuggableLines: debugMap?.debuggableLines() ?? [],
   }),
   getRegisters: () => (session?.isStarted() ? session.registers() : undefined),
+  getMachineStatus: () => nodes.machineStatus.textContent,
+  getBuiltOutput: () => (lastBuild?.output ? Array.from(lastBuild.output) : null),
+  readGuestMemory: (address, length) => Array.from(debugController.readMemory(address, length)),
+  disassembleAt: (segment, offset, count) => debugController.disassemble(segment, offset, count),
+  getLoaderControl: () => {
+    if (!session?.isStarted()) return null;
+    const { address } = session.control;
+    return { ...parseLoaderControl(debugController.readMemory(address, CONTROL.size), 0), address };
+  },
+  runTargetToLoaderExit,
+  pasteDosCommand: (command) => engine.pasteText(`${command}\r`),
+  waitForPrompt: (baseline) => waitForCurrentDosPrompt(engine, { baseline, timeout: 60_000 }),
   isCpuPaused: () => engine.dbgIsPaused(),
   engine,
   setValue: (text) => editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: text } }),

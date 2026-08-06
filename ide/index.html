@@ -9,8 +9,8 @@
 </head>
 <body>
   <header class="app-header">
-    <div><h1>PC98Dev</h1><p>ブラウザだけで書いて、ビルドして、PC-98で動かす。</p></div>
-    <a href="./debug.html">デバッガ実証（回帰検証用）</a>
+    <div class="app-title-row"><h1>PC98Dev</h1></div>
+    <p class="app-tagline">ブラウザだけで書いて、ビルドして、PC-98で動かす。</p>
   </header>
   <nav class="file-bar" aria-label="ファイル操作">
     <label>ファイル<select id="file-select" aria-label="ファイルを開く"></select></label>
@@ -34,7 +34,8 @@
       </section>
     </section>
     <section class="machine-card" aria-labelledby="machine-heading">
-      <div class="panel-heading"><h2 id="machine-heading">PC-98</h2><span id="runtime-status">未実行</span></div>
+      <div class="panel-heading"><h2 id="machine-heading">PC-98</h2></div>
+      <div id="machine-status" role="status">初期化中…</div>
       <div class="screen-shell"><canvas id="screen" width="640" height="400" tabindex="0"></canvas></div>
       <section id="debug-panel" class="debug-panel" aria-label="デバッグ" hidden>
         <div class="debug-actions">
@@ -45,12 +46,20 @@
           <button id="debug-restart" title="再実行 — 同じビルド結果でデバッグを最初からやり直す" aria-label="再実行 — 同じビルド結果でデバッグを最初からやり直す" disabled>↺</button>
           <button id="debug-stop" title="通常実行へ復帰 — BPを外して最後まで走らせ、DOSプロンプトへ戻る" aria-label="通常実行へ復帰 — BPを外して最後まで走らせ、DOSプロンプトへ戻る" disabled>■</button>
         </div>
-        <div id="debug-status" role="status">未開始</div>
         <div id="registers" class="ide-registers" aria-label="レジスタ（IDE独自表示）"></div>
       </section>
       <pre id="screen-text" aria-label="PC-98テキスト画面"></pre>
     </section>
   </main>
+  <footer class="app-footer">
+    <a href="https://www.urara-works.jp/" target="_blank" rel="noopener">© URARA-works</a> /
+    <a href="./core/LICENSE.NP2kai">NP2kai (GPLv2+)</a> /
+    <a href="./vendor/webnp2/LICENSE.WebNP2">WebNP2</a> /
+    <a href="./freedos/README.txt">FreeDOS(98)</a> /
+    <a href="./vendor/codemirror/LICENSE.CodeMirror">CodeMirror (MIT)</a> /
+    <a href="../toolchain/nasm-src/LICENSE">NASM (BSD-2)</a> /
+    <a href="../toolchain/smlrc-wasm/LICENSE.SmallerC">SmallerC (BSD-2)</a>
+  </footer>
   <script src="../toolchain/nasm-wasm/nasm.js"></script>
   <script src="../toolchain/smlrc-wasm/smlrpp.js"></script>
   <script src="../toolchain/smlrc-wasm/smlrc.js"></script>

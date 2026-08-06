@@ -35,6 +35,7 @@ function startServer() {
           '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
           '.asm': 'text/plain; charset=utf-8', '.c': 'text/plain; charset=utf-8',
           '.h': 'text/plain; charset=utf-8', '.md': 'text/plain; charset=utf-8',
+          '.txt': 'text/plain; charset=utf-8',
         };
         response.writeHead(200, { 'Content-Type': types[extname(file)] ?? 'application/octet-stream' });
         response.end(body);

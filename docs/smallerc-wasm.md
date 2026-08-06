@@ -42,7 +42,7 @@ huge/DPMI経路は使わない。smallの浮動小数点非対応は固定小数
 upstreamツリー自体は変更しない。`verify.mjs`はsmlrpp/smlrc/smlrlのホスト/wasm一致、
 4段の反復一致、リンク出力の故障注入に加え、パッチ済み出力だけに行コメントがあることを検査する。
 
-ブラウザ実行は`ide/verify-ide.mjs`の既存FreeDOS/WebNP2経路を流用し、FAT12 FD上の
+ブラウザ実行は`ide/verify-workbench.mjs`のFreeDOS/WebNP2経路を使い、FAT12 FD上の
 `HELLOC.EXE`を実行してTVRAMの`Hello from C on PC-98!`を確認する。Cデバッグマップは
 パッチコメントから物理ASM行、NASM listing、リンカの`.text`基底を順に合成する。
 非連続区間を全て保持し、対応区間外は近傍行へ寄せず`null`とする。

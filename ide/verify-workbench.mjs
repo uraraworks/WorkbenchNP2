@@ -36,6 +36,7 @@ function startServer() {
           '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
           '.asm': 'text/plain; charset=utf-8', '.c': 'text/plain; charset=utf-8',
           '.h': 'text/plain; charset=utf-8', '.md': 'text/plain; charset=utf-8',
+          '.txt': 'text/plain; charset=utf-8',
         };
         response.writeHead(200, { 'Content-Type': types[extname(file)] ?? 'application/octet-stream' });
         response.end(body);
@@ -72,6 +73,26 @@ try {
   await page.goto(BASE_URL, { waitUntil: 'networkidle2' });
   await page.evaluate(() => window.pc98workbench.ready);
   assert.deepEqual(pageErrors, []);
+  const shell = await page.evaluate(() => ({
+    machineStatus: document.querySelector('#machine-status')?.textContent ?? '',
+    runtimeStatusExists: Boolean(document.querySelector('#runtime-status')),
+    debugStatusExists: Boolean(document.querySelector('#debug-status')),
+    hasDebugPageLink: [...document.querySelectorAll('header a')]
+      .some((link) => new URL(link.href).pathname.endsWith(`/debug${'.'}html`)),
+    footerHrefs: [...document.querySelectorAll('footer.app-footer a')].map((link) => link.href),
+  }));
+  assert.ok(shell.machineStatus.trim(), 'ready直後の統合状況表示が空です');
+  assert.equal(shell.runtimeStatusExists, false, '#runtime-statusが残っています');
+  assert.equal(shell.debugStatusExists, false, '#debug-statusが残っています');
+  assert.equal(shell.hasDebugPageLink, false, 'ヘッダに削除済みデバッガページへのリンクがあります');
+  assert.equal(shell.footerHrefs.length, 7, 'フッタのライセンスリンクが7件ではありません');
+  for (const href of shell.footerHrefs) {
+    const response = await fetch(href);
+    assert.equal(response.status, 200, `フッタリンクがHTTP 200ではありません: ${href}`);
+  }
+  await page.evaluate(() => window.pc98workbench.prewarm);
+  assert.equal(await page.evaluate(() => window.pc98workbench.getMachineStatus()),
+    'エミュレータ起動しました。実行の準備ができています', 'プリウォーム完了表示が不一致です');
   assert.deepEqual(await page.evaluate(() => window.pc98workbench.getState()), {
     currentPath: 'samples/hello.asm', currentOrigin: 'sample', dirty: false, errors: [], built: null,
   });
@@ -87,6 +108,13 @@ try {
   assert.equal(files.length, 1);
   assert.equal(files[0].path, 'samples/hello.asm');
   assert.ok(files[0].content.includes(output));
+
+  const beforeBuildStatus = await page.evaluate(() => window.pc98workbench.getMachineStatus());
+  const firstBuild = await page.evaluate(() => window.pc98workbench.buildCurrent());
+  assert.equal(firstBuild.ok, true, JSON.stringify(firstBuild.errors));
+  const afterBuildStatus = await page.evaluate(() => window.pc98workbench.getMachineStatus());
+  assert.notEqual(afterBuildStatus, beforeBuildStatus, 'ビルド後に統合状況表示が変化しません');
+  assert.equal(afterBuildStatus, 'ビルド完了。実行できます');
 
   const run = await page.evaluate(() => window.pc98workbench.runCurrent());
   assert.equal(run.ok, true);
@@ -191,7 +219,9 @@ try {
   const asmDebug = await page.evaluate(async () => {
     const wb = window.pc98workbench;
     wb.toggleBreakpoint(11);
+    const statusBefore = wb.getMachineStatus();
     const started = await wb.startDebug();
+    const statusAfter = wb.getMachineStatus();
     const entry = { state: wb.getDebugState(), marks: wb.getEditorMarks(), registers: wb.getRegisters() };
     const stepped = wb.stepOverLine();
     const afterStep = { state: wb.getDebugState(), marks: wb.getEditorMarks() };
@@ -200,7 +230,7 @@ try {
       control: started.control, entry, stepped: stepped.line, afterStep,
       hit: { line: hit.line, eip: hit.registers.eip, cs: hit.registers.cs },
       atBreakpoint: { state: wb.getDebugState(), marks: wb.getEditorMarks() },
-      cpuPaused: wb.isCpuPaused(),
+      cpuPaused: wb.isCpuPaused(), statusBefore, statusAfter,
     };
   });
   assert.equal(asmDebug.control.kind, 0, 'ASM対象がCOMとして通知されていません');
@@ -223,6 +253,7 @@ try {
   assert.equal(asmDebug.atBreakpoint.marks.disassemblyVisible, true, 'デバッグ中に逆アセンブルが表示されていません');
   assert.ok(asmDebug.atBreakpoint.marks.disassemblyRows > 0, '逆アセンブル行が描画されていません');
   assert.equal(asmDebug.cpuPaused, true, 'BP停止中なのにCPUが動いています');
+  assert.notEqual(asmDebug.statusAfter, asmDebug.statusBefore, 'デバッグ開始後に統合状況表示が変化しません');
 
   const lockedSource = await page.evaluate(() => ({
     source: window.pc98workbench.getValue(), screen: window.pc98workbench.getScreenText().text,
@@ -409,6 +440,8 @@ try {
   await page.screenshot({ path: MOBILE_SHOT });
 
   console.log(`[PASS] file/edit/IndexedDB/build/run: ${output}`);
+  console.log('[PASS] machine status/prewarm: one status line, asynchronous boot completed, build/debug transitions');
+  console.log('[PASS] header/footer: retired debugger link absent, 7 license links returned HTTP 200');
   console.log('[PASS] 実キー入力 guard: editor/file bar stay local, canvas reaches guest DOS');
   console.log(`[PASS] Tab/caret: real tab at cursor (tab-size ${tabbed.tabSize}), caret drawn in ${tabbed.cursor.color}`);
   console.log('[PASS] .c auto build: HELLO-C.EXE');
