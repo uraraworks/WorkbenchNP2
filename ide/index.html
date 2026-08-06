@@ -10,33 +10,40 @@
 <body>
   <header class="app-header">
     <div><h1>PC98Dev</h1><p>ブラウザだけで書いて、ビルドして、PC-98で動かす。</p></div>
-    <a href="./debug.html">デバッガ実証</a>
+    <a href="./debug.html">デバッガ実証（回帰検証用）</a>
   </header>
   <nav class="file-bar" aria-label="ファイル操作">
     <label>ファイル<select id="file-select" aria-label="ファイルを開く"></select></label>
     <input id="new-path" aria-label="新規ファイル名" placeholder="project/main.asm">
     <button id="new-file">新規</button><button id="save-file">保存</button>
     <button id="folder-open">フォルダを開く</button><button id="folder-disconnect" hidden>切断</button>
+    <button id="swap-panes" title="エディタとPC-98画面の配置を入れ替える" aria-label="エディタとPC-98画面の配置を入れ替える" aria-pressed="false">⇄</button>
     <span id="folder-state">フォルダ未接続</span>
     <span id="save-state">未保存の変更なし</span>
   </nav>
   <main class="workspace-grid">
     <section class="editor-card" aria-labelledby="editor-heading">
-      <div class="panel-heading"><div><h2 id="editor-heading">エディタ</h2><span id="current-path"></span></div>
+      <div class="panel-heading"><div><h2 id="editor-heading">エディタ</h2><span id="current-path"></span><span id="edit-lock" class="edit-lock" hidden>デバッグ中は編集できません</span></div>
         <div class="build-actions"><button id="build">ビルド</button><button id="run">実行</button><button id="debug">デバッグ</button></div></div>
       <div id="editor" aria-label="ソースエディタ"></div>
       <div id="build-status" role="status">準備中…</div>
       <ul id="build-errors" aria-label="ビルドエラー"></ul>
+      <section id="disassembly-panel" class="disassembly-panel" aria-label="逆アセンブル" hidden>
+        <h3>逆アセンブル</h3>
+        <div id="disassembly"></div>
+      </section>
     </section>
     <section class="machine-card" aria-labelledby="machine-heading">
       <div class="panel-heading"><h2 id="machine-heading">PC-98</h2><span id="runtime-status">未実行</span></div>
       <div class="screen-shell"><canvas id="screen" width="640" height="400" tabindex="0"></canvas></div>
       <section id="debug-panel" class="debug-panel" aria-label="デバッグ" hidden>
         <div class="debug-actions">
-          <button id="debug-step" disabled>Step</button>
-          <button id="debug-next-line" disabled>次の行まで実行</button>
-          <button id="debug-continue" disabled>BPまで実行</button>
-          <button id="debug-stop" disabled>通常実行へ復帰</button>
+          <button id="debug-continue" title="続行 (F5) — BPまで実行。BPが無ければ最後まで実行する" aria-label="続行 (F5) — BPまで実行。BPが無ければ最後まで実行する" disabled>▶</button>
+          <button id="debug-step-over" title="ステップオーバー (F10) — 次のソース行まで実行する。call は飛び越える" aria-label="ステップオーバー (F10) — 次のソース行まで実行する。call は飛び越える" disabled>↷</button>
+          <button id="debug-step-into" title="ステップイン (F11) — call なら呼び先へ入る。行情報が無ければ呼び出し元へ戻る" aria-label="ステップイン (F11) — call なら呼び先へ入る。行情報が無ければ呼び出し元へ戻る" disabled>↓</button>
+          <button id="debug-step-instruction" title="1命令実行 — 機械語を1命令だけ進める" aria-label="1命令実行 — 機械語を1命令だけ進める" disabled>1</button>
+          <button id="debug-restart" title="再実行 — 同じビルド結果でデバッグを最初からやり直す" aria-label="再実行 — 同じビルド結果でデバッグを最初からやり直す" disabled>↺</button>
+          <button id="debug-stop" title="通常実行へ復帰 — BPを外して最後まで走らせ、DOSプロンプトへ戻る" aria-label="通常実行へ復帰 — BPを外して最後まで走らせ、DOSプロンプトへ戻る" disabled>■</button>
         </div>
         <div id="debug-status" role="status">未開始</div>
         <div id="registers" class="ide-registers" aria-label="レジスタ（IDE独自表示）"></div>

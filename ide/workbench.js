@@ -5,7 +5,7 @@ import {
   highlightSpecialChars, history, historyKeymap, indentOnInput, indentWithTab, keymap,
   lineNumbers, lintGutter, rectangularSelection, setDiagnostics, syntaxHighlighting,
 } from './vendor/codemirror/codemirror.js';
-import { createDebugger, createWebNP2 } from './vendor/webnp2/webnp2-embed.js';
+import { createDebugger, createWebNP2, mountDisassemblyView } from './vendor/webnp2/webnp2-embed.js';
 import { bootFreeDos, waitForCurrentDosPrompt } from './freedos-session.mjs';
 import { LOADER_NAME, buildSource } from './browser-toolchain.mjs';
 import { debugMapForBuild } from './debug-map.mjs';
@@ -21,17 +21,21 @@ const nodes = {
   fileSelect: document.querySelector('#file-select'), newPath: document.querySelector('#new-path'),
   newFile: document.querySelector('#new-file'), save: document.querySelector('#save-file'),
   saveState: document.querySelector('#save-state'), currentPath: document.querySelector('#current-path'),
+  editLock: document.querySelector('#edit-lock'),
   folderOpen: document.querySelector('#folder-open'), folderDisconnect: document.querySelector('#folder-disconnect'),
-  folderState: document.querySelector('#folder-state'),
+  swapPanes: document.querySelector('#swap-panes'), folderState: document.querySelector('#folder-state'),
   editor: document.querySelector('#editor'), build: document.querySelector('#build'), run: document.querySelector('#run'),
   buildStatus: document.querySelector('#build-status'), errors: document.querySelector('#build-errors'),
+  disassemblyPanel: document.querySelector('#disassembly-panel'), disassembly: document.querySelector('#disassembly'),
   runtimeStatus: document.querySelector('#runtime-status'), screenText: document.querySelector('#screen-text'),
-  debug: document.querySelector('#debug'), step: document.querySelector('#debug-step'),
-  nextLine: document.querySelector('#debug-next-line'), continue: document.querySelector('#debug-continue'),
+  debug: document.querySelector('#debug'), continue: document.querySelector('#debug-continue'),
+  stepOver: document.querySelector('#debug-step-over'), stepInto: document.querySelector('#debug-step-into'),
+  stepInstruction: document.querySelector('#debug-step-instruction'), restart: document.querySelector('#debug-restart'),
   stopDebug: document.querySelector('#debug-stop'), debugPanel: document.querySelector('#debug-panel'),
   debugStatus: document.querySelector('#debug-status'), registers: document.querySelector('#registers'),
 };
 const language = new Compartment();
+const readOnly = new Compartment();
 const projectFS = new IndexedDbProjectFS();
 const engine = createWebNP2(document.querySelector('#screen'));
 const debugController = createDebugger(engine);
@@ -46,10 +50,34 @@ let runSequence = 0;
 let booted;
 let session;
 let debugMap;
+let disassemblyView;
 let directoryFS;
 let directoryListing;
 let currentEncoding = 'utf-8';
+let panesSwapped = false;
+let lastShortcut = null;
 const breakpointLines = new Set();
+const PANES_SWAPPED_KEY = 'pc98dev:panes-swapped';
+const GUARDED_KEYBOARD_TARGETS = ['.file-bar', '.editor-card', '.debug-panel'];
+
+function loadPanesSwapped() {
+  try { return localStorage.getItem(PANES_SWAPPED_KEY) === '1'; }
+  catch { return false; }
+}
+
+function setPanesSwapped(value) {
+  panesSwapped = Boolean(value);
+  document.body.classList.toggle('panes-swapped', panesSwapped);
+  nodes.swapPanes.setAttribute('aria-pressed', String(panesSwapped));
+  // ストレージを拒否する環境でも、現在のページ内では配置変更を有効にする。
+  try {
+    if (panesSwapped) localStorage.setItem(PANES_SWAPPED_KEY, '1');
+    else localStorage.removeItem(PANES_SWAPPED_KEY);
+  } catch {}
+  return panesSwapped;
+}
+
+function getPanesSwapped() { return panesSwapped; }
 
 function setSaveState(value) {
   dirty = value;
@@ -135,6 +163,7 @@ const editor = new EditorView({
     doc: '',
     extensions: [
       breakpointGutter,
+      readOnly.of([]),
       lineNumbers(), highlightActiveLineGutter(), highlightSpecialChars(), history(), drawSelection(),
       dropCursor(), EditorState.allowMultipleSelections.of(true), indentOnInput(), bracketMatching(),
       rectangularSelection(), crosshairCursor(), highlightActiveLine(), syntaxHighlighting(defaultHighlightStyle),
@@ -337,12 +366,28 @@ function setDebugStatus(message, error = false) {
   nodes.debugStatus.classList.toggle('error', error);
 }
 
+/**
+ * contentEditableを保ったまま利用者入力だけを止め、BP gutter、プログラム的な差し替え、
+ * contentEditableを測る既存レイアウト検証をいずれも有効なままにする。
+ */
+function setEditorReadOnly(value) {
+  const locked = Boolean(value);
+  if (editor.state.readOnly === locked) return;
+  editor.dispatch({ effects: readOnly.reconfigure(locked ? EditorState.readOnly.of(true) : []) });
+}
+
 function setDebugControls(active) {
   nodes.debugPanel.hidden = !active;
+  nodes.disassemblyPanel.hidden = !active;
+  nodes.editLock.hidden = !active;
+  document.body.classList.toggle('debugging', active);
+  setEditorReadOnly(active);
   const paused = active && session?.isPaused();
-  nodes.step.disabled = !paused;
-  nodes.nextLine.disabled = !paused;
-  nodes.continue.disabled = !paused || breakpointLines.size === 0;
+  nodes.continue.disabled = !paused;
+  nodes.stepOver.disabled = !paused;
+  nodes.stepInto.disabled = !paused;
+  nodes.stepInstruction.disabled = !paused;
+  nodes.restart.disabled = !active || !lastBuild;
   nodes.stopDebug.disabled = !active;
 }
 
@@ -362,6 +407,12 @@ function refreshDebugViews() {
   if (!session?.isStarted() || !session.isPaused()) return null;
   const regs = session.registers();
   renderRegisters(regs);
+  disassemblyView.update({
+    seg: regs.cs,
+    eip: regs.eip,
+    lines: debugController.disassemble(regs.cs, regs.eip, 12),
+    breakpoints: new Set(),
+  });
   const line = session.currentLine();
   syncDebugMarks(line);
   nodes.screenText.textContent = engine.getScreenText().text;
@@ -400,6 +451,13 @@ async function startDebug() {
   if (!built?.ok) return built;
   if (!debugMap) throw new Error('行マップを生成できませんでした');
   if (session?.isStarted()) await stopDebug();
+  if (!disassemblyView) {
+    disassemblyView = mountDisassemblyView(nodes.disassembly, {
+      addBreakpointLabel: 'ブレークポイントを追加',
+      removeBreakpointLabel: 'ブレークポイントを解除',
+      onToggleBreakpoint: () => {},
+    });
+  }
   nodes.debugPanel.hidden = false;
   setDebugStatus('FreeDOSとデバッガローダを準備中…');
   await mountProgramFd(built);
@@ -444,6 +502,18 @@ function stepOverLine() {
   return result;
 }
 
+function stepInto() {
+  const result = requireSession().stepInto();
+  refreshDebugViews();
+  if (!result.entered && !result.steppedOverCall && result.line !== result.expectedLine) {
+    throw new Error(`次行が不一致です: expected=${result.expectedLine}, actual=${result.line}`);
+  }
+  if (result.entered) setDebugStatus(`呼び先の ${result.line} 行へ入りました`);
+  else if (result.steppedOverCall) setDebugStatus(`行情報の無い呼び先を抜けて ${result.line} 行へ進みました`);
+  else setDebugStatus(`次のソース ${result.line} 行へ進みました`);
+  return result;
+}
+
 function continueToBreakpoint() {
   const result = requireSession().continueToBreakpoint();
   refreshDebugViews();
@@ -452,6 +522,12 @@ function continueToBreakpoint() {
   }
   setDebugStatus(`ソース ${result.line} 行で停止しました`);
   return result;
+}
+
+/** BPが無ければ停止を解除し、通常の「続行」と同じくプログラム終了まで走らせる。 */
+async function continueOrRun() {
+  if (breakpointLines.size > 0) return continueToBreakpoint();
+  return stopDebug();
 }
 
 /** BPを外して通常実行へ戻す。プログラム終了後のDOSプロンプト復帰まで待つ。 */
@@ -528,6 +604,7 @@ async function openFolder() {
 }
 
 async function initialize() {
+  setPanesSwapped(loadPanesSwapped());
   await projectFS.open();
   const response = await fetch('./freedos/fd98_2hd.xdf');
   if (!response.ok) throw new Error(`FreeDOS: HTTP ${response.status}`);
@@ -548,19 +625,59 @@ nodes.newFile.addEventListener('click', () => createFile(nodes.newPath.value).ca
 nodes.save.addEventListener('click', () => saveFile().catch((error) => showErrors([{ stage: 'save', line: 0, message: error.message }])));
 nodes.folderOpen.addEventListener('click', () => openFolder().catch((error) => setDirectoryLabel(error.message)));
 nodes.folderDisconnect.addEventListener('click', () => disconnectDirectory().catch((error) => setDirectoryLabel(error.message)));
+nodes.swapPanes.addEventListener('click', () => setPanesSwapped(!panesSwapped));
 nodes.build.addEventListener('click', () => buildCurrent());
 nodes.run.addEventListener('click', () => runCurrent());
 nodes.debug.addEventListener('click', () => startDebug().catch((error) => setDebugStatus(error.message, true)));
-nodes.step.addEventListener('click', () => { try { stepInstruction(); } catch (error) { setDebugStatus(error.message, true); } });
-nodes.nextLine.addEventListener('click', () => { try { stepOverLine(); } catch (error) { setDebugStatus(error.message, true); } });
-nodes.continue.addEventListener('click', () => { try { continueToBreakpoint(); } catch (error) { setDebugStatus(error.message, true); } });
+nodes.continue.addEventListener('click', () => continueOrRun().catch((error) => setDebugStatus(error.message, true)));
+nodes.stepOver.addEventListener('click', () => { try { stepOverLine(); } catch (error) { setDebugStatus(error.message, true); } });
+nodes.stepInto.addEventListener('click', () => { try { stepInto(); } catch (error) { setDebugStatus(error.message, true); } });
+nodes.stepInstruction.addEventListener('click', () => { try { stepInstruction(); } catch (error) { setDebugStatus(error.message, true); } });
+nodes.restart.addEventListener('click', () => startDebug().catch((error) => setDebugStatus(error.message, true)));
 nodes.stopDebug.addEventListener('click', () => stopDebug().catch((error) => setDebugStatus(error.message, true)));
+
+function handleDebugShortcut(event) {
+  if (!session?.isStarted()) return;
+  const actions = {
+    F5: ['continue', continueOrRun],
+    F10: ['step-over', stepOverLine],
+    F11: ['step-into', stepInto],
+  };
+  const selected = actions[event.key];
+  if (!selected) return;
+  event.preventDefault();
+  lastShortcut = selected[0];
+  Promise.resolve().then(selected[1]).catch((error) => setDebugStatus(error.message, true));
+  return true;
+}
+
+for (const selector of GUARDED_KEYBOARD_TARGETS) {
+  const node = document.querySelector(selector);
+  for (const type of ['keydown', 'keypress', 'keyup']) {
+    node.addEventListener(type, (event) => {
+      if (type === 'keydown') handleDebugShortcut(event);
+      /**
+       * SDL2がdocumentでpreventDefaultする前にbubble段で止める。capture段で止めると
+       * CodeMirrorやフォーム自身にも届かない。処理済みショートカットもdocumentへ渡さず二重発火を防ぐ。
+       */
+      event.stopPropagation();
+    });
+  }
+}
+
+// canvasやbodyにフォーカスがある場合も同じショートカット処理へ到達させる。
+document.addEventListener('keydown', (event) => {
+  handleDebugShortcut(event);
+});
 
 const ready = initialize();
 ready.catch((error) => { nodes.buildStatus.textContent = error.message; nodes.buildStatus.classList.add('error'); });
 window.pc98workbench = {
   ready, openFile, createFile, saveFile, buildCurrent, runCurrent,
-  startDebug, stopDebug, toggleBreakpoint, stepInstruction, stepOverLine, continueToBreakpoint,
+  startDebug, stopDebug, toggleBreakpoint, stepInstruction, stepOverLine, stepInto,
+  continueToBreakpoint, continueOrRun, setPanesSwapped, getPanesSwapped,
+  getLastShortcut: () => lastShortcut,
+  getGuardedKeyboardTargets: () => [...GUARDED_KEYBOARD_TARGETS],
   getDebugState: () => ({
     started: Boolean(session?.isStarted()), paused: Boolean(session?.isPaused()),
     kind: debugMap?.kind ?? null, breakpoints: [...breakpointLines].sort((a, b) => a - b),
@@ -593,5 +710,9 @@ window.pc98workbench = {
     registers: [...nodes.registers.querySelectorAll('[data-ide-register]')]
       .map((item) => [item.dataset.ideRegister, Number(item.dataset.value)]),
     debugPanelVisible: !nodes.debugPanel.hidden,
+    disassemblyVisible: !nodes.disassemblyPanel.hidden,
+    disassemblyRows: nodes.disassembly.querySelectorAll('[data-debugger-disasm-row="true"]').length,
+    readOnly: editor.state.readOnly,
   }),
+  isEditorReadOnly: () => editor.state.readOnly,
 };

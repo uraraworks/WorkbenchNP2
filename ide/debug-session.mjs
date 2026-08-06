@@ -106,6 +106,30 @@ export function createDebugSession(debug) {
       return { line: currentLine(), expectedLine: next.line, registers: registers() };
     },
 
+    /**
+     * call なら呼び先へ入り、それ以外は行送りと同じにする。
+     * 呼び先に行情報が無い（ライブラリやDOS）ときは、そこで迷子にせず
+     * 戻り先アドレスへBPを置いて呼び出し元まで抜けてから次の行へ進める。
+     */
+    stepInto(maxSteps = 1_000_000) {
+      requireStarted();
+      const regs = registers();
+      if (regs.cs !== control.cs) throw new Error('対象CS外で停止しているためステップインできません');
+      const [instruction] = debug.disassemble(regs.cs, regs.eip, 1);
+      if (!/^call\b/i.test(instruction?.text ?? '')) return { ...this.stepOverLine(maxSteps), entered: false };
+      const returnOffset = (regs.eip + instruction.len) & 0xffff;
+      debug.step(1);
+      const inside = registers();
+      const line = inside.cs === control.cs ? map.lineAt(inside.eip) : null;
+      if (line !== null) return { line, expectedLine: line, entered: true, registers: inside };
+      const slot = BREAKPOINT_SLOTS.stepOver;
+      debug.setBreakpoint(slot, control.cs, returnOffset, true);
+      const hit = debug.runUntilBreakpoint(maxSteps);
+      debug.setBreakpoint(slot, control.cs, returnOffset, false);
+      if (hit !== slot) throw new Error(`呼び出し元へ戻れませんでした (hit=${hit})`);
+      return { ...this.stepOverLine(maxSteps), entered: false, steppedOverCall: true };
+    },
+
     stepInstruction(count = 1) {
       requireStarted();
       return { steps: debug.step(count), line: currentLine(), registers: registers() };

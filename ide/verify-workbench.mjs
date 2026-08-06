@@ -94,6 +94,42 @@ try {
   assertRun(run.screen, output);
   assert.throws(() => assertRun(run.screen, 'Workbench typo!'));
 
+  const guardedSource = await page.evaluate(() => ({
+    source: window.pc98workbench.getValue(), screen: window.pc98workbench.getScreenText().text,
+    targets: window.pc98workbench.getGuardedKeyboardTargets(),
+  }));
+  assert.deepEqual(guardedSource.targets, ['.file-bar', '.editor-card', '.debug-panel']);
+  await page.click('#editor .cm-content');
+  await page.keyboard.type('QQQ');
+  const editorGuard = await page.evaluate(() => ({
+    source: window.pc98workbench.getValue(), screen: window.pc98workbench.getScreenText().text,
+  }));
+  assert.notEqual(editorGuard.source, guardedSource.source, '実キー入力がエディタへ届きません');
+  assert.equal(editorGuard.screen, guardedSource.screen, 'エディタへの実キー入力がゲスト画面を変えました');
+  assert.ok(!editorGuard.screen.toLowerCase().includes('qqq'), 'エディタのQQQがゲストへ漏れました');
+  await page.evaluate((source) => window.pc98workbench.setValue(source), guardedSource.source);
+
+  const formScreen = await page.evaluate(() => window.pc98workbench.getScreenText().text);
+  await page.click('#new-path');
+  await page.keyboard.type('guarded/main.asm');
+  assert.equal(await page.$eval('#new-path', (node) => node.value), 'guarded/main.asm');
+  const formScreenAfter = await page.evaluate(() => window.pc98workbench.getScreenText().text);
+  assert.equal(formScreenAfter, formScreen, 'ファイル名の実キー入力がゲスト画面を変えました');
+  assert.ok(!formScreenAfter.toLowerCase().includes('guarded/main.asm'), 'ファイル名がゲストへ漏れました');
+  await page.$eval('#new-path', (node) => { node.value = ''; });
+
+  const canvasScreen = await page.evaluate(() => window.pc98workbench.getScreenText().text);
+  await page.click('#screen');
+  await page.keyboard.type('DIR');
+  await page.keyboard.press('Enter');
+  await page.waitForFunction((before) => {
+    const screen = window.pc98workbench.getScreenText();
+    const cursorLine = screen.lines[screen.cursor?.row] ?? '';
+    return screen.text !== before && /(?:^|\s)[A-Z]:?\\?>\s*$/i.test(cursorLine);
+  }, {}, canvasScreen);
+  const canvasScreenAfter = await page.evaluate(() => window.pc98workbench.getScreenText().text);
+  assert.notEqual(canvasScreenAfter, canvasScreen, 'canvasへの実キー入力にゲストが反応しません');
+
   await page.evaluate(() => window.pc98workbench.openFile('sample', 'samples/hello-c.c'));
   const cBuild = await page.evaluate(() => window.pc98workbench.buildCurrent());
   assert.equal(cBuild.ok, true, JSON.stringify(cBuild.errors));
@@ -157,7 +193,106 @@ try {
   assert.equal(asmDebug.hit.cs, asmDebug.control.cs);
   assert.notEqual(asmDebug.hit.eip, 0x100, 'BP停止IPがエントリのままです');
   assert.equal(asmDebug.atBreakpoint.marks.currentLine, 11);
+  assert.equal(asmDebug.atBreakpoint.marks.disassemblyVisible, true, 'デバッグ中に逆アセンブルが表示されていません');
+  assert.ok(asmDebug.atBreakpoint.marks.disassemblyRows > 0, '逆アセンブル行が描画されていません');
   assert.equal(asmDebug.cpuPaused, true, 'BP停止中なのにCPUが動いています');
+
+  const lockedSource = await page.evaluate(() => ({
+    source: window.pc98workbench.getValue(), screen: window.pc98workbench.getScreenText().text,
+  }));
+  await page.click('#editor .cm-content');
+  await page.keyboard.type('XXX');
+  const lockedEditor = await page.evaluate(() => ({
+    source: window.pc98workbench.getValue(),
+    screen: window.pc98workbench.getScreenText().text,
+    readOnly: window.pc98workbench.isEditorReadOnly(),
+    marksReadOnly: window.pc98workbench.getEditorMarks().readOnly,
+    lockVisible: !document.querySelector('#edit-lock').hidden,
+    debugging: document.body.classList.contains('debugging'),
+  }));
+  assert.equal(lockedEditor.source, lockedSource.source, 'デバッグ中の実キー入力でソースが変わりました');
+  assert.equal(lockedEditor.screen, lockedSource.screen, 'デバッグ中のXXXがゲスト画面を変えました');
+  assert.ok(!lockedEditor.screen.toLowerCase().includes('xxx'), 'デバッグ中のXXXがゲストへ漏れました');
+  assert.equal(lockedEditor.readOnly, true);
+  assert.equal(lockedEditor.marksReadOnly, true);
+  assert.equal(lockedEditor.lockVisible, true);
+  assert.equal(lockedEditor.debugging, true);
+
+  const toolbar = await page.$$eval('.debug-actions button', (buttons) => buttons.map((button) => ({
+    id: button.id, disabled: button.disabled, title: button.title,
+    ariaLabel: button.getAttribute('aria-label'),
+  })));
+  assert.deepEqual(toolbar.map((button) => button.id), [
+    'debug-continue', 'debug-step-over', 'debug-step-into',
+    'debug-step-instruction', 'debug-restart', 'debug-stop',
+  ], 'デバッグツールバーの構成が期待と不一致です');
+  assert.ok(toolbar.every((button) => !button.disabled), 'デバッグ中に無効なツールバーボタンがあります');
+  assert.ok(toolbar.every((button) => button.title && button.ariaLabel), 'ツールバーに説明の無いアイコンがあります');
+  assert.ok(toolbar.every((button) => button.title === button.ariaLabel), 'titleとaria-labelの説明が一致しません');
+
+  const swapButton = await page.$eval('#swap-panes', (button) => ({
+    title: button.title, ariaLabel: button.getAttribute('aria-label'),
+  }));
+  assert.ok(swapButton.title && swapButton.ariaLabel, '配置入替ボタンに説明がありません');
+  assert.equal(swapButton.title, swapButton.ariaLabel);
+
+  const paneSwap = await page.evaluate(() => {
+    const wb = window.pc98workbench;
+    const before = wb.getLayout();
+    wb.setPanesSwapped(true);
+    const swapped = wb.getLayout();
+    const stored = localStorage.getItem('pc98dev:panes-swapped');
+    const bodyClassWhileSwapped = document.body.classList.contains('panes-swapped');
+    wb.setPanesSwapped(false);
+    const restored = wb.getLayout();
+    return {
+      before, swapped, restored, stored, bodyClassWhileSwapped,
+      classWhileSwapped: swapped.editor.left > swapped.screen.left,
+      classAfterRestore: document.body.classList.contains('panes-swapped'),
+      stateAfterRestore: wb.getPanesSwapped(),
+    };
+  });
+  assert.ok(paneSwap.before.editor.left < paneSwap.before.screen.left, '初期配置がエディタ左ではありません');
+  assert.equal(paneSwap.bodyClassWhileSwapped, true, '入替時にbodyへpanes-swappedが付きません');
+  assert.equal(paneSwap.classWhileSwapped, true, '入替後にPC-98画面が左へ移っていません');
+  assert.equal(paneSwap.stored, '1', '配置の入替状態がlocalStorageへ保存されていません');
+  assert.ok(paneSwap.restored.editor.left < paneSwap.restored.screen.left, '配置が元の左右関係へ戻っていません');
+  assert.equal(paneSwap.classAfterRestore, false);
+  assert.equal(paneSwap.stateAfterRestore, false);
+
+  const noBreakpointRun = await page.evaluate(async () => {
+    const wb = window.pc98workbench;
+    wb.toggleBreakpoint(11);
+    return wb.continueOrRun();
+  });
+  assertRun(noBreakpointRun, output);
+
+  const stepInto = await page.evaluate(async () => {
+    const wb = window.pc98workbench;
+    await wb.startDebug();
+    const result = wb.stepInto();
+    return { result, marks: wb.getEditorMarks() };
+  });
+  assert.equal(stepInto.result.entered, false, 'callの無いhello.asmで呼び先へ入った扱いになりました');
+  assert.equal(stepInto.result.line, stepInto.result.expectedLine);
+  assert.equal(stepInto.marks.currentLine, stepInto.result.line, 'ステップイン後の停止行強調が不一致です');
+
+  const instruction = await page.evaluate(() => {
+    const result = window.pc98workbench.stepInstruction();
+    return { result, marks: window.pc98workbench.getEditorMarks() };
+  });
+  assert.equal(instruction.result.steps, 1);
+  assert.equal(instruction.marks.currentLine, instruction.result.line, '1命令実行後の停止行強調が不一致です');
+
+  const beforeF10 = (await page.evaluate(() => window.pc98workbench.getDebugState())).currentLine;
+  await page.keyboard.press('F10');
+  await page.waitForFunction((line) => window.pc98workbench.getDebugState().currentLine !== line, {}, beforeF10);
+  assert.equal(await page.evaluate(() => window.pc98workbench.getLastShortcut()), 'step-over');
+  const beforeF11 = (await page.evaluate(() => window.pc98workbench.getDebugState())).currentLine;
+  await page.keyboard.press('F11');
+  await page.waitForFunction((line) => window.pc98workbench.getDebugState().currentLine !== line, {}, beforeF11);
+  assert.equal(await page.evaluate(() => window.pc98workbench.getLastShortcut()), 'step-into');
+  await page.evaluate(() => window.pc98workbench.toggleBreakpoint(11));
 
   await mkdir(SHOT_DIR, { recursive: true });
   await page.screenshot({ path: DESKTOP_SHOT });
@@ -167,8 +302,26 @@ try {
   assert.throws(() => assertRun(asmResume, 'Workbench typo!'));
   // 通常実行へ戻したら停止行強調とレジスタは消す。BPは利用者の意図なので次のデバッグまで残す。
   assert.deepEqual(await page.evaluate(() => window.pc98workbench.getEditorMarks()),
-    { breakpointDots: 1, currentLine: null, registers: [], debugPanelVisible: false },
+    {
+      breakpointDots: 1, currentLine: null, registers: [], debugPanelVisible: false,
+      disassemblyVisible: false, disassemblyRows: 12, readOnly: false,
+    },
     'デバッグ終了後のエディタ状態が期待と不一致です');
+
+  const unlocked = await page.evaluate(() => ({
+    source: window.pc98workbench.getValue(),
+    readOnly: window.pc98workbench.isEditorReadOnly(),
+    lockHidden: document.querySelector('#edit-lock').hidden,
+    debugging: document.body.classList.contains('debugging'),
+  }));
+  assert.equal(unlocked.readOnly, false);
+  assert.equal(unlocked.lockHidden, true);
+  assert.equal(unlocked.debugging, false);
+  await page.click('#editor .cm-content');
+  await page.keyboard.type('XXX');
+  assert.notEqual(await page.evaluate(() => window.pc98workbench.getValue()), unlocked.source,
+    'デバッグ停止後も実キー入力が反映されません');
+  await page.evaluate((source) => window.pc98workbench.setValue(source), unlocked.source);
 
   // C側は1997年のSTRLEN.Cを、原文の行番号のままエディタ上でBP停止させる。
   await page.evaluate(() => window.pc98workbench.openFile('sample', 'samples/legacy/kensyuu/STRLEN.C'));
@@ -229,9 +382,14 @@ try {
   await page.screenshot({ path: MOBILE_SHOT });
 
   console.log(`[PASS] file/edit/IndexedDB/build/run: ${output}`);
+  console.log('[PASS] 実キー入力 guard: editor/file bar stay local, canvas reaches guest DOS');
   console.log('[PASS] .c auto build: HELLO-C.EXE');
   console.log('[PASS] structured error: line=4, list=true, gutter=true, wrong-line fault detected');
   console.log(`[PASS] ASM debug in editor: entry=8 next=9 bp=11 cs=${asmDebug.control.cs.toString(16).toUpperCase()} dots=1, non-mapped line rejected`);
+  console.log('[PASS] debugger toolbar: 6 accessible icon controls, step-into/instruction, F10/F11 shortcuts, continue without BP');
+  console.log('[PASS] workbench disassembly: rows visible while debugging and hidden after stop');
+  console.log('[PASS] editor lock: real typing blocked while debugging and accepted after stop');
+  console.log('[PASS] pane swap: desktop order reversed/restored and localStorage persisted');
   console.log(`[PASS] C debug in editor: STRLEN.C line 22 "${cDebug.sourceLine}" stop, resumed output "3"`);
   console.log(`[PASS] file bar: folder controls visible, no overflow (desktop ${desktopBar.overflow}px / mobile ${mobileBar.overflow}px)`);
   console.log(`[PASS] responsive DOM: desktop editor/screen=${Math.round(desktopLayout.editor.width)}/${Math.round(desktopLayout.screen.width)} mobile=${Math.round(mobile.editor.width)}/${Math.round(mobile.screen.width)}`);

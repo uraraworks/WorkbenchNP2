@@ -6,6 +6,7 @@ button { border: 1px solid #456175; border-radius: 6px; padding: 7px 11px; color
 button:hover { background: #29495f; }
 button:disabled { opacity: .45; }
 .app-header { min-height: 76px; display: flex; justify-content: space-between; align-items: center; padding: 14px 20px; border-bottom: 1px solid #263846; }
+body.debugging .app-header { background: #6b3410; border-bottom-color: #cc6633; }
 .app-header h1 { margin: 0; font-size: 24px; letter-spacing: .04em; }
 .app-header p { margin: 3px 0 0; color: #8fa9b9; font-size: 13px; }
 .app-header a { color: #91d5ff; font-size: 13px; }
@@ -17,14 +18,21 @@ button:disabled { opacity: .45; }
 #save-state { margin-left: auto; color: #8fa9b9; font-size: 12px; }
 #save-state.dirty { color: #ffd479; }
 .workspace-grid { display: grid; grid-template-columns: minmax(430px, 1fr) minmax(480px, 1fr); gap: 12px; padding: 12px 20px 20px; }
+body.panes-swapped .workspace-grid { grid-template-columns: minmax(480px, 1fr) minmax(430px, 1fr); }
+body.panes-swapped .editor-card { order: 2; }
+body.panes-swapped .machine-card { order: 1; }
 .editor-card, .machine-card { min-width: 0; border: 1px solid #314857; border-radius: 10px; background: rgba(16, 26, 34, .94); overflow: hidden; }
 .panel-heading { min-height: 51px; display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 9px 12px; border-bottom: 1px solid #2a3e4c; }
 .panel-heading h2 { margin: 0; font-size: 14px; }
 .panel-heading span { color: #8fa9b9; font: 11px ui-monospace, monospace; }
+.panel-heading .edit-lock { display: inline-block; margin-left: 7px; padding: 2px 7px; border-radius: 4px; background: #6b3410; color: #ffd7b0; font-size: 11px; }
+.panel-heading .edit-lock[hidden] { display: none; }
 .build-actions { display: flex; gap: 6px; }
 #run { background: #176044; border-color: #2c926d; }
 #editor { height: min(62vh, 610px); min-height: 360px; }
 .cm-editor { height: 100%; background: #0c141a; font-size: 13px; }
+body.debugging .cm-editor { background: #0e1218; }
+body.debugging .cm-content { caret-color: transparent; }
 .cm-scroller { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .cm-gutters { background: #111e27 !important; border-right-color: #263d4c !important; }
 .cm-activeLine, .cm-activeLineGutter { background: rgba(67, 137, 177, .18) !important; }
@@ -35,6 +43,8 @@ button:disabled { opacity: .45; }
 .cm-debug-current { background: rgba(255, 212, 121, .17); box-shadow: inset 3px 0 0 #ffd479; }
 .debug-panel { margin: 0 12px 12px; padding: 9px 10px; border: 1px solid #2d4351; border-radius: 8px; background: rgba(9, 17, 23, .8); }
 .debug-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.debug-actions button { display: inline-grid; place-items: center; min-width: 36px; height: 34px; padding: 0 8px; font-size: 17px; line-height: 1; }
+#debug-continue { background: #176044; border-color: #2c926d; }
 #debug { background: #4a3a12; border-color: #8a6a24; }
 #debug-status { margin-top: 7px; color: #95bad0; font: 12px ui-monospace, monospace; }
 #debug-status.error { color: #ff9f9f; }
@@ -44,6 +54,9 @@ button:disabled { opacity: .45; }
 #build-status { min-height: 34px; padding: 8px 12px; border-top: 1px solid #293d4a; color: #95bad0; font-size: 12px; }
 #build-status.error { color: #ff9f9f; }
 #build-errors { min-height: 0; max-height: 110px; overflow: auto; margin: 0; padding: 0 12px 8px 34px; color: #ffb2b2; font: 12px/1.45 ui-monospace, monospace; }
+.disassembly-panel { max-height: 190px; overflow: auto; margin: 0; padding: 8px 12px 12px; border-top: 1px solid #293d4a; color: #a9c0ce; background: #0a1116; }
+.disassembly-panel h3 { margin: 0 0 6px; color: #95bad0; font-size: 12px; }
+.disassembly-panel .debugger-disasm-list { border-color: #293d4a; }
 .screen-shell { margin: 12px; display: flex; justify-content: center; border: 1px solid #23313a; background: #030405; }
 #screen { display: block; width: min(100%, 640px); height: auto; aspect-ratio: 8 / 5; image-rendering: pixelated; }
 #screen-text { margin: 0 12px 12px; height: 112px; overflow: auto; color: #7e9aaa; background: #0a1116; font: 10px/1.25 ui-monospace, monospace; white-space: pre-wrap; }
@@ -56,10 +69,12 @@ button:disabled { opacity: .45; }
   #folder-state { max-width: 100%; width: 100%; }
   #save-state { width: 100%; margin: 0; }
   .workspace-grid { grid-template-columns: 1fr; gap: 8px; padding: 8px 10px 12px; }
+  body.panes-swapped .workspace-grid { grid-template-columns: 1fr; }
   .panel-heading { min-height: 42px; padding: 5px 8px; }
   #editor { height: 285px; min-height: 285px; }
   #build-status { min-height: 29px; padding: 5px 8px; }
   #build-errors { max-height: 56px; }
+  .disassembly-panel { max-height: 120px; padding: 6px 8px 8px; }
   .screen-shell { margin: 7px; }
   .debug-panel { margin: 0 7px 7px; padding: 6px 7px; }
   .ide-registers { grid-template-columns: repeat(2, minmax(0, 1fr)); }
