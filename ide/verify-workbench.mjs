@@ -88,6 +88,8 @@ try {
       uiBackground: rootStyle.getPropertyValue('--vsc-ui-bg').trim(),
       debuggingBackground: rootStyle.getPropertyValue('--vsc-debugging').trim(),
       normalHeaderBackground: getComputedStyle(document.querySelector('.app-header')).backgroundColor,
+      footerBackground: getComputedStyle(document.querySelector('footer.app-footer')).backgroundColor,
+      bodyBackground: getComputedStyle(document.body).backgroundColor,
     };
   });
   assert.ok(shell.machineStatus.trim(), 'ready直後の統合状況表示が空です');
@@ -97,6 +99,9 @@ try {
   assert.equal(shell.footerHrefs.length, 7, 'フッタのライセンスリンクが7件ではありません');
   assert.ok(theme.editorBackground && theme.uiBackground && theme.debuggingBackground,
     ':rootのVS Codeテーマ変数が定義されていません');
+  assert.equal(theme.normalHeaderBackground, 'rgb(12, 12, 12)', 'ヘッダ背景がWebNP2実測値ではありません');
+  assert.equal(theme.footerBackground, 'rgb(236, 236, 236)', 'フッタ背景がWebNP2実測値ではありません');
+  assert.equal(theme.bodyBackground, 'rgb(250, 250, 250)', 'ページ背景がWebNP2実測値ではありません');
   for (const href of shell.footerHrefs) {
     const response = await fetch(href);
     assert.equal(response.status, 200, `フッタリンクがHTTP 200ではありません: ${href}`);
@@ -243,6 +248,38 @@ try {
   assert.notEqual(canvasScreenAfter, canvasScreen, 'canvasへの実キー入力にゲストが反応しません');
 
   await page.evaluate(() => window.pc98workbench.openFile('sample', 'samples/hello-c.c'));
+  // 暗背景に沈むトークン色を防ぐ。定数の一致ではなく、実際の描画色と背景のコントラスト比を測る。
+  const syntax = await page.evaluate(async () => {
+    // Lezerの解析は数フレームかけて進むので、色が出揃うまで待ってから測る。
+    const distinct = () => new Set([...document.querySelectorAll('#editor .cm-line span')]
+      .map((node) => getComputedStyle(node).color)).size;
+    for (let attempt = 0; attempt < 60 && distinct() < 4; attempt++) {
+      await new Promise((done) => setTimeout(done, 50));
+    }
+    const parse = (value) => value.match(/\d+/g).slice(0, 3).map(Number);
+    const luminance = ([r, g, b]) => {
+      const channel = (v) => (v / 255 <= 0.03928 ? v / 255 / 12.92 : ((v / 255 + 0.055) / 1.055) ** 2.4);
+      return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+    };
+    const editorBg = parse(getComputedStyle(document.querySelector('.cm-editor')).backgroundColor);
+    const tokens = new Map();
+    for (const node of document.querySelectorAll('#editor .cm-line span')) {
+      const color = getComputedStyle(node).color;
+      if (!tokens.has(color)) tokens.set(color, node.textContent.trim().slice(0, 20));
+    }
+    const background = luminance(editorBg);
+    return [...tokens.entries()].map(([color, sample]) => {
+      const token = luminance(parse(color));
+      const ratio = (Math.max(token, background) + 0.05) / (Math.min(token, background) + 0.05);
+      return { color, sample, ratio: Number(ratio.toFixed(2)) };
+    });
+  });
+  assert.ok(syntax.length >= 4, `Cのトークン色が少なすぎます: ${JSON.stringify(syntax)}`);
+  const sunken = syntax.filter((token) => token.ratio < 3);
+  assert.deepEqual(sunken, [], `背景に沈むトークン色があります: ${JSON.stringify(sunken)}`);
+  assert.ok(syntax.some((token) => token.color === 'rgb(197, 134, 192)'),
+    `制御キーワードがVS Code Dark+の色ではありません: ${JSON.stringify(syntax)}`);
+
   const cBuild = await page.evaluate(() => window.pc98workbench.buildCurrent());
   assert.equal(cBuild.ok, true, JSON.stringify(cBuild.errors));
   assert.equal(cBuild.dosName, 'HELLO-C.EXE');
@@ -313,7 +350,50 @@ try {
   assert.equal(asmDebug.cpuPaused, true, 'BP停止中なのにCPUが動いています');
   assert.notEqual(asmDebug.statusAfter, asmDebug.statusBefore, 'デバッグ開始後に統合状況表示が変化しません');
   assert.notEqual(asmDebug.headerBackground, theme.normalHeaderBackground,
-    'デバッグ開始後もヘッダの背景色が通常時と同じです');
+    'デバッグ開始後もヘッダの背景色がWebNP2通常時と同じです');
+
+  const debugSections = await page.evaluate(() => ({
+    registersExists: Boolean(document.querySelector('#section-registers')),
+    breakpointsExists: Boolean(document.querySelector('#section-breakpoints')),
+    registersOpen: document.querySelector('#section-registers')?.open,
+    breakpointsOpen: document.querySelector('#section-breakpoints')?.open,
+    registerCount: document.querySelectorAll('#registers [data-ide-register]').length,
+    breakpointCount: document.querySelector('#breakpoint-count')?.textContent,
+    breakpointItems: document.querySelectorAll('#breakpoint-list [data-breakpoint-line]').length,
+    breakpoints: window.pc98workbench.getBreakpointList(),
+  }));
+  assert.equal(debugSections.registersExists, true, 'レジスタセクションがありません');
+  assert.equal(debugSections.breakpointsExists, true, 'ブレークポイントセクションがありません');
+  assert.equal(debugSections.registersOpen, true, 'レジスタセクションが開いていません');
+  assert.equal(debugSections.breakpointsOpen, true, 'ブレークポイントセクションが開いていません');
+  assert.equal(debugSections.registerCount, 8, 'レジスタ表示が8件ではありません');
+  assert.equal(debugSections.breakpointCount, '1', 'BP件数バッジが1ではありません');
+  assert.equal(debugSections.breakpointItems, 1, 'BP一覧が1件ではありません');
+  assert.deepEqual(debugSections.breakpoints, [{ line: 11, label: 'hello.asm:11' }],
+    'BP一覧のファイル名:行ラベルが不一致です');
+
+  const stateBeforeBreakpointGoto = await page.evaluate(() => window.pc98workbench.getState());
+  await page.click('.breakpoint-goto');
+  assert.equal(await page.evaluate(() => window.pc98workbench.getCursorLine()), 11,
+    'BP一覧からエディタの該当行へ移動しませんでした');
+  assert.deepEqual(await page.evaluate(() => window.pc98workbench.getState()), stateBeforeBreakpointGoto,
+    'BP一覧からの行移動でworkbench状態が変化しました');
+
+  await page.click('.breakpoint-remove');
+  const removedBreakpoint = await page.evaluate(() => ({
+    state: window.pc98workbench.getDebugState().breakpoints,
+    list: window.pc98workbench.getBreakpointList(),
+    count: document.querySelector('#breakpoint-count').textContent,
+    itemCount: document.querySelectorAll('#breakpoint-list [data-breakpoint-line]').length,
+    guide: document.querySelector('#breakpoint-list').textContent,
+  }));
+  assert.deepEqual(removedBreakpoint.state, [], '削除ボタンでBPが解除されませんでした');
+  assert.deepEqual(removedBreakpoint.list, [], '削除後も公開BP一覧に項目があります');
+  assert.equal(removedBreakpoint.count, '0', '削除後のBP件数バッジが0ではありません');
+  assert.equal(removedBreakpoint.itemCount, 0, '削除後もBP一覧項目が残っています');
+  assert.ok(removedBreakpoint.guide.includes('BPはエディタ左端のgutterをクリックして設定します'),
+    'BPが0件の案内文がありません');
+  await page.evaluate(() => window.pc98workbench.toggleBreakpoint(11));
 
   const lockedSource = await page.evaluate(() => ({
     source: window.pc98workbench.getValue(), screen: window.pc98workbench.getScreenText().text,
@@ -555,15 +635,17 @@ try {
 
   console.log(`[PASS] file/edit/IndexedDB/build/run: ${output}`);
   console.log('[PASS] machine status/prewarm: one status line, asynchronous boot completed, build/debug transitions');
-  console.log('[PASS] header/footer: retired debugger link absent, 7 license links returned HTTP 200');
+  console.log('[PASS] header/footer: WebNP2 colors, retired debugger link absent, 7 license links returned HTTP 200');
   console.log(`[PASS] run separator: ${separators} blank prompt lines before a consecutive run`);
   console.log('[PASS] 実キー入力 guard: editor/file bar stay local, canvas reaches guest DOS');
   console.log(`[PASS] Tab/caret: real tab at cursor (tab-size ${tabbed.tabSize}), caret drawn in ${tabbed.cursor.color}`);
+  console.log(`[PASS] syntax colors: ${syntax.length} tokens, min contrast ${Math.min(...syntax.map((t) => t.ratio))}:1 on the dark editor`);
   console.log('[PASS] .c auto build: HELLO-C.EXE');
   console.log('[PASS] structured error: line=4, list=true, gutter=true, wrong-line fault detected');
   console.log(`[PASS] ASM debug in editor: entry=8 next=9 bp=11 cs=${asmDebug.control.cs.toString(16).toUpperCase()} dots=1, non-mapped line rejected`);
   console.log('[PASS] editor toolbar: 9 inline-SVG controls, accessible labels, build/debug mode swap and restore');
-  console.log('[PASS] VS Code Dark Modern theme: --vsc-* variables and debugging header transition');
+  console.log('[PASS] WebNP2 outer chrome + VS Code Dark Modern workspace: measured colors and debugging header transition');
+  console.log('[PASS] debug sections: 8 registers, breakpoint list/goto/remove/empty guide');
   console.log('[PASS] workbench disassembly: rows visible while debugging and hidden after stop');
   console.log('[PASS] editor lock: real typing blocked while debugging and accepted after stop');
   console.log('[PASS] pane swap: desktop order reversed/restored and localStorage persisted');

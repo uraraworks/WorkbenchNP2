@@ -70,7 +70,14 @@
       <div id="machine-status" role="status">初期化中…</div>
       <div class="screen-shell"><canvas id="screen" width="640" height="400" tabindex="0"></canvas></div>
       <section id="debug-panel" class="debug-panel" aria-label="デバッグ" hidden>
-        <div id="registers" class="ide-registers" aria-label="レジスタ（IDE独自表示）"></div>
+        <details class="debug-section" id="section-registers" open>
+          <summary>変数（レジスタ）</summary>
+          <div id="registers" class="ide-registers" aria-label="レジスタ（IDE独自表示）"></div>
+        </details>
+        <details class="debug-section" id="section-breakpoints" open>
+          <summary>ブレークポイント<span class="section-count" id="breakpoint-count">0</span></summary>
+          <ul id="breakpoint-list" aria-label="ブレークポイント一覧"></ul>
+        </details>
       </section>
       <pre id="screen-text" aria-label="PC-98テキスト画面"></pre>
     </section>

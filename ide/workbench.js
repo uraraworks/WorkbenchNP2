@@ -1,10 +1,10 @@
 import {
   Compartment, Decoration, EditorState, EditorView, GutterMarker, RangeSetBuilder, StateEffect,
-  StateField, bracketMatching, cpp, crosshairCursor, defaultHighlightStyle, defaultKeymap,
+  StateField, bracketMatching, cpp, crosshairCursor, defaultKeymap,
   drawSelection, dropCursor, gutter, highlightActiveLine, highlightActiveLineGutter,
-  highlightSpecialChars, history, historyKeymap, indentLess, indentOnInput, indentUnit,
-  insertTab, keymap, lineNumbers, lintGutter, rectangularSelection, setDiagnostics,
-  syntaxHighlighting,
+  HighlightStyle, highlightSpecialChars, history, historyKeymap, indentLess, indentOnInput,
+  indentUnit, insertTab, keymap, lineNumbers, lintGutter, rectangularSelection, setDiagnostics,
+  syntaxHighlighting, tags,
 } from './vendor/codemirror/codemirror.js';
 import { createDebugger, createWebNP2, mountDisassemblyView } from './vendor/webnp2/webnp2-embed.js';
 import { bootFreeDos, waitForCurrentDosPrompt } from './freedos-session.mjs';
@@ -35,7 +35,10 @@ const nodes = {
   stepOver: document.querySelector('#debug-step-over'), stepInto: document.querySelector('#debug-step-into'),
   stepInstruction: document.querySelector('#debug-step-instruction'), restart: document.querySelector('#debug-restart'),
   stopDebug: document.querySelector('#debug-stop'), debugPanel: document.querySelector('#debug-panel'),
-  registers: document.querySelector('#registers'),
+  sectionRegisters: document.querySelector('#section-registers'),
+  sectionBreakpoints: document.querySelector('#section-breakpoints'),
+  registers: document.querySelector('#registers'), breakpointCount: document.querySelector('#breakpoint-count'),
+  breakpointList: document.querySelector('#breakpoint-list'),
 };
 const language = new Compartment();
 const readOnly = new Compartment();
@@ -71,7 +74,21 @@ let panesSwapped = false;
 let lastShortcut = null;
 const breakpointLines = new Set();
 const PANES_SWAPPED_KEY = 'pc98dev:panes-swapped';
+const DEBUG_SECTION_KEYS = [
+  [nodes.sectionRegisters, 'pc98dev:section:registers'],
+  [nodes.sectionBreakpoints, 'pc98dev:section:breakpoints'],
+];
 const GUARDED_KEYBOARD_TARGETS = ['.file-bar', '.editor-card', '.debug-panel'];
+
+for (const [section, key] of DEBUG_SECTION_KEYS) {
+  try {
+    const stored = localStorage.getItem(key);
+    if (stored !== null) section.open = stored === '1';
+  } catch {}
+  section.addEventListener('toggle', () => {
+    try { localStorage.setItem(key, section.open ? '1' : '0'); } catch {}
+  });
+}
 
 function loadPanesSwapped() {
   try { return localStorage.getItem(PANES_SWAPPED_KEY) === '1'; }
@@ -192,6 +209,26 @@ function syncDebugMarks(currentLine = null) {
   });
 }
 
+/**
+ * 既定の defaultHighlightStyle は明るい背景向けで、暗背景だと紺や暗赤が沈んで読めない。
+ * 配色をVS Codeへ寄せてあるので、トークン色もVS Code Dark+の割り当てに合わせる。
+ */
+const darkHighlightStyle = HighlightStyle.define([
+  { tag: [tags.comment, tags.lineComment, tags.blockComment, tags.docComment], color: '#6a9955', fontStyle: 'italic' },
+  { tag: [tags.string, tags.special(tags.string), tags.character], color: '#ce9178' },
+  { tag: [tags.number, tags.integer, tags.float, tags.bool, tags.null], color: '#b5cea8' },
+  { tag: [tags.keyword, tags.modifier, tags.self, tags.atom], color: '#569cd6' },
+  { tag: [tags.controlKeyword, tags.moduleKeyword, tags.operatorKeyword], color: '#c586c0' },
+  { tag: [tags.function(tags.variableName), tags.function(tags.propertyName), tags.macroName], color: '#dcdcaa' },
+  { tag: [tags.typeName, tags.className, tags.namespace, tags.standard(tags.typeName)], color: '#4ec9b0' },
+  { tag: [tags.variableName, tags.propertyName, tags.attributeName], color: '#9cdcfe' },
+  { tag: [tags.constant(tags.variableName), tags.standard(tags.variableName)], color: '#4fc1ff' },
+  { tag: [tags.meta, tags.processingInstruction, tags.definitionKeyword], color: '#c586c0' },
+  { tag: [tags.operator, tags.punctuation, tags.separator, tags.bracket], color: '#d4d4d4' },
+  { tag: tags.labelName, color: '#dcdcaa' },
+  { tag: tags.invalid, color: '#f14c4c' },
+]);
+
 const editor = new EditorView({
   state: EditorState.create({
     doc: '',
@@ -200,7 +237,7 @@ const editor = new EditorView({
       readOnly.of([]),
       lineNumbers(), highlightActiveLineGutter(), highlightSpecialChars(), history(), drawSelection(),
       dropCursor(), EditorState.allowMultipleSelections.of(true), indentOnInput(), bracketMatching(),
-      rectangularSelection(), crosshairCursor(), highlightActiveLine(), syntaxHighlighting(defaultHighlightStyle),
+      rectangularSelection(), crosshairCursor(), highlightActiveLine(), syntaxHighlighting(darkHighlightStyle),
       // アセンブラは「命令のあとにタブでコメント桁を揃える」書き方をするので、Tabは行頭の
       // 字下げ(indentWithTab)ではなくカーソル位置への挿入にする。単位は本物のタブ、桁は8。
       indentUnit.of('\t'), EditorState.tabSize.of(8),
@@ -218,6 +255,57 @@ const editor = new EditorView({
   }),
   parent: nodes.editor,
 });
+
+function getBreakpointList() {
+  const fileName = currentPath?.split(/[\\/]/).pop() ?? '';
+  return [...breakpointLines].sort((a, b) => a - b)
+    .map((line) => ({ line, label: `${fileName}:${line}` }));
+}
+
+function renderBreakpointList() {
+  const breakpoints = getBreakpointList();
+  nodes.breakpointCount.textContent = String(breakpoints.length);
+  if (breakpoints.length === 0) {
+    const guide = document.createElement('li');
+    guide.className = 'breakpoint-empty';
+    guide.textContent = 'BPはエディタ左端のgutterをクリックして設定します';
+    nodes.breakpointList.replaceChildren(guide);
+    return;
+  }
+  nodes.breakpointList.replaceChildren(...breakpoints.map(({ line, label }) => {
+    const item = document.createElement('li');
+    item.dataset.breakpointLine = String(line);
+
+    const indicator = document.createElement('span');
+    indicator.className = 'breakpoint-indicator';
+    indicator.textContent = '●';
+    indicator.setAttribute('aria-hidden', 'true');
+
+    const goTo = document.createElement('button');
+    goTo.type = 'button';
+    goTo.className = 'breakpoint-goto';
+    goTo.textContent = label;
+    goTo.addEventListener('click', () => {
+      if (line < 1 || line > editor.state.doc.lines) return;
+      const sourceLine = editor.state.doc.line(line);
+      editor.dispatch({
+        selection: { anchor: sourceLine.from },
+        effects: EditorView.scrollIntoView(sourceLine.from, { y: 'center' }),
+      });
+      editor.focus();
+    });
+
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'breakpoint-remove';
+    remove.title = 'ブレークポイントを削除';
+    remove.setAttribute('aria-label', 'ブレークポイントを削除');
+    remove.textContent = '×';
+    remove.addEventListener('click', () => toggleBreakpoint(line));
+    item.append(indicator, goTo, remove);
+    return item;
+  }));
+}
 
 function clearDiagnostics() {
   lastErrors = [];
@@ -294,7 +382,7 @@ async function openFile(origin, path) {
   // BP行は行番号そのものなので、別ファイルへ持ち越さずセッションごと畳む。
   breakpointLines.clear();
   session?.detach(); session = undefined; debugMap = undefined;
-  syncDebugMarks(null); setDebugControls(false);
+  syncDebugMarks(null); renderBreakpointList(); setDebugControls(false);
   clearDiagnostics(); lastBuild = undefined; setSaveState(false);
   setCurrentPathLabel();
   nodes.buildStatus.textContent = '.asm / .c を自動判別します'; nodes.buildStatus.classList.remove('error');
@@ -532,6 +620,7 @@ function toggleBreakpoint(line) {
   const adding = !breakpointLines.has(line);
   if (adding && debugMap && !debugMap.isDebuggable(line)) {
     setDebugStatus(`${line}行には生成アドレスがないためBPを張れません`, true);
+    renderBreakpointList();
     return false;
   }
   if (adding) breakpointLines.add(line); else breakpointLines.delete(line);
@@ -544,11 +633,13 @@ function toggleBreakpoint(line) {
       session.setBreakpointLines([...breakpointLines]);
       setDebugStatus(error.message, true);
       syncDebugMarks(session.currentLine());
+      renderBreakpointList();
       return false;
     }
   }
   syncDebugMarks(session?.isStarted() ? session.currentLine() : null);
   setDebugControls(Boolean(session?.isStarted()));
+  renderBreakpointList();
   return true;
 }
 
@@ -583,6 +674,7 @@ async function startDebug() {
   if (unmapped.length === 0 && !recoveredDriveError) {
     setDebugStatus(`${built.dosName} エントリ停止 CS:IP=${HEX(started.control.cs, 4)}:${HEX(started.control.ip, 4)}`);
   }
+  renderBreakpointList();
   return { ...started, line: view?.line ?? null };
 }
 
@@ -658,6 +750,7 @@ async function stopDebug() {
   setDebugControls(false);
   // 停止していないCPUのレジスタを表示し続けると嘘になるので、復帰と同時に消す。
   nodes.registers.replaceChildren();
+  renderBreakpointList();
   setMachineStatus('通常実行中…');
   const screen = await waitForCurrentDosPrompt(engine, { timeout: 60_000 });
   nodes.screenText.textContent = screen.text;
@@ -814,6 +907,8 @@ window.pc98workbench = {
     control: session?.control ?? null, debuggableLines: debugMap?.debuggableLines() ?? [],
   }),
   getRegisters: () => (session?.isStarted() ? session.registers() : undefined),
+  getBreakpointList,
+  getCursorLine: () => editor.state.doc.lineAt(editor.state.selection.main.head).number,
   getMachineStatus: () => nodes.machineStatus.textContent,
   getToolbarMode: () => (nodes.debugActions.hidden ? 'build' : 'debug'),
   setFdSwapDelay,

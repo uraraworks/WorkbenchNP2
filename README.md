@@ -80,8 +80,9 @@ IndexedDBプロジェクト、ローカルフォルダを開き、新規作成�
 デバッグ開始後の続行／ステップ／再実行／停止操作をモードに応じて入れ替える。9個のアイコンは
 環境依存の記号文字を使わないinline SVGで、意味は同一文言の`title`と`aria-label`で示す。
 
-配色はVS CodeのDark Modernに合わせ、値はvscode.devの実CSS変数から採取した。
-テーマ色は`ide/workbench.css`の`:root`へ`--vsc-*`カスタムプロパティとして集約している。
+ページのヘッダ・フッタ・背景はWebNP2に合わせ、値はWebNP2の実CSSから採取した。暗い作業領域は
+VS CodeのDark Modernを維持し、両方のテーマ色を`ide/workbench.css`の`:root`へ
+`--np2-*`／`--vsc-*`カスタムプロパティとして集約している。
 
 ### ローカルフォルダ（File System Access）
 
