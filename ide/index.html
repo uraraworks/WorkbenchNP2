@@ -21,7 +21,7 @@
   <main class="workspace-grid">
     <section class="editor-card" aria-labelledby="editor-heading">
       <div class="panel-heading"><div><h2 id="editor-heading">エディタ</h2><span id="current-path"></span></div>
-        <div class="build-actions"><button id="build">ビルド</button><button id="run">実行</button></div></div>
+        <div class="build-actions"><button id="build">ビルド</button><button id="run">実行</button><button id="debug">デバッグ</button></div></div>
       <div id="editor" aria-label="ソースエディタ"></div>
       <div id="build-status" role="status">準備中…</div>
       <ul id="build-errors" aria-label="ビルドエラー"></ul>
@@ -29,6 +29,16 @@
     <section class="machine-card" aria-labelledby="machine-heading">
       <div class="panel-heading"><h2 id="machine-heading">PC-98</h2><span id="runtime-status">未実行</span></div>
       <div class="screen-shell"><canvas id="screen" width="640" height="400" tabindex="0"></canvas></div>
+      <section id="debug-panel" class="debug-panel" aria-label="デバッグ" hidden>
+        <div class="debug-actions">
+          <button id="debug-step" disabled>Step</button>
+          <button id="debug-next-line" disabled>次の行まで実行</button>
+          <button id="debug-continue" disabled>BPまで実行</button>
+          <button id="debug-stop" disabled>通常実行へ復帰</button>
+        </div>
+        <div id="debug-status" role="status">未開始</div>
+        <div id="registers" class="ide-registers" aria-label="レジスタ（IDE独自表示）"></div>
+      </section>
       <pre id="screen-text" aria-label="PC-98テキスト画面"></pre>
     </section>
   </main>

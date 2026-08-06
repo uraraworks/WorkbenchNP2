@@ -15,7 +15,8 @@ const IDE_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = dirname(IDE_DIR);
 const BASE_URL = process.env.PC98DEV_URL ?? 'http://127.0.0.1:5184/ide/';
 const CHROME = process.env.CHROME_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const SHOT = '/private/tmp/claude-501/-Users-haruurara-MyProject--emulator-PC98/ebf3c7ad-2505-4d39-9ee7-ff750b61b82a/scratchpad/pc98dev-ide.png';
+// スクリーンショットの出力先はリポジトリへ固定しない。PC98DEV_SHOT_DIR で差し替えられる。
+const SHOT = `${process.env.PC98DEV_SHOT_DIR ?? `${tmpdir()}/pc98dev-shots`}/pc98dev-ide.png`;
 async function loadPuppeteer() {
   try {
     return (await import('puppeteer-core')).default;

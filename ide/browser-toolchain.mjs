@@ -1,6 +1,8 @@
 import { assembleWithFactory } from '../toolchain/assemble-core.mjs';
 import { compileWithFactories } from '../toolchain/compile-core.mjs';
+import { parseListing } from '../toolchain/listing.mjs';
 import { makeFd } from '../toolchain/makefd.mjs';
+import { assembleDebugLoader } from './toolchain.js';
 
 const HEADER_NAMES = [
   'assert.h', 'ctype.h', 'errno.h', 'fcntl.h', 'float.h', 'inttypes.h', 'iso646.h',
@@ -14,7 +16,17 @@ const INCLUDE_HEADERS = new Set([
   'stdint.h', 'stdio.h', 'stdlib.h', 'string.h', 'time.h', 'unistd.h',
 ]);
 
+export const LOADER_NAME = 'E0LOAD';
+
 let cResourcesPromise;
+let debugLoaderPromise;
+
+/** デバッガローダは対象と同じFDへ常に同梱する。実行・デバッグでFDを作り分けない。 */
+function loadDebugLoader() {
+  if (!debugLoaderPromise) debugLoaderPromise = assembleDebugLoader().then((result) => result.output);
+  return debugLoaderPromise;
+}
+
 const fetchBytes = async (url) => {
   const response = await fetch(url);
   if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`);
@@ -55,7 +67,9 @@ export async function buildSource(path, text) {
   let result;
   let outputExtension;
   if (extension === 'asm') {
-    result = await browserAssemble(source, { format: 'bin' });
+    result = await browserAssemble(source, { format: 'bin', listing: true });
+    // listingは行→offsetマップ専用に読む。BIN出力バイト自体は listing 無しと同一である。
+    if (result.ok) result = { ...result, map: parseListing(result.listing, result.output) };
     outputExtension = 'COM';
   } else if (extension === 'c') {
     const resources = await loadCResources();
@@ -77,8 +91,13 @@ export async function buildSource(path, text) {
       : result;
   }
   const name = dosName(path);
+  const loader = await loadDebugLoader();
   return {
-    ...result, dosName: `${name}.${outputExtension}`,
-    fd: makeFd([{ name, ext: outputExtension, data: result.output }]),
+    ...result, dosName: `${name}.${outputExtension}`, kind: outputExtension,
+    loaderName: `${LOADER_NAME}.COM`,
+    fd: makeFd([
+      { name: LOADER_NAME, ext: 'COM', data: loader },
+      { name, ext: outputExtension, data: result.output },
+    ]),
   };
 }

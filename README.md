@@ -4,9 +4,9 @@
 [WebNP2](../WebNP2) を実行基盤に、C / アセンブラで書いたコードを
 その場でビルド・実行・デバッグできるようにするのが目標。
 
-## 現状（2026-08-05）
+## 現状（2026-08-06）
 
-**ASM/Cのビルド・実行・ソース行デバッグに加え、IDE UI第1段（編集・保存・ビルド・実行）まで到達。**
+**ASM/Cのビルド・実行・ソース行デバッグに加え、IDE UI第2段（エディタ上でのBP・停止行・行送り）まで到達。**
 
 ```
 .asm ──[wasm NASM]──> .COM ──[FAT12 書き込み]──> .xdf ──[WebNP2]──> PC-98 で実行
@@ -40,9 +40,11 @@ samples/             テスト用 .asm
 docs/
   masm-to-nasm.md    MASM→NASM 変換規則（自動変換ツールの仕様書を兼ねる）
 ide/                CodeMirrorエディタ＋WebNP2実行画面
-  index.html          実用workbench（編集・IndexedDB保存・ビルド・実行）
-  debug.html          CPU／ソース行デバッガ実証（第2段統合前の独立画面）
+  index.html          実用workbench（編集・IndexedDB保存・ビルド・実行・デバッグ）
+  debug.html          CPU／ソース行デバッガ実証（HELLO.COM固定の回帰検証用）
   project-fs.mjs      保存先を差し替え可能にするProjectFS抽象
+  debug-map.mjs       ASM listing / C source mapを1つの行マップ契約へ寄せる層
+  debug-session.mjs   4B01hローダ経由の起動・行BP・行送りを保持するセッション
   vendor/codemirror/  固定版bundle・17パッケージのLICENSE・再現build.sh
 ```
 
@@ -80,20 +82,43 @@ IndexedDBプロジェクトを開き、新規作成・編集・保存できる�
 
 CodeMirrorは`codemirror@6.0.2`、`@codemirror/lang-cpp@6.0.3`を入口に、直接・間接依存17件を
 全て固定して`ide/vendor/codemirror/codemirror.js`へvendoringした。17件の一次`LICENSE`本文は
-全てMITで、`LICENSE.CodeMirror`へpackage名・版ごとに同梱する。bundleは458,489 bytes
-（gzip -9で148,837 bytes）。`ide/vendor/codemirror/build.sh`がnpm installからbundle・
-ライセンス収集までを再現する。CDNは使用しない。
+全てMITで、`LICENSE.CodeMirror`へpackage名・版ごとに同梱する。BP gutterと停止行強調のため
+`entry.mjs`へ`Decoration`／`GutterMarker`／`gutter`／`StateField`／`StateEffect`／`RangeSet`／
+`RangeSetBuilder`を追加re-exportしてbundleし直し、パッケージ構成・版・17件のLICENSEは変更なく
+bundleは458,609 bytes（gzip -9で148,865 bytes）。`ide/vendor/codemirror/build.sh`がnpm install
+からbundle・ライセンス収集までを再現する。CDNは使用しない。
 
-デバッガ実証UIは`ide/debug.html`へ分離し、既存`verify-ide.mjs`の9項目はURLだけ追従して
-アサーションを維持する。workbenchへのデバッガ統合はUI第2段であり、未着手である。
+デバッガ実証UIは`ide/debug.html`へHELLO.COM固定の回帰検証用として残し、既存`verify-ide.mjs`の
+9項目はそのままアサーションを維持する。workbenchへのデバッガ統合（UI第2段）は完了しており、
+`index.html`の「デバッグ」ボタンからビルド済み対象を4B01hローダ経由で起動し、対象の1命令目
+手前で停止する。BPはCodeMirrorの専用gutterをクリックして張り、停止行はエディタ本体の行
+decorationで強調する（デバッガ実証画面のような別ソース一覧は使わない）。行マップはビルド
+時点で確定するため、実行前に「どの行へBPを張れるか」が決まり、生成アドレスのない行へのBPは
+拒否する（黙って無視しない）。ハードウェアBP枠は0〜5を利用者BP、6を「次の行まで実行」の
+一時BP、7を4B01hのエントリ停止用に割り当てる。C の1行が複数の非連続区間を持つ場合は全区間へ
+張り、枠を超えるとエラーにする。レジスタはIDE独自の8本表示。通常実行へ復帰すると停止行強調と
+レジスタ表示は消えるが、BPは次のデバッグまで残す。別ファイルを開くとBPは持ち越さない。
+
+コアはページごとに1回しか起動できないため、FreeDOSは1度だけ起動し、以後はビルドのたびに
+B:のFDだけ差し替える。差し替えは「排出→間隔→挿入→間隔」のメディア交換手順が必要で、
+挿入だけだとDOSがFATキャッシュを持ち越して「ドライブの準備ができていません」になることを
+実測した。デバッガローダ`E0LOAD.COM`は実行用・デバッグ用でFDを作り分けず、常に対象と同じ
+FAT12 FDへ同梱する。
+
+`ide/verify-workbench.mjs`は、`hello.asm`を編集したものをエディタ上でデバッグし、生成行が
+8,9,10,11,12,14の6行であること、生成アドレスの無い13行目へのBPが拒否されること、エントリが
+8行目で停止すること、「次の行まで実行」で9行目、BPで11行目に停止すること、gutterのBP印と
+停止行強調がDOMに出ていることを確認する。続けて1997年の`STRLEN.C`を原文の行番号のままエディタ
+上で22行目`Len++;`に停止させ、通常実行へ復帰して出力`3`を確認する。スクリーンショットの出力先は
+リポジトリへ固定せず、環境変数`PC98DEV_SHOT_DIR`で差し替えられる（既定はOSの一時ディレクトリ）。
 
 ## デバッガ実証
 
 > **現在の制約:** デバッガローダが使うDOS EXEC 4B01hは、同梱FreeDOS(98)・NEC日本語MS-DOS 3.3C・
 > 1996年当時のHDD環境の3つで実地確認済み（下表）。ただしこれは手元にあるイメージの範囲であり、
 > すべてのDOSでの対応を保証するものではない。非対応DOSではこの方式を利用できない。
-> `debug.html`自体は回帰検証を安定させるためHELLO.COM固定である。任意ファイルの編集・実行は
-> `index.html`のworkbenchが担当し、デバッガ統合は第2段で行う。
+> `debug.html`自体は回帰検証を安定させるためHELLO.COM固定である。任意ファイルの編集・実行と
+> デバッガ統合（UI第2段）は`index.html`のworkbenchが担当する。
 
 > **終了復帰:** 4B01h load-only後に対象へfar jumpしても、対象のAH=4Ch終了後に
 > ローダ自身をAH=4Chで終了してFreeDOSのプロンプトへ戻る。同一セッションで
@@ -123,6 +148,7 @@ WebNP2から埋め込み成果物とコアを同期してから、実ブラウ�
 ../WebNP2/scripts/export-embed.sh
 node ide/verify-workbench.mjs
 node ide/verify-ide.mjs
+node ide/verify-debug-map.mjs
 ```
 
 検証は、28-byteの無改変hello、対象1命令目での初期レジスタ一致と未出力、クリックBPと停止・強調行、
@@ -369,7 +395,7 @@ node verify-saka-build.mjs  # SAKA変換版のwasm NASM・MZヘッダ・EXE行�
 
 ## 次のステップ
 
-6. workbenchへASM/Cソース行デバッガを統合（UI第2段）
+6. ~~workbenchへASM/Cソース行デバッガを統合（UI第2段）~~ 完了
 
 ## 注意
 

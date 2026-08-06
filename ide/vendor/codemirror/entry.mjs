@@ -1,8 +1,10 @@
-export { Compartment, EditorState } from '@codemirror/state';
 export {
-  EditorView, crosshairCursor, drawSelection, dropCursor, highlightActiveLine,
-  highlightActiveLineGutter, highlightSpecialChars, keymap, lineNumbers,
-  rectangularSelection,
+  Compartment, EditorState, RangeSet, RangeSetBuilder, StateEffect, StateField,
+} from '@codemirror/state';
+export {
+  Decoration, EditorView, GutterMarker, crosshairCursor, drawSelection, dropCursor,
+  gutter, highlightActiveLine, highlightActiveLineGutter, highlightSpecialChars, keymap,
+  lineNumbers, rectangularSelection,
 } from '@codemirror/view';
 export { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 export {

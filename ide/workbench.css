@@ -27,6 +27,19 @@ button:disabled { opacity: .45; }
 .cm-scroller { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .cm-gutters { background: #111e27 !important; border-right-color: #263d4c !important; }
 .cm-activeLine, .cm-activeLineGutter { background: rgba(67, 137, 177, .18) !important; }
+.cm-breakpoint-gutter { width: 16px; cursor: pointer; }
+.cm-breakpoint-gutter .cm-gutterElement:hover { background: rgba(255, 120, 120, .18); }
+.cm-breakpoint-dot { display: block; color: #ff6b6b; font-size: 11px; line-height: 1.4; text-align: center; }
+.cm-breakpoint-spacer { display: block; visibility: hidden; font-size: 11px; line-height: 1.4; }
+.cm-debug-current { background: rgba(255, 212, 121, .17); box-shadow: inset 3px 0 0 #ffd479; }
+.debug-panel { margin: 0 12px 12px; padding: 9px 10px; border: 1px solid #2d4351; border-radius: 8px; background: rgba(9, 17, 23, .8); }
+.debug-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+#debug { background: #4a3a12; border-color: #8a6a24; }
+#debug-status { margin-top: 7px; color: #95bad0; font: 12px ui-monospace, monospace; }
+#debug-status.error { color: #ff9f9f; }
+.ide-registers { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; margin-top: 8px; }
+.ide-register { display: flex; justify-content: space-between; gap: 5px; padding: 3px 6px; border-radius: 4px; background: #111e27; font: 11px ui-monospace, monospace; }
+.ide-register span { color: #7e9aaa; }
 #build-status { min-height: 34px; padding: 8px 12px; border-top: 1px solid #293d4a; color: #95bad0; font-size: 12px; }
 #build-status.error { color: #ff9f9f; }
 #build-errors { min-height: 0; max-height: 110px; overflow: auto; margin: 0; padding: 0 12px 8px 34px; color: #ffb2b2; font: 12px/1.45 ui-monospace, monospace; }
@@ -46,5 +59,7 @@ button:disabled { opacity: .45; }
   #build-status { min-height: 29px; padding: 5px 8px; }
   #build-errors { max-height: 56px; }
   .screen-shell { margin: 7px; }
+  .debug-panel { margin: 0 7px 7px; padding: 6px 7px; }
+  .ide-registers { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   #screen-text { display: none; }
 }
