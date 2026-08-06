@@ -1046,11 +1046,10 @@ async function mountProgramFd(built) {
 }
 
 async function swapProgramFd(built, name, key) {
-  await engine.ejectFd(2);
-  await settle(FD_SWAP_MS);
+  // insertFd がコア側の挿入遅延(20フレーム=約0.4秒)明けまで待って返すようになったので、
+  // ホスト側の排出も実時間の待ちも要らない。挿入遅延はエミュレートフレーム基準なので、
+  // setTimeout で待っても足りる保証が無かった（それが差し替えが不安定だった原因）。
   await engine.insertFd(2, { name, bytes: built.fd }, key);
-  // この間隔は成功しやすくする最適化であり、正しさは検出後の交換やり直しで担保する。
-  await settle(FD_SWAP_MS);
 }
 
 async function abortDriveError() {
