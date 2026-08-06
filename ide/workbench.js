@@ -49,6 +49,8 @@ let lastBuild;
 let lastErrors = [];
 let freeDos;
 let runSequence = 0;
+let FD_SWAP_MS = 300;
+let driveErrorRetries = 0;
 let booted;
 let resolvePrewarm;
 let rejectPrewarm;
@@ -333,9 +335,25 @@ async function buildCurrent() {
  * コアはページごとに1回しか起動できないため、FreeDOSは1度だけ起動し、
  * 以後はビルドのたびにB:のFDだけ差し替える。ビルド→実行→デバッグを何度でも繰り返せる。
  */
-/** メディア交換はDOS側が気付くまで待つ必要がある。排出後と挿入後の両方で間隔を空ける。 */
-const FD_SWAP_MS = 800;
+/**
+ * 短い待ちは通常経路の最適化であり、媒体交換の正しさの根拠ではない。
+ * 足りなければDOS画面のドライブエラーを検出し、挿入済み媒体の読込みを自動で再試行する。
+ */
 const settle = (ms) => new Promise((resolveSettle) => { setTimeout(resolveSettle, ms); });
+
+function setFdSwapDelay(ms) {
+  if (!Number.isFinite(ms) || ms < 0) throw new TypeError('FD差し替え待ちは0以上の数値にしてください');
+  FD_SWAP_MS = Math.trunc(ms);
+  return FD_SWAP_MS;
+}
+
+function recordDriveErrorRetries(count) {
+  const added = Number.isInteger(count) && count > 0 ? count : 0;
+  if (added === 0) return false;
+  driveErrorRetries += added;
+  setMachineStatus(`ディスクの認識を再試行しました（${driveErrorRetries}回）`);
+  return true;
+}
 
 function startBoot(programFd, programName, programKey) {
   setMachineStatus('エミュレータを起動しています…');
@@ -344,7 +362,9 @@ function startBoot(programFd, programName, programKey) {
     freeDos, freeDosKey: 'workbench:freedos', programFd, programName, programKey,
     onScreen: (screen) => { nodes.screenText.textContent = screen.text; },
   }).then((screen) => {
-    setMachineStatus('エミュレータ起動しました。実行の準備ができています');
+    if (!recordDriveErrorRetries(screen.driveErrorRetries)) {
+      setMachineStatus('エミュレータ起動しました。実行の準備ができています');
+    }
     return screen;
   }).catch((error) => {
     if (booted === tracked) booted = undefined;
@@ -382,13 +402,18 @@ async function mountProgramFd(built) {
   // 排出してからメディア交換として挿入する。
   // 排出と挿入の間はゲストを走らせたまま待つ必要がある。CPUを止めて交換するとゲストが
   // 「ディスクが無い」中間状態を一度も観測せず、交換に気付かないまま古いFATを使う（実測で失敗）。
-  // 待ち時間は実測で決めた。同一セッションでの2回目の差し替えは300msでは失敗し、800msで通る。
-  setMachineStatus('プログラムを挿入しています…');
+  setMachineStatus('作業用ディスクを挿入しています…');
   await engine.ejectFd(2);
   await settle(FD_SWAP_MS);
   await engine.insertFd(2, { name, bytes: built.fd }, key);
   await settle(FD_SWAP_MS);
-  const screen = engine.getScreenText();
+  const inserted = engine.getScreenText();
+  nodes.screenText.textContent = inserted.text;
+  // 連続実行の区切りが分かるよう、コマンド投入前に空のプロンプト行を入れておく。
+  // 空行が描画し終わるまで待ってから返さないと、呼び出し側のbaselineが古くなり、
+  // プログラム実行前のプロンプトを「実行完了」と誤認してしまう。
+  await engine.pasteText('\r\r\r');
+  const screen = await waitForCurrentDosPrompt(engine, { baseline: inserted.text, timeout: 30_000 });
   nodes.screenText.textContent = screen.text;
   return screen;
 }
@@ -402,8 +427,16 @@ async function runCurrent() {
   await engine.pasteText(`B:\\${built.dosName}\r`);
   const screen = await waitForCurrentDosPrompt(engine, { baseline: baseline.text, timeout: 60_000 });
   nodes.screenText.textContent = screen.text;
-  setMachineStatus(`${built.dosName} 終了・DOSプロンプト復帰`);
+  if (!recordDriveErrorRetries(screen.driveErrorRetries)) {
+    setMachineStatus(`${built.dosName} 終了・DOSプロンプト復帰`);
+  }
   return { ...built, screen };
+}
+
+async function waitForPrompt(baseline) {
+  const screen = await waitForCurrentDosPrompt(engine, { baseline, timeout: 60_000 });
+  recordDriveErrorRetries(screen.driveErrorRetries);
+  return screen;
 }
 
 const HEX = (value, width) => (value >>> 0).toString(16).toUpperCase().padStart(width, '0');
@@ -514,6 +547,7 @@ async function startDebug() {
   const started = await session.start(
     engine, `B:\\${LOADER_NAME} B:\\${built.dosName}`, debugMap, built.kind,
   );
+  const recoveredDriveError = recordDriveErrorRetries(started.driveErrorRetries);
   const unmapped = [...breakpointLines].filter((line) => !debugMap.isDebuggable(line));
   if (unmapped.length > 0) {
     // 張れないBPを黙って捨てると「効かないBP」になるため、外した行を明示してから続行する。
@@ -522,7 +556,7 @@ async function startDebug() {
   }
   session.setBreakpointLines([...breakpointLines]);
   const view = refreshDebugViews();
-  if (unmapped.length === 0) {
+  if (unmapped.length === 0 && !recoveredDriveError) {
     setDebugStatus(`${built.dosName} エントリ停止 CS:IP=${HEX(started.control.cs, 4)}:${HEX(started.control.ip, 4)}`);
   }
   return { ...started, line: view?.line ?? null };
@@ -603,7 +637,9 @@ async function stopDebug() {
   setMachineStatus('通常実行中…');
   const screen = await waitForCurrentDosPrompt(engine, { timeout: 60_000 });
   nodes.screenText.textContent = screen.text;
-  setMachineStatus('実行終了・DOSプロンプト復帰');
+  if (!recordDriveErrorRetries(screen.driveErrorRetries)) {
+    setMachineStatus('実行終了・DOSプロンプト復帰');
+  }
   return screen;
 }
 
@@ -754,6 +790,9 @@ window.pc98workbench = {
   }),
   getRegisters: () => (session?.isStarted() ? session.registers() : undefined),
   getMachineStatus: () => nodes.machineStatus.textContent,
+  setFdSwapDelay,
+  getFdSwapDelay: () => FD_SWAP_MS,
+  getDriveErrorRetries: () => driveErrorRetries,
   getBuiltOutput: () => (lastBuild?.output ? Array.from(lastBuild.output) : null),
   readGuestMemory: (address, length) => Array.from(debugController.readMemory(address, length)),
   disassembleAt: (segment, offset, count) => debugController.disassemble(segment, offset, count),
@@ -764,7 +803,7 @@ window.pc98workbench = {
   },
   runTargetToLoaderExit,
   pasteDosCommand: (command) => engine.pasteText(`${command}\r`),
-  waitForPrompt: (baseline) => waitForCurrentDosPrompt(engine, { baseline, timeout: 60_000 }),
+  waitForPrompt,
   isCpuPaused: () => engine.dbgIsPaused(),
   engine,
   setValue: (text) => editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: text } }),

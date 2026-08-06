@@ -1,3 +1,5 @@
+import { answerDriveErrorRetry, DOS_DRIVE_ERROR_PATTERN } from './dos-prompt.mjs';
+
 const CONTROL_SIGNATURE = new TextEncoder().encode('PC98DEV1');
 export const CONTROL = {
   version: 8, state: 10, loaderPsp: 12, targetPsp: 14, kind: 16,
@@ -6,6 +8,7 @@ export const CONTROL = {
   execReturnIp: 42, waitIp: 44, childReturn: 46, exitReadyIp: 48, size: 50,
 };
 const CONTROL_VERSION = 3;
+const DRIVE_ERROR_RETRY_INTERVAL = 1_000;
 
 const sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
 const readWord = (memory, offset) => memory[offset] | (memory[offset + 1] << 8);
@@ -40,9 +43,40 @@ export function parseLoaderControl(memory, address) {
   };
 }
 
-export async function waitForLoaderControl(debug, timeout = 20_000) {
+export async function waitForLoaderControl(debug, opts = {}) {
+  if (typeof opts === 'number') opts = { timeout: opts };
+  const timeout = opts.timeout ?? 20_000;
+  const engine = opts.engine;
   const limit = Date.now() + timeout;
+  let driveErrorRetries = 0;
+  let answeredDriveErrorText;
+  let nextDriveErrorRetryAt = 0;
   while (Date.now() < limit) {
+    if (engine) {
+      const screen = engine.getScreenText();
+      if (DOS_DRIVE_ERROR_PATTERN.test(screen.text)) {
+        if (screen.text === answeredDriveErrorText && Date.now() < nextDriveErrorRetryAt) {
+          await sleep(100);
+          continue;
+        }
+        if (driveErrorRetries >= 3) {
+          const error = new Error('デバッガローダ待機中のDOSドライブエラー再試行が3回を超えました');
+          error.code = 'DOS_DRIVE_ERROR';
+          error.screen = screen;
+          error.driveErrorRetries = driveErrorRetries;
+          throw error;
+        }
+        await answerDriveErrorRetry(engine);
+        driveErrorRetries++;
+        answeredDriveErrorText = screen.text;
+        nextDriveErrorRetryAt = Date.now() + DRIVE_ERROR_RETRY_INTERVAL;
+        opts.onDriveErrorRetry?.(driveErrorRetries, screen);
+        await sleep(100);
+        continue;
+      }
+      answeredDriveErrorText = undefined;
+      nextDriveErrorRetryAt = 0;
+    }
     const memory = debug.readMemory(0, 0xa0000);
     for (let address = 0; address + CONTROL.size <= memory.length; address++) {
       if (!signatureMatches(memory, address)) continue;
@@ -51,7 +85,7 @@ export async function waitForLoaderControl(debug, timeout = 20_000) {
       if (control.state === 0xffff) {
         throw new Error(`デバッガローダが失敗しました (AX=${control.errorAx.toString(16).toUpperCase().padStart(4, '0')})`);
       }
-      return control;
+      return { ...control, driveErrorRetries };
     }
     await sleep(100);
   }

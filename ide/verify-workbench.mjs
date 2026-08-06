@@ -122,6 +122,22 @@ try {
   assertRun(run.screen, output);
   assert.throws(() => assertRun(run.screen, 'Workbench typo!'));
 
+  // 連続実行の区切り: 2回目のコマンド行の直前に、空のプロンプト行が2本以上あること。
+  const secondRun = await page.evaluate(() => window.pc98workbench.runCurrent());
+  assertRun(secondRun.screen, output);
+  const commandRows = secondRun.screen.lines
+    .map((line, index) => [line.trim(), index])
+    .filter(([line]) => line.endsWith(`B:\\${run.dosName}`))
+    .map(([, index]) => index);
+  assert.ok(commandRows.length >= 2, `実行コマンド行が2本ありません: ${JSON.stringify(commandRows)}`);
+  let separators = 0;
+  for (let row = commandRows.at(-1) - 1; row >= 0; row--) {
+    if (!/^[A-Z]:\\?>$/i.test(secondRun.screen.lines[row].trim())) break;
+    separators += 1;
+  }
+  assert.ok(separators >= 2,
+    `連続実行の区切り行が2本未満です: ${separators}本 / ${JSON.stringify(secondRun.screen.lines.slice(-8))}`);
+
   const guardedSource = await page.evaluate(() => ({
     source: window.pc98workbench.getValue(), screen: window.pc98workbench.getScreenText().text,
     targets: window.pc98workbench.getGuardedKeyboardTargets(),
@@ -410,6 +426,29 @@ try {
   assertRun(cResume, '3');
   assert.throws(() => assertRun(cResume, '4'));
 
+  // 固定待ちを0にして媒体交換を急がせ、DOS画面を見た自己回復経路を可能な限り強制する。
+  const forcedRecovery = await page.evaluate(async () => {
+    const wb = window.pc98workbench;
+    const retriesBefore = wb.getDriveErrorRetries();
+    wb.setFdSwapDelay(0);
+    const forcedDelay = wb.getFdSwapDelay();
+    try {
+      await wb.openFile('sample', 'samples/second-run.asm');
+      await wb.buildCurrent();
+      const run = await wb.runCurrent();
+      return {
+        run, forcedDelay, retriesBefore, retriesAfter: wb.getDriveErrorRetries(),
+      };
+    } finally {
+      wb.setFdSwapDelay(300);
+    }
+  });
+  assert.equal(forcedRecovery.forcedDelay, 0, 'FD差し替え待ちを0msへ設定できません');
+  assertRun(forcedRecovery.run.screen, 'Second debug run!');
+  assert.equal(await page.evaluate(() => window.pc98workbench.getFdSwapDelay()), 300,
+    '強制検証後にFD差し替え待ちが300msへ戻っていません');
+  const forcedRetryCount = forcedRecovery.retriesAfter - forcedRecovery.retriesBefore;
+
   await page.evaluate(() => window.pc98workbench.openFile('project', 'samples/hello.asm'));
   // フォルダ操作を足した後もファイルバーが横にはみ出さないことを、実測値で確認する。
   const fileBar = () => page.$eval('.file-bar', (node) => ({
@@ -442,6 +481,7 @@ try {
   console.log(`[PASS] file/edit/IndexedDB/build/run: ${output}`);
   console.log('[PASS] machine status/prewarm: one status line, asynchronous boot completed, build/debug transitions');
   console.log('[PASS] header/footer: retired debugger link absent, 7 license links returned HTTP 200');
+  console.log(`[PASS] run separator: ${separators} blank prompt lines before a consecutive run`);
   console.log('[PASS] 実キー入力 guard: editor/file bar stay local, canvas reaches guest DOS');
   console.log(`[PASS] Tab/caret: real tab at cursor (tab-size ${tabbed.tabSize}), caret drawn in ${tabbed.cursor.color}`);
   console.log('[PASS] .c auto build: HELLO-C.EXE');
@@ -452,6 +492,11 @@ try {
   console.log('[PASS] editor lock: real typing blocked while debugging and accepted after stop');
   console.log('[PASS] pane swap: desktop order reversed/restored and localStorage persisted');
   console.log(`[PASS] C debug in editor: STRLEN.C line 22 "${cDebug.sourceLine}" stop, resumed output "3"`);
+  if (forcedRetryCount > 0) {
+    console.log(`[PASS] FD swap self-recovery: delay=0ms retries=${forcedRetryCount} total=${forcedRecovery.retriesAfter}`);
+  } else {
+    console.log('[INFO] FD swap self-recovery: この環境では待ち0でもドライブエラーを再現しなかったためスキップ');
+  }
   console.log(`[PASS] file bar: folder controls visible, no overflow (desktop ${desktopBar.overflow}px / mobile ${mobileBar.overflow}px)`);
   console.log(`[PASS] responsive DOM: desktop editor/screen=${Math.round(desktopLayout.editor.width)}/${Math.round(desktopLayout.screen.width)} mobile=${Math.round(mobile.editor.width)}/${Math.round(mobile.screen.width)}`);
   console.log(`[SHOT] ${DESKTOP_SHOT}`);

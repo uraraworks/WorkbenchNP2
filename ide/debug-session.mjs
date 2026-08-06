@@ -50,15 +50,16 @@ export function createDebugSession(debug) {
       assignments = [];
       map = debugMap;
       await engine.pasteText(`${command}\r`);
-      const found = await waitForLoaderControl(debug);
-      if (!found) throw new Error('デバッガローダのREADY制御ブロックを検出できません');
+      const foundResult = await waitForLoaderControl(debug, { engine });
+      if (!foundResult) throw new Error('デバッガローダのREADY制御ブロックを検出できません');
+      const { driveErrorRetries = 0, ...found } = foundResult;
       const wanted = KIND[expectedKind];
       if (found.kind !== wanted) {
         throw new Error(`対象の種別が${expectedKind}ではありません: kind=${found.kind}`);
       }
       control = found;
       const entryRegisters = releaseLoaderAtEntry(debug, found, BREAKPOINT_SLOTS.entry);
-      return { control: found, registers: entryRegisters };
+      return { control: found, registers: entryRegisters, driveErrorRetries };
     },
 
     /**
