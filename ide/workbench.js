@@ -29,6 +29,10 @@ const nodes = {
   editLock: document.querySelector('#edit-lock'),
   tabStrip: document.querySelector('#tab-strip'),
   sidebar: document.querySelector('#sidebar'), toggleSidebar: document.querySelector('#toggle-sidebar'),
+  activityBar: document.querySelector('#activity-bar'),
+  activityExplorer: document.querySelector('#activity-explorer'), activityDebug: document.querySelector('#activity-debug'),
+  viewExplorer: document.querySelector('#view-explorer'), viewDebug: document.querySelector('#view-debug'),
+  debugEmpty: document.querySelector('#debug-empty'),
   folderOpen: document.querySelector('#folder-open'), folderDisconnect: document.querySelector('#folder-disconnect'),
   swapPanes: document.querySelector('#swap-panes'), folderState: document.querySelector('#folder-state'),
   editorCard: document.querySelector('.editor-card'), machineCard: document.querySelector('.machine-card'),
@@ -82,9 +86,11 @@ let panesSwapped = false;
 let maximizedPane = null;
 let sidebarVisible = false;
 let sidebarPreference = null;
+let sidebarView = 'explorer';
 let lastShortcut = null;
 const PANES_SWAPPED_KEY = 'pc98dev:panes-swapped';
 const SIDEBAR_KEY = 'pc98dev:sidebar';
+const SIDEBAR_VIEW_KEY = 'pc98dev:sidebar-view';
 const SPLIT_EDITOR_KEY = 'pc98dev:split-editor';
 const SPLIT_DISASSEMBLY_KEY = 'pc98dev:split-disassembly';
 // 画面幅が狭い環境ではPC-98画面を等倍(640px)まで広げられなくなるため、可動域は絞らない。
@@ -152,6 +158,40 @@ function setSidebarVisible(value, { persist = true } = {}) {
 
 function getSidebarVisible() { return sidebarVisible; }
 
+function loadSidebarView() {
+  try {
+    const stored = localStorage.getItem(SIDEBAR_VIEW_KEY);
+    return stored === 'explorer' || stored === 'debug' ? stored : 'explorer';
+  } catch { return 'explorer'; }
+}
+
+function setSidebarView(view, { persist = true } = {}) {
+  if (view !== 'explorer' && view !== 'debug') {
+    throw new TypeError('サイドバービューは explorer / debug で指定してください');
+  }
+  sidebarView = view;
+  nodes.viewExplorer.hidden = view !== 'explorer';
+  nodes.viewDebug.hidden = view !== 'debug';
+  nodes.activityExplorer.setAttribute('aria-selected', String(view === 'explorer'));
+  nodes.activityDebug.setAttribute('aria-selected', String(view === 'debug'));
+  if (persist) {
+    try { localStorage.setItem(SIDEBAR_VIEW_KEY, sidebarView); } catch {}
+  }
+  return sidebarView;
+}
+
+function getSidebarView() { return sidebarView; }
+
+/** 選択中アイコンの再クリックは表示トグル（選択状態は保持）。未選択アイコンはビュー切替＋表示。 */
+function handleActivityClick(view) {
+  if (sidebarView === view) {
+    setSidebarVisible(!sidebarVisible);
+    return;
+  }
+  setSidebarView(view);
+  setSidebarVisible(true);
+}
+
 const sidebarMedia = window.matchMedia('(max-width: 820px)');
 sidebarMedia.addEventListener?.('change', (event) => {
   if (sidebarPreference === null) setSidebarVisible(!event.matches, { persist: false });
@@ -208,16 +248,17 @@ function splitBounds() {
   const gridStyle = getComputedStyle(nodes.workspace);
   const gridWidth = nodes.workspace.getBoundingClientRect().width
     - parseFloat(gridStyle.paddingLeft) - parseFloat(gridStyle.paddingRight);
+  const activityWidth = nodes.activityBar.offsetParent === null ? 0 : nodes.activityBar.getBoundingClientRect().width;
   const sidebarWidth = nodes.sidebar.offsetParent === null ? 0 : nodes.sidebar.getBoundingClientRect().width;
   const splitterWidth = parseFloat(getComputedStyle(document.documentElement)
     .getPropertyValue('--splitter-col')) || nodes.splitter.getBoundingClientRect().width || 6;
   const gap = parseFloat(gridStyle.columnGap) || 0;
-  const trackCount = sidebarWidth > 0 ? 4 : 3;
+  const trackCount = 3 + (activityWidth > 0 ? 1 : 0) + (sidebarWidth > 0 ? 1 : 0);
   const available = gridWidth - gap * (trackCount - 1);
   return {
     min: MIN_EDITOR_WIDTH,
     max: Math.max(MIN_EDITOR_WIDTH,
-      Math.floor(available - sidebarWidth - splitterWidth - MIN_MACHINE_WIDTH)),
+      Math.floor(available - activityWidth - sidebarWidth - splitterWidth - MIN_MACHINE_WIDTH)),
   };
 }
 
@@ -341,12 +382,15 @@ function editorWidthAtPointer(clientX, drag) {
   const gap = parseFloat(gridStyle.columnGap) || 0;
   const contentLeft = gridRect.left + parseFloat(gridStyle.paddingLeft);
   const contentRight = gridRect.right - parseFloat(gridStyle.paddingRight);
+  const activityWidth = nodes.activityBar.offsetParent === null ? 0 : nodes.activityBar.getBoundingClientRect().width;
   const sidebarWidth = nodes.sidebar.offsetParent === null ? 0 : nodes.sidebar.getBoundingClientRect().width;
   const splitterLeft = clientX - drag.pointerOffset;
   if (panesSwapped) {
     return contentRight - splitterLeft - drag.splitterSize - gap;
   }
-  const editorLeft = contentLeft + (sidebarWidth > 0 ? sidebarWidth + gap : 0);
+  const leadingWidth = activityWidth + sidebarWidth
+    + (activityWidth > 0 ? gap : 0) + (sidebarWidth > 0 ? gap : 0);
+  const editorLeft = contentLeft + leadingWidth;
   return splitterLeft - gap - editorLeft;
 }
 
@@ -1128,6 +1172,7 @@ function setDebugControls(active) {
   nodes.buildActions.hidden = active;
   nodes.debugActions.hidden = !active;
   nodes.debugPanel.hidden = !active;
+  nodes.debugEmpty.hidden = active;
   nodes.disassemblySplitter.hidden = !active;
   nodes.disassemblyPanel.hidden = !active;
   if (active) restoreDisassemblyHeight();
@@ -1218,6 +1263,9 @@ async function startDebug() {
     });
   }
   nodes.debugPanel.hidden = false;
+  nodes.debugEmpty.hidden = true;
+  setSidebarView('debug');
+  setSidebarVisible(true);
   setDebugStatus('FreeDOSとデバッガローダを準備中…');
   const mounted = await mountProgramFd(built);
   session = createDebugSession(debugController);
@@ -1380,6 +1428,7 @@ async function openFolder() {
 }
 
 async function initialize() {
+  setSidebarView(loadSidebarView(), { persist: false });
   sidebarPreference = loadSidebarPreference();
   setSidebarVisible(sidebarPreference ?? !sidebarMedia.matches, { persist: false });
   setPanesSwapped(loadPanesSwapped());
@@ -1402,6 +1451,8 @@ nodes.save.addEventListener('click', () => saveFile().catch((error) => showError
 nodes.folderOpen.addEventListener('click', () => openFolder().catch((error) => setDirectoryLabel(error.message)));
 nodes.folderDisconnect.addEventListener('click', () => disconnectDirectory().catch((error) => setDirectoryLabel(error.message)));
 nodes.toggleSidebar.addEventListener('click', () => setSidebarVisible(!sidebarVisible));
+nodes.activityExplorer.addEventListener('click', () => handleActivityClick('explorer'));
+nodes.activityDebug.addEventListener('click', () => handleActivityClick('debug'));
 nodes.swapPanes.addEventListener('click', () => setPanesSwapped(!panesSwapped));
 nodes.maximizeEditor.addEventListener('click', () => setMaximizedPane(maximizedPane === 'editor' ? null : 'editor'));
 nodes.maximizeMachine.addEventListener('click', () => setMaximizedPane(maximizedPane === 'machine' ? null : 'machine'));
@@ -1463,6 +1514,7 @@ window.pc98workbench = {
   continueToBreakpoint, continueOrRun, setPanesSwapped, getPanesSwapped,
   setMaximizedPane, getMaximizedPane,
   setSidebarVisible, getSidebarVisible,
+  setSidebarView, getSidebarView,
   setEditorWidth, setDisassemblyHeight, getSplit,
   getLastShortcut: () => lastShortcut,
   getScreenScaling: syncScreenScaling,
@@ -1531,6 +1583,7 @@ window.pc98workbench = {
     registers: [...nodes.registers.querySelectorAll('[data-ide-register]')]
       .map((item) => [item.dataset.ideRegister, Number(item.dataset.value)]),
     debugPanelVisible: !nodes.debugPanel.hidden,
+    sidebarView: getSidebarView(),
     disassemblyVisible: !nodes.disassemblyPanel.hidden,
     disassemblyRows: nodes.disassembly.querySelectorAll('[data-debugger-disasm-row="true"]').length,
     readOnly: editor.state.readOnly,

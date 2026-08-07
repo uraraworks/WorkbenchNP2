@@ -69,7 +69,9 @@ try {
   page = await browser.newPage();
   const pageErrors = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
-  await page.setViewport({ width: 1400, height: 900, deviceScaleFactor: 1 });
+  // アクティビティバー(48px+gap)の分だけ、常時消費される横幅が増えた。
+  // サイドバー非表示時にPC-98画面が等倍へ届く保証を保つため、その分だけviewportを広げる。
+  await page.setViewport({ width: 1460, height: 900, deviceScaleFactor: 1 });
   await page.goto(BASE_URL, { waitUntil: 'networkidle2' });
   await page.evaluate(() => window.pc98workbench.ready);
   assert.deepEqual(pageErrors, []);
@@ -137,6 +139,83 @@ try {
   assert.deepEqual(sidebarVisibility.initial, { visible: true, hidden: false, pressed: 'true' });
   assert.deepEqual(sidebarVisibility.hidden, { visible: false, hidden: true, pressed: 'false' });
   assert.deepEqual(sidebarVisibility.restored, { visible: true, hidden: false, pressed: 'true' });
+
+  // --- アクティビティバー: エクスプローラー/デバッグの2ビュー切替 ---
+  const measureActivity = () => ({
+    explorerSelected: document.querySelector('#activity-explorer').getAttribute('aria-selected'),
+    debugSelected: document.querySelector('#activity-debug').getAttribute('aria-selected'),
+    viewExplorerVisible: document.querySelector('#view-explorer').offsetParent !== null,
+    viewDebugVisible: document.querySelector('#view-debug').offsetParent !== null,
+    debugPanelVisible: document.querySelector('#debug-panel').offsetParent !== null,
+    debugEmptyVisible: document.querySelector('#debug-empty').offsetParent !== null,
+    sidebarView: window.pc98workbench.getSidebarView(),
+  });
+  const activityInitial = await page.evaluate(measureActivity);
+  const activityInitialExpected = {
+    explorerSelected: 'true', debugSelected: 'false',
+    viewExplorerVisible: true, viewDebugVisible: false,
+    // debug-empty/debug-panelは非表示の#view-debug配下にいるので、この時点ではどちらも不可視。
+    debugPanelVisible: false, debugEmptyVisible: false, sidebarView: 'explorer',
+  };
+  assert.deepEqual(activityInitial, activityInitialExpected,
+    '初期状態でエクスプローラービュー/デバッグ未開始表示になっていません');
+  // 規律: 期待値をわざと逆にしてFAILすることを実測してから元に戻す。
+  assert.throws(() => assert.deepEqual(activityInitial,
+    { ...activityInitialExpected, viewDebugVisible: true }));
+
+  await page.click('#activity-debug');
+  const activityAfterDebugClick = await page.evaluate(() => {
+    const base = {
+      explorerSelected: document.querySelector('#activity-explorer').getAttribute('aria-selected'),
+      debugSelected: document.querySelector('#activity-debug').getAttribute('aria-selected'),
+      viewExplorerVisible: document.querySelector('#view-explorer').offsetParent !== null,
+      viewDebugVisible: document.querySelector('#view-debug').offsetParent !== null,
+      fileTreeHidden: document.querySelector('#file-tree').offsetParent === null,
+      debugPanelVisible: document.querySelector('#debug-panel').offsetParent !== null,
+      debugEmptyVisible: document.querySelector('#debug-empty').offsetParent !== null,
+      sidebarView: window.pc98workbench.getSidebarView(),
+      sidebarVisible: window.pc98workbench.getSidebarVisible(),
+    };
+    return base;
+  });
+  assert.deepEqual(activityAfterDebugClick, {
+    explorerSelected: 'false', debugSelected: 'true',
+    viewExplorerVisible: false, viewDebugVisible: true,
+    fileTreeHidden: true,
+    // まだデバッグを開始していないので「デバッグしていません」案内が見える側。
+    debugPanelVisible: false, debugEmptyVisible: true,
+    sidebarView: 'debug', sidebarVisible: true,
+  }, 'デバッグアイコンのクリックでビューが切り替わりません、またはデバッグ未開始表示が不一致です');
+  assert.throws(() => assert.equal(activityAfterDebugClick.fileTreeHidden, false));
+  // 規律: debug-panel/debug-emptyの可視性をわざと逆にしてFAILすることを実測してから元に戻す。
+  assert.throws(() => assert.deepEqual(activityAfterDebugClick,
+    { ...activityAfterDebugClick, debugPanelVisible: true, debugEmptyVisible: false }));
+
+  await page.click('#activity-debug');
+  const activityHiddenBySameClick = await page.evaluate(() => ({
+    sidebarVisible: window.pc98workbench.getSidebarVisible(),
+    sidebarHidden: document.querySelector('#sidebar').offsetParent === null,
+    debugSelected: document.querySelector('#activity-debug').getAttribute('aria-selected'),
+  }));
+  assert.deepEqual(activityHiddenBySameClick,
+    { sidebarVisible: false, sidebarHidden: true, debugSelected: 'true' },
+    '選択中アイコンの再クリックでサイドバーが隠れないか、選択状態が失われました');
+  assert.throws(() => assert.equal(activityHiddenBySameClick.debugSelected, 'false'));
+
+  await page.click('#activity-debug');
+  const activityShownBySameClick = await page.evaluate(() => ({
+    sidebarVisible: window.pc98workbench.getSidebarVisible(),
+    sidebarHidden: document.querySelector('#sidebar').offsetParent === null,
+    debugSelected: document.querySelector('#activity-debug').getAttribute('aria-selected'),
+  }));
+  assert.deepEqual(activityShownBySameClick,
+    { sidebarVisible: true, sidebarHidden: false, debugSelected: 'true' },
+    '選択中アイコンの再クリックでサイドバーが再表示されません');
+
+  await page.click('#activity-explorer');
+  const activityBackToExplorer = await page.evaluate(measureActivity);
+  assert.deepEqual(activityBackToExplorer, activityInitialExpected,
+    'エクスプローラーアイコンのクリックで元のビューへ戻りません');
 
   const initialTree = await page.evaluate(() => ({
     groups: [...document.querySelectorAll('#file-tree .file-group-heading')].map((node) => node.textContent),
@@ -415,6 +494,7 @@ try {
       editorHidden: document.querySelector('.editor-card').offsetParent === null,
       machineHidden: document.querySelector('.machine-card').offsetParent === null,
       sidebarHidden: document.querySelector('#sidebar').offsetParent === null,
+      activityHidden: document.querySelector('#activity-bar').offsetParent === null,
       splitterHidden: document.querySelector('#splitter').offsetParent === null,
       editorPressed: document.querySelector('#maximize-editor').getAttribute('aria-pressed'),
       machinePressed: document.querySelector('#maximize-machine').getAttribute('aria-pressed'),
@@ -431,22 +511,26 @@ try {
   assert.equal(maximized.editor.pane, 'editor');
   assert.equal(maximized.editor.machineHidden, true, 'エディタ最大化時もPC-98カードが見えています');
   assert.equal(maximized.editor.sidebarHidden, true, 'エディタ最大化時もサイドバーが見えています');
+  assert.equal(maximized.editor.activityHidden, true, 'エディタ最大化時もアクティビティバーが見えています');
   assert.equal(maximized.editor.splitterHidden, true, 'エディタ最大化時もスプリッタが見えています');
   assert.ok(maximized.editor.editorWidth > maximized.normal.editorWidth, 'エディタ最大化時に幅が広がりません');
   assert.deepEqual([maximized.editor.editorPressed, maximized.editor.machinePressed], ['true', 'false']);
   assert.equal(maximized.machine.pane, 'machine');
   assert.equal(maximized.machine.editorHidden, true, 'PC-98最大化時もエディタカードが見えています');
   assert.equal(maximized.machine.sidebarHidden, true, 'PC-98最大化時もサイドバーが見えています');
+  assert.equal(maximized.machine.activityHidden, true, 'PC-98最大化時もアクティビティバーが見えています');
   assert.equal(maximized.machine.splitterHidden, true, 'PC-98最大化時もスプリッタが見えています');
   assert.ok(maximized.machine.machineWidth > maximized.normal.machineWidth, 'PC-98最大化時に幅が広がりません');
   assert.deepEqual([maximized.machine.editorPressed, maximized.machine.machinePressed], ['false', 'true']);
   assert.equal(maximized.restored.pane, null);
   assert.deepEqual([
     maximized.restored.editorHidden, maximized.restored.machineHidden,
-    maximized.restored.sidebarHidden,
+    maximized.restored.sidebarHidden, maximized.restored.activityHidden,
     maximized.restored.splitterHidden,
     maximized.restored.editorPressed, maximized.restored.machinePressed,
-  ], [false, false, false, false, 'false', 'false'], '最大化解除後にサイドバー・スプリッタ・両ペインが復帰しません');
+  ], [false, false, false, false, false, 'false', 'false'], '最大化解除後にサイドバー・アクティビティバー・スプリッタ・両ペインが復帰しません');
+  // 規律: わざとactivityHiddenの期待をfalseにしてFAILすることを実測してから元に戻す。
+  assert.throws(() => assert.equal(maximized.editor.activityHidden, false));
 
   const guardedSource = await page.evaluate(() => ({
     source: window.pc98workbench.getValue(), screen: window.pc98workbench.getScreenText().text,
@@ -619,6 +703,16 @@ try {
     'デバッグ開始でWebNP2ヘッダの背景色が変わりました');
   assert.notEqual(asmDebug.footerBackground, theme.footerBackground,
     'デバッグ開始後もステータスバーの背景色が通常時と同じです');
+
+  const activityOnDebugStart = await page.evaluate(measureActivity);
+  assert.deepEqual(activityOnDebugStart, {
+    explorerSelected: 'false', debugSelected: 'true',
+    viewExplorerVisible: false, viewDebugVisible: true,
+    debugPanelVisible: true, debugEmptyVisible: false, sidebarView: 'debug',
+  }, 'デバッグ開始で実行とデバッグビューへ自動切替されません');
+  // 規律: わざとdebugEmptyVisibleをtrueにしてFAILすることを実測してから元に戻す。
+  assert.throws(() => assert.deepEqual(activityOnDebugStart,
+    { ...activityOnDebugStart, debugEmptyVisible: true, debugPanelVisible: false }));
 
   const disassemblySplit = await page.evaluate(() => {
     const wb = window.pc98workbench;
@@ -850,6 +944,8 @@ try {
   assert.deepEqual(await page.evaluate(() => window.pc98workbench.getEditorMarks()),
     {
       breakpointDots: 1, currentLine: null, registers: [], debugPanelVisible: false,
+      // デバッグ終了ではビュー選択を自動で戻さない仕様なので、直前に開始したdebugビューのまま。
+      sidebarView: 'debug',
       disassemblyVisible: false, disassemblyRows: 12, readOnly: false,
     },
     'デバッグ終了後のエディタ状態が期待と不一致です');
@@ -930,6 +1026,11 @@ try {
   const forcedRemountCount = forcedRecovery.remountsAfter - forcedRecovery.remountsBefore;
 
   await page.evaluate(() => window.pc98workbench.openFile('project', 'samples/hello.asm'));
+  // 直前までのデバッグセッションでビューがdebugのままなので、フォルダ操作の検証前にエクスプローラーへ戻す。
+  await page.evaluate(() => {
+    window.pc98workbench.setSidebarView('explorer');
+    window.pc98workbench.setSidebarVisible(true);
+  });
   // サイドバー操作列とステータスバー自身がviewportを横へ押し広げないことを実測する。
   const chromeOverflow = () => page.evaluate(() => {
     const actions = document.querySelector('.sidebar-actions');
@@ -988,6 +1089,13 @@ try {
   assert.ok(mobileChrome.footer <= 1, `モバイルのステータスバーがはみ出しています: ${mobileChrome.footer}px`);
   assert.equal(mobileChrome.folderOpen, true, 'モバイルでフォルダを開くボタンが表示されていません');
   assert.equal(mobileSplitterHidden, true, '375px幅でスプリッタが非表示ではありません');
+  // 375px幅ではアクティビティバーは横並びの帯になる（幅=viewport相当、高さ<幅）。
+  const mobileActivity = await page.$eval('#activity-bar', (node) => node.getBoundingClientRect().toJSON());
+  assert.ok(mobileActivity.width >= 330, `モバイルでアクティビティバーの幅が狭すぎます: ${JSON.stringify(mobileActivity)}`);
+  assert.ok(mobileActivity.height > 0 && mobileActivity.height < mobileActivity.width,
+    `モバイルでアクティビティバーが横並びになっていません: ${JSON.stringify(mobileActivity)}`);
+  // 規律: わざと不等号を逆にしてFAILすることを実測してから元に戻す。
+  assert.throws(() => assert.ok(mobileActivity.height > mobileActivity.width));
   // 等倍未満の縮小では補間、等倍以上ではドット感を残す（実測値で確認する）。
   const mobileScaling = await page.evaluate(() => ({
     ...window.pc98workbench.getScreenScaling(),
@@ -998,6 +1106,16 @@ try {
   assert.notEqual(mobileScaling.rendering, 'pixelated', '縮小時にimage-renderingがpixelatedのままです');
   await page.screenshot({ path: MOBILE_SHOT });
   console.log(`[PASS] screen scaling: desktop x${desktopScaling.scale.toFixed(2)} pixelated / mobile x${mobileScaling.scale.toFixed(2)} ${mobileScaling.rendering}`);
+
+  // --- サイドバービューの永続化: リロード後もlocalStorageから復元される ---
+  await page.evaluate(() => window.pc98workbench.setSidebarView('debug'));
+  await page.reload({ waitUntil: 'networkidle2' });
+  await page.evaluate(() => window.pc98workbench.ready);
+  const restoredView = await page.evaluate(() => window.pc98workbench.getSidebarView());
+  assert.equal(restoredView, 'debug', 'リロード後にサイドバービュー(debug)の選択が復元されません');
+  // 規律: わざと'explorer'を期待させてFAILすることを実測してから元に戻す。
+  assert.throws(() => assert.equal(restoredView, 'explorer'));
+  console.log('[PASS] activity bar: initial explorer view, click-to-switch, click-to-toggle with aria-selected retained, reload persistence, debug auto-switch, maximize hiding, mobile row layout');
 
   console.log(`[PASS] file/edit/IndexedDB/build/run: ${output}`);
   console.log('[PASS] machine status/prewarm: one status line, asynchronous boot completed, build/debug transitions');

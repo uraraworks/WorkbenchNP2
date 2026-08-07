@@ -16,25 +16,52 @@
     </button>
   </header>
   <main class="workspace-grid">
+    <nav class="activity-bar" id="activity-bar" role="tablist" aria-label="アクティビティバー">
+      <button id="activity-explorer" role="tab" aria-selected="true" title="エクスプローラー" aria-label="エクスプローラー">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"><rect x="4" y="5" width="16" height="14" rx="1"/><path d="M9 5v14"/></svg>
+      </button>
+      <button id="activity-debug" role="tab" aria-selected="false" title="実行とデバッグ" aria-label="実行とデバッグ">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"><path d="M5 4l11 7-11 7z"/><circle cx="18" cy="17" r="3"/></svg>
+      </button>
+    </nav>
     <aside class="sidebar" id="sidebar" aria-label="エクスプローラー">
-      <div class="sidebar-heading">エクスプローラー</div>
-      <div class="sidebar-actions">
-        <input id="new-path" aria-label="新規ファイル名" placeholder="project/main.asm">
-        <button id="new-file" title="新規ファイル" aria-label="新規ファイル">
-          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"><path d="M6 3h8l4 4v14H6zM14 3v5h5M12 11v6M9 14h6"/></svg>
-        </button>
-        <button id="save-file" title="保存" aria-label="保存">
-          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"><path d="M5 4h12l2 2v14H5zM8 4v6h8V4M8 20v-6h8v6"/></svg>
-        </button>
-        <button id="folder-open" title="フォルダを開く" aria-label="フォルダを開く">
-          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"><path d="M3 7h7l2 2h9l-2 10H5zM3 7v12h2"/></svg>
-        </button>
-        <button id="folder-disconnect" title="フォルダを切断" aria-label="フォルダを切断" hidden>
-          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"><path d="M3 7h7l2 2h9l-2 10H5zM4 4l16 16"/></svg>
-        </button>
+      <div id="view-explorer" class="sidebar-view" role="tabpanel" aria-labelledby="activity-explorer">
+        <div class="sidebar-heading">エクスプローラー</div>
+        <div class="sidebar-actions">
+          <input id="new-path" aria-label="新規ファイル名" placeholder="project/main.asm">
+          <button id="new-file" title="新規ファイル" aria-label="新規ファイル">
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"><path d="M6 3h8l4 4v14H6zM14 3v5h5M12 11v6M9 14h6"/></svg>
+          </button>
+          <button id="save-file" title="保存" aria-label="保存">
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"><path d="M5 4h12l2 2v14H5zM8 4v6h8V4M8 20v-6h8v6"/></svg>
+          </button>
+          <button id="folder-open" title="フォルダを開く" aria-label="フォルダを開く">
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"><path d="M3 7h7l2 2h9l-2 10H5zM3 7v12h2"/></svg>
+          </button>
+          <button id="folder-disconnect" title="フォルダを切断" aria-label="フォルダを切断" hidden>
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"><path d="M3 7h7l2 2h9l-2 10H5zM4 4l16 16"/></svg>
+          </button>
+        </div>
+        <div id="folder-state">フォルダ未接続</div>
+        <div id="file-tree" role="tree" aria-label="ファイル"></div>
       </div>
-      <div id="folder-state">フォルダ未接続</div>
-      <div id="file-tree" role="tree" aria-label="ファイル"></div>
+      <div id="view-debug" class="sidebar-view" role="tabpanel" aria-labelledby="activity-debug" hidden>
+        <div class="sidebar-heading">実行とデバッグ</div>
+        <div id="debug-empty" class="debug-empty">
+          <p>デバッグしていません</p>
+          <p>デバッグを開始するとレジスタとブレークポイントがここに出ます。</p>
+        </div>
+        <section id="debug-panel" class="debug-panel" aria-label="デバッグ" hidden>
+          <details class="debug-section" id="section-registers" open>
+            <summary>変数（レジスタ）</summary>
+            <div id="registers" class="ide-registers" aria-label="レジスタ（IDE独自表示）"></div>
+          </details>
+          <details class="debug-section" id="section-breakpoints" open>
+            <summary>ブレークポイント<span class="section-count" id="breakpoint-count">0</span></summary>
+            <ul id="breakpoint-list" aria-label="ブレークポイント一覧"></ul>
+          </details>
+        </section>
+      </div>
     </aside>
     <section class="editor-card" aria-labelledby="editor-heading">
       <div class="panel-heading">
@@ -106,16 +133,6 @@
       </div>
       <div id="machine-status" role="status">初期化中…</div>
       <div class="screen-shell"><canvas id="screen" width="640" height="400" tabindex="0"></canvas></div>
-      <section id="debug-panel" class="debug-panel" aria-label="デバッグ" hidden>
-        <details class="debug-section" id="section-registers" open>
-          <summary>変数（レジスタ）</summary>
-          <div id="registers" class="ide-registers" aria-label="レジスタ（IDE独自表示）"></div>
-        </details>
-        <details class="debug-section" id="section-breakpoints" open>
-          <summary>ブレークポイント<span class="section-count" id="breakpoint-count">0</span></summary>
-          <ul id="breakpoint-list" aria-label="ブレークポイント一覧"></ul>
-        </details>
-      </section>
       <pre id="screen-text" aria-label="PC-98テキスト画面"></pre>
     </section>
   </main>
