@@ -28,7 +28,7 @@ const nodes = {
   saveState: document.querySelector('#save-state'), currentPath: document.querySelector('#current-path'),
   editLock: document.querySelector('#edit-lock'),
   tabStrip: document.querySelector('#tab-strip'),
-  sidebar: document.querySelector('#sidebar'), toggleSidebar: document.querySelector('#toggle-sidebar'),
+  sidebar: document.querySelector('#sidebar'),
   activityBar: document.querySelector('#activity-bar'),
   activityExplorer: document.querySelector('#activity-explorer'), activityDebug: document.querySelector('#activity-debug'),
   viewExplorer: document.querySelector('#view-explorer'), viewDebug: document.querySelector('#view-debug'),
@@ -147,7 +147,6 @@ function loadSidebarPreference() {
 function setSidebarVisible(value, { persist = true } = {}) {
   sidebarVisible = Boolean(value);
   document.body.classList.toggle('sidebar-hidden', !sidebarVisible);
-  nodes.toggleSidebar.setAttribute('aria-pressed', String(sidebarVisible));
   if (persist) {
     sidebarPreference = sidebarVisible;
     try { localStorage.setItem(SIDEBAR_KEY, sidebarVisible ? '1' : '0'); } catch {}
@@ -1450,7 +1449,6 @@ nodes.newFile.addEventListener('click', () => createFile(nodes.newPath.value).ca
 nodes.save.addEventListener('click', () => saveFile().catch((error) => showErrors([{ stage: 'save', line: 0, message: error.message }])));
 nodes.folderOpen.addEventListener('click', () => openFolder().catch((error) => setDirectoryLabel(error.message)));
 nodes.folderDisconnect.addEventListener('click', () => disconnectDirectory().catch((error) => setDirectoryLabel(error.message)));
-nodes.toggleSidebar.addEventListener('click', () => setSidebarVisible(!sidebarVisible));
 nodes.activityExplorer.addEventListener('click', () => handleActivityClick('explorer'));
 nodes.activityDebug.addEventListener('click', () => handleActivityClick('debug'));
 nodes.swapPanes.addEventListener('click', () => setPanesSwapped(!panesSwapped));

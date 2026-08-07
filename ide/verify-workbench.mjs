@@ -120,12 +120,15 @@ try {
   assert.equal(initialTabs.tabs[0].active, true, '初期タブがアクティブではありません');
   assert.equal(initialTabs.rendered, 1, '初期タブがタブ列へ1枚描画されていません');
   const initialTabId = initialTabs.tabs[0].id;
+  // サイドバーの開閉はアクティビティバーに集約された（#toggle-sidebarは廃止）。
+  // 開閉API自体はwb.setSidebarVisible()で直接叩き、選択中ビュー(#activity-explorerの
+  // aria-selected)が可視状態の変化と無関係に保持されることも合わせて確認する。
   const sidebarVisibility = await page.evaluate(() => {
     const wb = window.pc98workbench;
     const measure = () => ({
       visible: wb.getSidebarVisible(),
       hidden: document.querySelector('#sidebar').offsetParent === null,
-      pressed: document.querySelector('#toggle-sidebar').getAttribute('aria-pressed'),
+      explorerSelected: document.querySelector('#activity-explorer').getAttribute('aria-selected'),
     });
     const initial = measure();
     wb.setSidebarVisible(false);
@@ -134,9 +137,16 @@ try {
     const restored = measure();
     return { initial, hidden, restored };
   });
-  assert.deepEqual(sidebarVisibility.initial, { visible: true, hidden: false, pressed: 'true' });
-  assert.deepEqual(sidebarVisibility.hidden, { visible: false, hidden: true, pressed: 'false' });
-  assert.deepEqual(sidebarVisibility.restored, { visible: true, hidden: false, pressed: 'true' });
+  assert.deepEqual(sidebarVisibility.initial, { visible: true, hidden: false, explorerSelected: 'true' });
+  assert.deepEqual(sidebarVisibility.hidden, { visible: false, hidden: true, explorerSelected: 'true' });
+  assert.deepEqual(sidebarVisibility.restored, { visible: true, hidden: false, explorerSelected: 'true' });
+  // 規律: 期待値をわざと逆にしてFAILすることを実測してから元に戻す。
+  assert.throws(() => assert.deepEqual(sidebarVisibility.initial,
+    { visible: false, hidden: true, explorerSelected: 'true' }));
+  assert.throws(() => assert.deepEqual(sidebarVisibility.hidden,
+    { visible: false, hidden: true, explorerSelected: 'false' }));
+  assert.throws(() => assert.deepEqual(sidebarVisibility.restored,
+    { visible: false, hidden: false, explorerSelected: 'true' }));
 
   // --- アクティビティバー: エクスプローラー/デバッグの2ビュー切替 ---
   const measureActivity = () => ({
