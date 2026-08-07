@@ -69,9 +69,7 @@ try {
   page = await browser.newPage();
   const pageErrors = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
-  // アクティビティバー(48px+gap)の分だけ、常時消費される横幅が増えた。
-  // サイドバー非表示時にPC-98画面が等倍へ届く保証を保つため、その分だけviewportを広げる。
-  await page.setViewport({ width: 1460, height: 900, deviceScaleFactor: 1 });
+  await page.setViewport({ width: 1400, height: 900, deviceScaleFactor: 1 });
   await page.goto(BASE_URL, { waitUntil: 'networkidle2' });
   await page.evaluate(() => window.pc98workbench.ready);
   assert.deepEqual(pageErrors, []);

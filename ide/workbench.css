@@ -40,7 +40,19 @@
   --vsc-transparent: transparent;
   --activity-col: 48px;
   --sidebar-col: 240px;
-  --editor-col: minmax(430px, 1fr);
+  /*
+   * アクティビティバー(48px+gap)の追加で、サイドバー非表示時の既定(未ドラッグ)の
+   * エディタ/PC-98画面の1fr:1fr均等割りが両側とも28px前後ずつ削られ、1400px幅では
+   * PC-98画面が625px(<640px)までしか届かなくなった。実測(1400px, サイドバー非表示,
+   * setEditorWidth(null)の既定割り付け): 均等割り(1fr)ではeditor=653px/machine=653px/
+   * screen=625px。screenが640pxに届くにはmachine>=668px(1fr換算0.955)が必要。
+   * 1400px級ノートでも既定配置のまま等倍へ届くよう、editor側のfr配分だけ0.94へ
+   * 落として機体側へ余裕(約5px)を渡す。実測: fr=0.94でmachine=673px/editor=633px/
+   * screen=640px（editorは下限430pxにも既存assertion(>500px)にも十分な余裕あり）。
+   * なおmin側の430pxはこの均等割りの結果に影響しない(実測: 430を下げても分配比は
+   * 不変。fr同士の按分は各トラックの最小値を満たした後は最小値と無関係なため)。
+   */
+  --editor-col: minmax(430px, 0.94fr);
   --splitter-col: 6px;
   background: var(--vsc-editor-bg);
   color: var(--vsc-fg);
