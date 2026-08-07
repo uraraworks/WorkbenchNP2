@@ -39,7 +39,9 @@ const nodes = {
   workspace: document.querySelector('.workspace-grid'), splitter: document.querySelector('#splitter'),
   maximizeEditor: document.querySelector('#maximize-editor'), maximizeMachine: document.querySelector('#maximize-machine'),
   editor: document.querySelector('#editor'), build: document.querySelector('#build'), run: document.querySelector('#run'),
+  editorToolbar: document.querySelector('#editor-toolbar'),
   buildActions: document.querySelector('#build-actions'), debugActions: document.querySelector('#debug-actions'),
+  debugToolbarGrip: document.querySelector('#debug-toolbar-grip'),
   buildStatus: document.querySelector('#build-status'), errors: document.querySelector('#build-errors'),
   disassemblySplitter: document.querySelector('#disassembly-splitter'),
   disassemblyPanel: document.querySelector('#disassembly-panel'), disassembly: document.querySelector('#disassembly'),
@@ -88,11 +90,13 @@ let sidebarVisible = false;
 let sidebarPreference = null;
 let sidebarView = 'explorer';
 let lastShortcut = null;
+let debugToolbarOffset = 0;
 const PANES_SWAPPED_KEY = 'pc98dev:panes-swapped';
 const SIDEBAR_KEY = 'pc98dev:sidebar';
 const SIDEBAR_VIEW_KEY = 'pc98dev:sidebar-view';
 const SPLIT_EDITOR_KEY = 'pc98dev:split-editor';
 const SPLIT_DISASSEMBLY_KEY = 'pc98dev:split-disassembly';
+const DEBUG_TOOLBAR_KEY = 'pc98dev:debug-toolbar-x';
 // 画面幅が狭い環境ではPC-98画面を等倍(640px)まで広げられなくなるため、可動域は絞らない。
 // 片側を潰しきってもスプリッタ自体は残るので、いつでも引き戻せる。
 const MIN_EDITOR_WIDTH = 0;
@@ -152,6 +156,7 @@ function setSidebarVisible(value, { persist = true } = {}) {
     try { localStorage.setItem(SIDEBAR_KEY, sidebarVisible ? '1' : '0'); } catch {}
   }
   reclampExplicitEditorWidth();
+  reclampDebugToolbarOffset();
   return sidebarVisible;
 }
 
@@ -206,6 +211,7 @@ function setMaximizedPane(pane) {
   nodes.maximizeEditor.setAttribute('aria-pressed', String(pane === 'editor'));
   nodes.maximizeMachine.setAttribute('aria-pressed', String(pane === 'machine'));
   if (pane === null) reclampExplicitEditorWidth();
+  reclampDebugToolbarOffset();
   return maximizedPane;
 }
 
@@ -242,6 +248,9 @@ new ResizeObserver(syncScreenScaling).observe(screenCanvas);
 new MutationObserver(syncScreenScaling).observe(screenCanvas, {
   attributes: true, attributeFilter: ['width', 'height'],
 });
+// viewport変化・スプリッタ操作・サイドバー開閉など、.editor-card自体の幅が変わる経路を
+// 個別に呼び分けるのではなく、実際の幅変化そのものを監視してフローティングツールバーを再クランプする。
+new ResizeObserver(() => reclampDebugToolbarOffset()).observe(nodes.editorCard);
 
 function splitBounds() {
   const gridStyle = getComputedStyle(nodes.workspace);
@@ -286,6 +295,7 @@ function setEditorWidth(px, { persist = true } = {}) {
   // ResizeObserver任せにせず、幅変更と同じターンで補間状態も合わせる。
   const editorWidth = nodes.editorCard.getBoundingClientRect().width;
   syncScreenScaling();
+  reclampDebugToolbarOffset();
   return editorWidth;
 }
 
@@ -305,9 +315,76 @@ function restoreEditorWidth() {
   }
 }
 
+/**
+ * フローティングデバッグツールバーの可動範囲。containing block(.editor-cardの
+ * padding edge = border-boxからborder幅を引いた内側)からはみ出さないよう、
+ * ツールバー自身の実測幅の半分だけ中心から離れられる範囲に絞る。
+ */
+function debugToolbarBounds() {
+  const cardStyle = getComputedStyle(nodes.editorCard);
+  const containingWidth = nodes.editorCard.getBoundingClientRect().width
+    - parseFloat(cardStyle.borderLeftWidth) - parseFloat(cardStyle.borderRightWidth);
+  const toolbarWidth = nodes.debugActions.getBoundingClientRect().width || 0;
+  const half = Math.max(0, (containingWidth - toolbarWidth) / 2);
+  return { min: -half, max: half };
+}
+
+/** #editorの上端+8pxへ追従させる。パネル見出し/タブ列の高さは実測し、値を決め打ちしない。 */
+function positionDebugToolbarTop() {
+  if (nodes.debugActions.hidden) return;
+  const cardRect = nodes.editorCard.getBoundingClientRect();
+  const editorRect = nodes.editor.getBoundingClientRect();
+  nodes.debugActions.style.top = `${Math.round(editorRect.top - cardRect.top + 8)}px`;
+}
+
+function setDebugToolbarOffset(px, { persist = true } = {}) {
+  if (px === null) {
+    debugToolbarOffset = 0;
+    if (persist) {
+      try { localStorage.removeItem(DEBUG_TOOLBAR_KEY); } catch {}
+    }
+  } else {
+    const requested = Number(px);
+    if (!Number.isFinite(requested)) throw new TypeError('デバッグツールバーの位置は数値または null で指定してください');
+    const { min, max } = debugToolbarBounds();
+    debugToolbarOffset = Math.min(max, Math.max(min, Math.round(requested)));
+    if (persist) {
+      try { localStorage.setItem(DEBUG_TOOLBAR_KEY, String(debugToolbarOffset)); } catch {}
+    }
+  }
+  nodes.debugActions.style.setProperty('--debug-toolbar-offset', `${debugToolbarOffset}px`);
+  return debugToolbarOffset;
+}
+
+/**
+ * エディタ幅が変わりうるすべての操作(スプリッタ・サイドバー開閉・最大化・viewport変化)の
+ * あとに呼ぶ。reclampExplicitEditorWidth()と同じ考え方で、保存済みの論理オフセットを
+ * 現在の可動範囲へ当てはめ直すだけで、ユーザーの意図(中心からのズレ)は保持する。
+ */
+function reclampDebugToolbarOffset() {
+  setDebugToolbarOffset(debugToolbarOffset, { persist: false });
+  positionDebugToolbarTop();
+}
+
+function restoreDebugToolbarOffset() {
+  try {
+    const stored = localStorage.getItem(DEBUG_TOOLBAR_KEY);
+    if (stored === null) return setDebugToolbarOffset(0, { persist: false });
+    const offset = Number(stored);
+    if (!Number.isFinite(offset)) {
+      localStorage.removeItem(DEBUG_TOOLBAR_KEY);
+      return setDebugToolbarOffset(0, { persist: false });
+    }
+    return setDebugToolbarOffset(offset);
+  } catch {
+    return setDebugToolbarOffset(0, { persist: false });
+  }
+}
+
 function getSplit() {
   const bounds = splitBounds();
   const screenWidth = screenCanvas.getBoundingClientRect().width;
+  const debugToolbarRect = nodes.debugActions.getBoundingClientRect();
   return {
     editorWidth: nodes.editorCard.getBoundingClientRect().width,
     machineWidth: nodes.machineCard.getBoundingClientRect().width,
@@ -316,6 +393,12 @@ function getSplit() {
     minEditorWidth: bounds.min,
     maxEditorWidth: bounds.max,
     disassemblyHeight: nodes.disassemblyPanel.getBoundingClientRect().height,
+    debugToolbar: {
+      floating: getComputedStyle(nodes.debugActions).position === 'absolute',
+      offset: debugToolbarOffset,
+      left: debugToolbarRect.left,
+      width: debugToolbarRect.width,
+    },
   };
 }
 
@@ -393,10 +476,13 @@ function editorWidthAtPointer(clientX, drag) {
   return splitterLeft - gap - editorLeft;
 }
 
-function installSplitter({ node, axis, decreaseKey, increaseKey, getValue, setValue, valueAtPointer }) {
+function installSplitter({
+  node, axis, decreaseKey, increaseKey, getValue, setValue, valueAtPointer, draggingClasses,
+}) {
   let drag;
   const coordinate = (event) => (axis === 'vertical' ? event.clientX : event.clientY);
   const size = (rect) => (axis === 'vertical' ? rect.width : rect.height);
+  const classes = draggingClasses ?? ['splitting', `splitting-${axis}`];
   node.addEventListener('pointerdown', (event) => {
     if (event.button !== 0 || node.offsetParent === null) return;
     const rect = node.getBoundingClientRect();
@@ -409,7 +495,7 @@ function installSplitter({ node, axis, decreaseKey, increaseKey, getValue, setVa
       splitterSize: size(rect),
     };
     node.setPointerCapture(event.pointerId);
-    document.body.classList.add('splitting', `splitting-${axis}`);
+    document.body.classList.add(...classes);
     event.preventDefault();
   });
   node.addEventListener('pointermove', (event) => {
@@ -423,7 +509,7 @@ function installSplitter({ node, axis, decreaseKey, increaseKey, getValue, setVa
     if (drag?.pointerId !== event.pointerId) return;
     const { pointerId, value } = drag;
     drag = undefined;
-    document.body.classList.remove('splitting', `splitting-${axis}`);
+    document.body.classList.remove(...classes);
     if (node.hasPointerCapture(pointerId)) node.releasePointerCapture(pointerId);
     setValue(value);
   };
@@ -452,6 +538,14 @@ installSplitter({
   decreaseKey: 'ArrowDown', increaseKey: 'ArrowUp',
   getValue: () => nodes.disassemblyPanel.getBoundingClientRect().height,
   setValue: setDisassemblyHeight,
+});
+installSplitter({
+  // 水平ドラッグのみ(VS Code同様、上端に沿って左右)。cursorは resize系ではなくgrab/grabbing。
+  node: nodes.debugToolbarGrip, axis: 'vertical', decreaseKey: 'ArrowLeft', increaseKey: 'ArrowRight',
+  getValue: () => debugToolbarOffset,
+  setValue: setDebugToolbarOffset,
+  valueAtPointer: (clientX, drag) => drag.startValue + (clientX - drag.startCoordinate),
+  draggingClasses: ['dragging-debug-toolbar'],
 });
 
 /** TVRAMダンプは常に最新が見えるよう、行が増えたら最下段へ追従させる。 */
@@ -1168,8 +1262,12 @@ function setEditorReadOnly(value) {
 
 function setDebugControls(active) {
   const targetActive = active && activeTabId === debugTabId;
+  // インフローの.editor-toolbar(#build-actionsのみ)はデバッグ中まるごと隠す。
+  // #debug-actionsは既にフローティング(.editor-cardの直接の子)なので道連れにならない。
+  nodes.editorToolbar.hidden = active;
   nodes.buildActions.hidden = active;
   nodes.debugActions.hidden = !active;
+  if (active) { positionDebugToolbarTop(); reclampDebugToolbarOffset(); }
   nodes.debugPanel.hidden = !active;
   nodes.debugEmpty.hidden = active;
   nodes.disassemblySplitter.hidden = !active;
@@ -1432,6 +1530,7 @@ async function initialize() {
   setSidebarVisible(sidebarPreference ?? !sidebarMedia.matches, { persist: false });
   setPanesSwapped(loadPanesSwapped());
   restoreEditorWidth();
+  restoreDebugToolbarOffset();
   await projectFS.open();
   const response = await fetch('./freedos/fd98_2hd.xdf');
   if (!response.ok) throw new Error(`FreeDOS: HTTP ${response.status}`);
@@ -1513,7 +1612,7 @@ window.pc98workbench = {
   setMaximizedPane, getMaximizedPane,
   setSidebarVisible, getSidebarVisible,
   setSidebarView, getSidebarView,
-  setEditorWidth, setDisassemblyHeight, getSplit,
+  setEditorWidth, setDisassemblyHeight, getSplit, setDebugToolbarOffset,
   getLastShortcut: () => lastShortcut,
   getScreenScaling: syncScreenScaling,
   getGuardedKeyboardTargets: () => [...GUARDED_KEYBOARD_TARGETS],

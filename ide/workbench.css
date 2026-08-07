@@ -112,6 +112,8 @@ body.splitting { user-select: none; }
 body.splitting-vertical { cursor: col-resize; }
 body.splitting-horizontal { cursor: row-resize; }
 .editor-card, .machine-card { min-width: 0; border: 1px solid var(--vsc-border); border-radius: 8px; color: var(--vsc-fg); background: var(--vsc-editor-bg); overflow: hidden; }
+/* フローティングデバッグツールバー(#debug-actions)の位置基準にする。 */
+.editor-card { position: relative; }
 .panel-heading { min-height: 51px; display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 9px 12px; border-bottom: 1px solid var(--vsc-border); background: var(--vsc-ui-bg); }
 .panel-heading h2 { margin: 0; font-size: 14px; }
 .panel-heading span { color: var(--vsc-muted); font: 11px ui-monospace, monospace; }
@@ -134,14 +136,53 @@ body.splitting-horizontal { cursor: row-resize; }
 .tab-close svg { display: block; }
 #editor { height: min(62vh, 610px); min-height: 200px; }
 .editor-toolbar { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px; border-top: 1px solid var(--vsc-border); background: var(--vsc-ui-bg); }
+.editor-toolbar[hidden] { display: none; }
 .tool-group { display: flex; flex-wrap: wrap; gap: 6px; }
 .tool-group[hidden] { display: none; }
-.editor-toolbar button { display: inline-grid; place-items: center; min-width: 38px; height: 34px; padding: 0 9px; }
-.editor-toolbar svg { display: block; }
+/* #build-actionsも#debug-actions(フローティング)も.tool-groupなので、DOM上の親に関わらず共通化する。 */
+.tool-group button { display: inline-grid; place-items: center; min-width: 38px; height: 34px; padding: 0 9px; }
+.tool-group svg { display: block; }
 #run, #debug-continue { color: var(--vsc-debug-fg); background: var(--vsc-accent); }
 #run:hover, #debug-continue:hover { background: var(--vsc-accent-hover); }
 #debug { border-color: var(--vsc-accent); color: var(--vsc-link); }
 #debug:hover { background: var(--vsc-toolbar-hover); }
+/*
+ * VS Code風フローティングデバッグツールバー。.editor-card(position:relative)を基準に、
+ * エディタ内容領域(#editor)の上端中央へ絶対配置する。位置はJSが#debug-toolbar-grip経由で
+ * --debug-toolbar-offsetへ書き込む(既定0=中央)。containing blockは.editor-cardの
+ * padding edge(=border-box - border幅)なので、左右中央合わせのtranslateX(-50%)はその基準に揃う。
+ */
+.debug-toolbar-float {
+  position: absolute;
+  left: 50%;
+  transform: translateX(calc(-50% + var(--debug-toolbar-offset, 0px)));
+  /* エディタを極端に狭めた(スプリッタの可動域は0まで)ときも幅を強制的に収め、
+     入りきらなければ折り返す。固定幅のままだとcontaining blockより広くなり得るため。 */
+  max-width: calc(100% - 8px);
+  flex-wrap: wrap;
+  padding: 4px 6px;
+  border: 1px solid var(--vsc-border);
+  border-radius: 6px;
+  background: var(--vsc-widget-bg);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .35);
+  z-index: 5;
+}
+.debug-toolbar-grip {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 16px;
+  height: 34px;
+  margin-right: 2px;
+  padding-right: 4px;
+  border-right: 1px solid var(--vsc-border);
+  color: var(--vsc-fg-dim);
+  cursor: grab;
+}
+.debug-toolbar-grip svg { display: block; }
+.debug-toolbar-grip:focus-visible { outline: 1px solid var(--vsc-focus); outline-offset: 1px; }
+body.dragging-debug-toolbar { user-select: none; }
+body.dragging-debug-toolbar .debug-toolbar-grip { cursor: grabbing; }
 #debug-stop { color: var(--vsc-error); }
 .cm-editor { height: 100%; color: var(--vsc-fg); background: var(--vsc-editor-bg); font-size: 13px; }
 body.debugging .cm-content { caret-color: var(--vsc-transparent); }
@@ -227,6 +268,22 @@ body.maximized-editor #editor { height: min(78vh, 900px); }
   .panel-heading { min-height: 42px; padding: 5px 8px; }
   #editor { height: 285px; min-height: 285px; }
   .editor-toolbar { padding: 5px 8px; }
+  /* 375px級ではドラッグ可能な浮遊物が操作の邪魔になるため、インフロー表示に戻す。 */
+  .debug-toolbar-float {
+    position: static;
+    left: auto;
+    transform: none;
+    width: 100%;
+    flex-wrap: wrap;
+    margin: 0;
+    padding: 5px 8px;
+    border: none;
+    border-top: 1px solid var(--vsc-border);
+    border-radius: 0;
+    box-shadow: none;
+    background: var(--vsc-ui-bg);
+  }
+  .debug-toolbar-grip { display: none; }
   #build-status { min-height: 29px; padding: 5px 8px; }
   #machine-status { min-height: 29px; padding: 5px 8px; }
   #build-errors { max-height: 56px; }

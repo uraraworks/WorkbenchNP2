@@ -252,11 +252,14 @@ try {
     'build', 'run', 'debug', 'debug-continue', 'debug-step-over', 'debug-step-into',
     'debug-step-instruction', 'debug-restart', 'debug-stop',
   ];
-  const readToolbar = () => page.$$eval('.editor-toolbar button', (buttons) => buttons.map((button) => {
+  // Step14でデバッグ用の6ボタン(#debug-actions)はフローティング化のため.editor-toolbarの
+  // 外(.editor-cardの直接の子)へ移設された。build/debug両方とも.tool-groupは共通なので、
+  // そちらを基準に9ボタンを拾う(移し替え。削除ではない)。
+  const readToolbar = () => page.$$eval('.tool-group button', (buttons) => buttons.map((button) => {
     const svg = button.querySelector('svg');
     return {
       id: button.id, disabled: button.disabled, title: button.title,
-      ariaLabel: button.getAttribute('aria-label'), insideToolbar: Boolean(button.closest('.editor-toolbar')),
+      ariaLabel: button.getAttribute('aria-label'), insideToolbar: Boolean(button.closest('.tool-group')),
       hasSvg: Boolean(svg), svgWidth: svg?.getBoundingClientRect().width ?? 0,
       text: button.textContent.trim(),
     };
@@ -722,6 +725,90 @@ try {
   assert.throws(() => assert.deepEqual(activityOnDebugStart,
     { ...activityOnDebugStart, debugEmptyVisible: true, debugPanelVisible: false }));
 
+  // --- Step14: VS Codeスタイルのフローティングデバッグツールバー ---
+  const debugToolbarInitial = await page.evaluate(() => {
+    const cardRect = document.querySelector('.editor-card').getBoundingClientRect();
+    const tbRect = document.querySelector('#debug-actions').getBoundingClientRect();
+    return {
+      editorToolbarHidden: document.querySelector('#editor-toolbar').offsetParent === null,
+      position: getComputedStyle(document.querySelector('#debug-actions')).position,
+      cardCenter: cardRect.left + cardRect.width / 2,
+      tbCenter: tbRect.left + tbRect.width / 2,
+      offset: window.pc98workbench.getSplit().debugToolbar.offset,
+    };
+  });
+  assert.equal(debugToolbarInitial.editorToolbarHidden, true,
+    'デバッグ中もインフローの.editor-toolbarが空の帯として残っています');
+  assert.equal(debugToolbarInitial.position, 'absolute',
+    'デバッグツールバーがposition:absoluteでフローティングしていません');
+  assert.equal(debugToolbarInitial.offset, 0, '既定オフセットが0(中央)ではありません');
+  assert.ok(Math.abs(debugToolbarInitial.cardCenter - debugToolbarInitial.tbCenter) <= 2,
+    `デバッグツールバーの既定位置がエディタカード中央から2pxを超えてずれています: ${JSON.stringify(debugToolbarInitial)}`);
+  // 規律: 期待値をわざと逆/厳しくしてFAILすることを実測してから元に戻す。
+  assert.throws(() => assert.equal(debugToolbarInitial.editorToolbarHidden, false));
+  assert.throws(() => assert.equal(debugToolbarInitial.position, 'static'));
+  assert.throws(() => assert.ok(Math.abs(debugToolbarInitial.cardCenter + 500 - debugToolbarInitial.tbCenter) <= 2));
+
+  // ドラッグ(実ポインタ操作)でグリップから位置が動くこと
+  const gripRect = await page.$eval('#debug-toolbar-grip', (node) => node.getBoundingClientRect().toJSON());
+  await page.mouse.move(gripRect.left + gripRect.width / 2, gripRect.top + gripRect.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(gripRect.left + gripRect.width / 2 + 40, gripRect.top + gripRect.height / 2, { steps: 5 });
+  await page.mouse.up();
+  const afterDrag = await page.evaluate(() => window.pc98workbench.getSplit().debugToolbar.offset);
+  assert.ok(afterDrag > 0, `グリップのドラッグで右へ位置が動きません: ${afterDrag}`);
+  assert.throws(() => assert.equal(afterDrag, 0));
+
+  // キーボード: ←/→で16px、Homeで既定(中央)へ
+  await page.focus('#debug-toolbar-grip');
+  const beforeArrow = await page.evaluate(() => window.pc98workbench.getSplit().debugToolbar.offset);
+  await page.keyboard.press('ArrowRight');
+  const afterArrowRight = await page.evaluate(() => window.pc98workbench.getSplit().debugToolbar.offset);
+  assert.ok(Math.abs(afterArrowRight - (beforeArrow + 16)) <= 1,
+    `ArrowRightで16px動きません: ${beforeArrow} -> ${afterArrowRight}`);
+  await page.keyboard.press('ArrowLeft');
+  const afterArrowLeft = await page.evaluate(() => window.pc98workbench.getSplit().debugToolbar.offset);
+  assert.ok(Math.abs(afterArrowLeft - beforeArrow) <= 1, `ArrowLeftで元へ戻りません: ${afterArrowLeft}`);
+  await page.keyboard.press('Home');
+  const afterHome = await page.evaluate(() => window.pc98workbench.getSplit().debugToolbar.offset);
+  assert.equal(afterHome, 0, 'Homeで既定位置(中央)へ戻りません');
+  assert.throws(() => assert.notEqual(afterHome, 0));
+
+  // 極端な値(±99999)でクランプされ、エディタカードの内側に収まること
+  const withinCard = (rect, cardRect, margin = 0.5) => rect.left >= cardRect.left - margin
+    && rect.left + rect.width <= cardRect.left + cardRect.width + margin;
+  const clampCheck = await page.evaluate(() => {
+    const wb = window.pc98workbench;
+    wb.setDebugToolbarOffset(99999);
+    const high = document.querySelector('#debug-actions').getBoundingClientRect().toJSON();
+    wb.setDebugToolbarOffset(-99999);
+    const low = document.querySelector('#debug-actions').getBoundingClientRect().toJSON();
+    wb.setDebugToolbarOffset(null);
+    const cardRect = document.querySelector('.editor-card').getBoundingClientRect().toJSON();
+    return { high, low, cardRect };
+  });
+  assert.ok(withinCard(clampCheck.high, clampCheck.cardRect),
+    `setDebugToolbarOffset(99999)でカード外へはみ出します: ${JSON.stringify(clampCheck)}`);
+  assert.ok(withinCard(clampCheck.low, clampCheck.cardRect),
+    `setDebugToolbarOffset(-99999)でカード外へはみ出します: ${JSON.stringify(clampCheck)}`);
+  // 規律: マージンを大きく緩めて「はみ出しても通る」判定にするとFAILしない(=検査が効いている)ことを確認する。
+  assert.throws(() => assert.ok(withinCard(clampCheck.high, clampCheck.cardRect, -10000)));
+
+  // スプリッタでエディタを狭めたあとも内側に収まる(再クランプが効いている)
+  const narrowCheck = await page.evaluate(() => {
+    const wb = window.pc98workbench;
+    wb.setDebugToolbarOffset(60);
+    wb.setEditorWidth(260);
+    const rect = document.querySelector('#debug-actions').getBoundingClientRect().toJSON();
+    const cardRect = document.querySelector('.editor-card').getBoundingClientRect().toJSON();
+    wb.setEditorWidth(null);
+    wb.setDebugToolbarOffset(null);
+    return { rect, cardRect };
+  });
+  assert.ok(withinCard(narrowCheck.rect, narrowCheck.cardRect),
+    `エディタを260pxへ狭めた後にツールバーがカード外へはみ出します(再クランプ不足): ${JSON.stringify(narrowCheck)}`);
+  assert.throws(() => assert.ok(withinCard(narrowCheck.rect, narrowCheck.cardRect, -10000)));
+
   const disassemblySplit = await page.evaluate(() => {
     const wb = window.pc98workbench;
     const splitter = document.querySelector('#disassembly-splitter');
@@ -1104,6 +1191,16 @@ try {
     `モバイルでアクティビティバーが横並びになっていません: ${JSON.stringify(mobileActivity)}`);
   // 規律: わざと不等号を逆にしてFAILすることを実測してから元に戻す。
   assert.throws(() => assert.ok(mobileActivity.height > mobileActivity.width));
+  // 375px幅ではデバッグツールバーはフローティングにしない(position:static、グリップも非表示)。
+  const mobileDebugToolbar = await page.evaluate(() => ({
+    position: getComputedStyle(document.querySelector('#debug-actions')).position,
+    gripVisible: getComputedStyle(document.querySelector('#debug-toolbar-grip')).display !== 'none',
+  }));
+  assert.equal(mobileDebugToolbar.position, 'static', '375px幅でデバッグツールバーがフローティングのままです');
+  assert.equal(mobileDebugToolbar.gripVisible, false, '375px幅でグリップが表示されたままです');
+  // 規律: 期待値をわざと逆にしてFAILすることを実測してから元に戻す。
+  assert.throws(() => assert.equal(mobileDebugToolbar.position, 'absolute'));
+  assert.throws(() => assert.equal(mobileDebugToolbar.gripVisible, true));
   // 等倍未満の縮小では補間、等倍以上ではドット感を残す（実測値で確認する）。
   const mobileScaling = await page.evaluate(() => ({
     ...window.pc98workbench.getScreenScaling(),
@@ -1115,15 +1212,22 @@ try {
   await page.screenshot({ path: MOBILE_SHOT });
   console.log(`[PASS] screen scaling: desktop x${desktopScaling.scale.toFixed(2)} pixelated / mobile x${mobileScaling.scale.toFixed(2)} ${mobileScaling.rendering}`);
 
-  // --- サイドバービューの永続化: リロード後もlocalStorageから復元される ---
-  await page.evaluate(() => window.pc98workbench.setSidebarView('debug'));
+  // --- サイドバービュー/デバッグツールバー位置の永続化: リロード後もlocalStorageから復元される ---
+  await page.evaluate(() => {
+    window.pc98workbench.setSidebarView('debug');
+    window.pc98workbench.setDebugToolbarOffset(37);
+  });
   await page.reload({ waitUntil: 'networkidle2' });
   await page.evaluate(() => window.pc98workbench.ready);
   const restoredView = await page.evaluate(() => window.pc98workbench.getSidebarView());
+  const restoredDebugToolbarOffset = await page.evaluate(() => window.pc98workbench.getSplit().debugToolbar.offset);
   assert.equal(restoredView, 'debug', 'リロード後にサイドバービュー(debug)の選択が復元されません');
-  // 規律: わざと'explorer'を期待させてFAILすることを実測してから元に戻す。
+  assert.equal(restoredDebugToolbarOffset, 37, 'リロード後にデバッグツールバーの位置(37px)が復元されません');
+  // 規律: わざと違う値を期待させてFAILすることを実測してから元に戻す。
   assert.throws(() => assert.equal(restoredView, 'explorer'));
+  assert.throws(() => assert.equal(restoredDebugToolbarOffset, 0));
   console.log('[PASS] activity bar: initial explorer view, click-to-switch, click-to-toggle with aria-selected retained, reload persistence, debug auto-switch, maximize hiding, mobile row layout');
+  console.log('[PASS] floating debug toolbar: absolute positioning, centered default, drag/keyboard/Home, extreme-offset and narrow-editor clamping, reload persistence, mobile static fallback');
 
   console.log(`[PASS] file/edit/IndexedDB/build/run: ${output}`);
   console.log('[PASS] machine status/prewarm: one status line, asynchronous boot completed, build/debug transitions');
