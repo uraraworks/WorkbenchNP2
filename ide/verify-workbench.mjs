@@ -749,6 +749,34 @@ try {
   assert.throws(() => assert.equal(debugToolbarInitial.position, 'static'));
   assert.throws(() => assert.ok(Math.abs(debugToolbarInitial.cardCenter + 500 - debugToolbarInitial.tbCenter) <= 2));
 
+  /*
+   * 位置と収まりだけでは「2段折り返し」を検出できなかった実物の不具合(left:50%指定の
+   * absolute要素はshrink-to-fit幅の計算にcontaining block右端までの半分しか使えないため、
+   * 既定の1400px幅でも#debug-stopだけ2行目に落ちていた)への回帰検査。
+   * グリップ+ボタン6個のtopが全部同じ(=同一行)であることと、ツールバー自体の高さが
+   * ボタン1個分の実測高さを大きく超えないことの両方を見る。閾値はボタンの実測高さから
+   * 導出し、マジックナンバーは置かない。
+   */
+  const rowCheck = await page.evaluate(() => {
+    const tb = document.querySelector('#debug-actions');
+    const tops = [...tb.querySelectorAll('button, .debug-toolbar-grip')]
+      .map((el) => Math.round(el.getBoundingClientRect().top));
+    return {
+      uniqueTopCount: new Set(tops).size,
+      tops,
+      toolbarHeight: tb.getBoundingClientRect().height,
+      buttonHeight: document.querySelector('#debug-continue').getBoundingClientRect().height,
+    };
+  });
+  assert.equal(rowCheck.uniqueTopCount, 1,
+    `グリップと6ボタンが同一行に並んでいません(2段折り返し): ${JSON.stringify(rowCheck.tops)}`);
+  // 2段になればボタン高さの約2倍(+gap)を超えるので、1.5倍を閾値に「1行に収まっているか」を見る。
+  assert.ok(rowCheck.toolbarHeight < rowCheck.buttonHeight * 1.5,
+    `デバッグツールバーの高さがボタン1行分を大きく超えています(2段折り返し疑い): ${JSON.stringify(rowCheck)}`);
+  // 規律: 期待値をわざと逆/厳しくしてFAILすることを実測してから元に戻す。
+  assert.throws(() => assert.equal(rowCheck.uniqueTopCount, 2));
+  assert.throws(() => assert.ok(rowCheck.toolbarHeight < rowCheck.buttonHeight * 0.5));
+
   // ドラッグ(実ポインタ操作)でグリップから位置が動くこと
   const gripRect = await page.$eval('#debug-toolbar-grip', (node) => node.getBoundingClientRect().toJSON());
   await page.mouse.move(gripRect.left + gripRect.width / 2, gripRect.top + gripRect.height / 2);
@@ -808,6 +836,34 @@ try {
   assert.ok(withinCard(narrowCheck.rect, narrowCheck.cardRect),
     `エディタを260pxへ狭めた後にツールバーがカード外へはみ出します(再クランプ不足): ${JSON.stringify(narrowCheck)}`);
   assert.throws(() => assert.ok(withinCard(narrowCheck.rect, narrowCheck.cardRect, -10000)));
+
+  /*
+   * width: max-content にしても、極端に狭いとき(setEditorWidth(0)相当)の折り返し
+   * フォールバック(max-width + flex-wrap)は生きていること。ここまで狭いと単一行
+   * 296px相当のボタン列は物理的にカード内へ収まりきらないため「完全に収まる」ことは
+   * 検査しない(不可能な要求になる)。その代わり、折り返しで実際に複数行になり、
+   * 単一行のときの約296pxよりずっと狭い幅に切り詰まっていることを見る。
+   * 折り返しを禁止(nowrap)すると単一行296px幅のまま中心配置され、はみ出す量が
+   * 大きく増える。
+   */
+  const wrapFallback = await page.evaluate(() => {
+    const wb = window.pc98workbench;
+    wb.setDebugToolbarOffset(0);
+    wb.setEditorWidth(0);
+    const tb = document.querySelector('#debug-actions');
+    const rect = tb.getBoundingClientRect().toJSON();
+    const tops = [...tb.querySelectorAll('button, .debug-toolbar-grip')]
+      .map((el) => Math.round(el.getBoundingClientRect().top));
+    wb.setEditorWidth(null);
+    wb.setDebugToolbarOffset(null);
+    return { rect, uniqueTopCount: new Set(tops).size };
+  });
+  assert.ok(wrapFallback.uniqueTopCount > 1,
+    `エディタ幅0で折り返しが起きていません(折り返しフォールバックが無効化されています): ${JSON.stringify(wrapFallback)}`);
+  assert.ok(wrapFallback.rect.width < 296 / 2,
+    `折り返しが効いていれば単一行(約296px)よりずっと狭くなるはずです: ${JSON.stringify(wrapFallback)}`);
+  // 規律: 折り返しが起きていない(1行のまま)ことを期待するとFAILすることを実測してから戻す。
+  assert.throws(() => assert.equal(wrapFallback.uniqueTopCount, 1));
 
   const disassemblySplit = await page.evaluate(() => {
     const wb = window.pc98workbench;

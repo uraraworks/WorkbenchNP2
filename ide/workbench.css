@@ -156,6 +156,14 @@ body.splitting-horizontal { cursor: row-resize; }
   position: absolute;
   left: 50%;
   transform: translateX(calc(-50% + var(--debug-toolbar-offset, 0px)));
+  /*
+   * 実測で判明: left:50%とrightを指定しないabsolute要素はshrink-to-fit幅の計算に
+   * 「50%地点から containing block 右端まで」を使うため、幅がcontaining block幅の
+   * 半分(実測255px≒cardの512.625pxの半分)に切り詰められ、6ボタン+グリップ(必要幅
+   * 約290px)が収まらず2段折り返しになっていた(#debug-stopだけ2行目)。
+   * width: max-content で「内容が要求する幅」を明示し、shrink-to-fit計算を無効にする。
+   */
+  width: max-content;
   /* エディタを極端に狭めた(スプリッタの可動域は0まで)ときも幅を強制的に収め、
      入りきらなければ折り返す。固定幅のままだとcontaining blockより広くなり得るため。 */
   max-width: calc(100% - 8px);
