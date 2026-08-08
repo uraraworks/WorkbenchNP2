@@ -107,6 +107,29 @@ declare class TypedEmitter<EventMap extends Record<string, unknown>> {
     emit<K extends keyof EventMap>(type: K, detail: EventMap[K]): void;
 }
 /**
+ * 「準備完了になるまでポーリングする」の純粋なロジック。waitForFddReady()から
+ * wasm/DOM依存(coreFddReady・requestAnimationFrame)を切り離し、単体テストできるようにする。
+ *
+ * 打ち切り条件は2つ:
+ * - フレーム基準(主): `raf`がmaxIdleFrames回呼ばれても`isReady()`にならなければ諦める。
+ *   NP2kaiの挿入遅延はエミュレート1フレームごとに減るため、こちらが本来の基準になる。
+ * - 壁時計(保険): `raf`自体が一度も呼ばれない(タブが完全に凍結した等)場合の最終防波堤。
+ *   スロットル中やタブ背面化でも`raf`が来る限りはフレーム基準が先に効くはずだが、
+ *   `raf`そのものが止まるケースはフレーム基準では検出できないため、こちらで打ち切る。
+ *
+ * どちらの条件で打ち切っても、最後にもう一度`isReady()`を見てから結果を返す
+ * (打ち切り判定とほぼ同時に準備が整うタイミングを取りこぼさないため)。
+ */
+export declare function pollUntilReady(opts: {
+    isReady: () => boolean;
+    raf: (callback: () => void) => void;
+    now?: () => number;
+    timeoutMs?: number;
+    maxIdleFrames?: number;
+    setTimeoutFn?: (callback: () => void, ms: number) => unknown;
+    clearTimeoutFn?: (handle: unknown) => void;
+}): Promise<boolean>;
+/**
  * WebNP2 コマンドバス。boot / persistNow / exportDisk / resetToOriginal / fullscreen を提供する。
  */
 export declare class WebNP2 extends TypedEmitter<WebNP2EventMap> {
@@ -206,8 +229,14 @@ export declare class WebNP2 extends TypedEmitter<WebNP2EventMap> {
     private onVisibilityChange;
     /** persistNow の再入ガード。タイマーと visibilitychange が重なると二重保存になるため。 */
     private persisting;
-    /** マウント中の各イメージのうち変化したものだけ IndexedDB へ保存する。 */
-    persistNow(): Promise<void>;
+    /**
+     * マウント中の各イメージのうち変化したものだけ IndexedDB へ保存する。
+     * force=true では HDD の最短保存間隔を無視する(排出・タブ離脱・明示要求など、
+     * 「ここで保存できないと失われる」場面で間隔を理由に飛ばさないため)。
+     */
+    persistNow(options?: {
+        force?: boolean;
+    }): Promise<void>;
     private persistNowInner;
     private snapshotOf;
     private hasChanged;
@@ -228,10 +257,33 @@ export declare class WebNP2 extends TypedEmitter<WebNP2EventMap> {
      * FDドライブが読み書きできる状態になるまで待つ。
      *
      * NP2kai は挿入から 20 フレーム(約0.4秒)を Not Ready として模倣する(実機どおり)。
-     * この遅延は **エミュレート1フレームごと** に減るので、実時間での sleep では
-     * 足りる保証がない。挿入直後にゲストへコマンドを投げる用途では必ずこれで待つこと。
+     * この遅延はコア(NP2kai)側の comment 通り **エミュレート1フレームごと**(np2exec の
+     * メインループが1周するたび)に減る。CPUが HLT で止まっていてもフレーム/割り込みは
+     * 進むため、CPUのEIPが変化しているかどうかはこの遅延の進み方と直結しない
+     * (EIPは「CPUが命令を実行したか」であり「フレームが1つ進んだか」ではないため、
+     * DOSが正当にHLT待機している間もEIPが動かないまま遅延だけは明ける、という
+     * ケースを誤検出しうる。EIPを主指標に採用しなかった理由はこれ)。
+     * 実時間での sleep では足りる保証がない(**スロットル中・タブ背面化中は特に**)。
+     * 挿入直後にゲストへコマンドを投げる用途では必ずこれで待つこと。
+     *
+     * 打ち切りは requestAnimationFrame の呼び出し回数(=描画フレームの実際の到着回数)を
+     * 主基準にする(pollUntilReady参照)。rAFはブラウザの合成タイミングに紐づき、
+     * NP2kaiのメインループもrAF駆動で1フレームずつ進むため、同じ描画フレームの中で
+     * 両者は基本的に足並みが揃う。つまり「rAFが呼ばれた回数」は「コアが実際に処理した
+     * フレーム数」の妥当な代理指標になる(タブ背面化やCPU飽和でrAF自体が来なくなる
+     * 場合は後述の壁時計が拾う)。
+     *
+     * 実測(CPU 4倍スロットリング、Chrome DevTools Emulation.setCPUThrottlingRate):
+     * 挿入から準備完了までに要したrAF呼び出し回数は 20〜24 回(20フレームの遅延と一致、
+     * 誤差はスケジューリングのジッタ)。壁時計では約3.2秒だった。つまり「フレーム数」は
+     * スロットル倍率に関わらずほぼ一定(≈20)で、壁時計だけが伸びる。
+     * FDD_READY_MAX_IDLE_FRAMES=300 はこの実測値(20〜24)の10倍超の余裕を持たせた値で、
+     * 「20フレームでは説明できないほど長くrAFが来続けているのに一向に準備が整わない」
+     * ことをもって初めて諦める(=より重い環境でも早期に見捨てない側に倒す)。
      * @param drive 1|2
-     * @param timeoutMs 上限(既定10秒)。超えたら false を返す(例外にはしない)
+     * @param timeoutMs 保険の壁時計上限(既定10秒)。rAFそのものが一切来なくなる
+     *   (タブが完全に背面化/凍結する等)場合だけの最終防波堤。
+     *   フレーム基準より先に効くことは通常想定していない。
      */
     waitForFddReady(drive: 1 | 2, timeoutMs?: number): Promise<boolean>;
     /** 実行中の FD ドライブからイメージを排出する。 */

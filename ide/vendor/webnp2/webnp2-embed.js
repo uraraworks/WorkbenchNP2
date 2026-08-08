@@ -1,11 +1,11 @@
-var Je = Object.defineProperty;
-var Qe = (r, s, e) => s in r ? Je(r, s, { enumerable: !0, configurable: !0, writable: !0, value: e }) : r[s] = e;
-var F = (r, s, e) => Qe(r, typeof s != "symbol" ? s + "" : s, e);
-function le() {
+var Ze = Object.defineProperty;
+var Je = (r, s, e) => s in r ? Ze(r, s, { enumerable: !0, configurable: !0, writable: !0, value: e }) : r[s] = e;
+var F = (r, s, e) => Je(r, typeof s != "symbol" ? s + "" : s, e);
+function ue() {
   var r;
   return ((r = window.Module) == null ? void 0 : r.FS) ?? window.FS;
 }
-function et() {
+function Qe() {
   var r;
   return ((r = window.Module) == null ? void 0 : r.ccall) ?? window.ccall;
 }
@@ -13,19 +13,19 @@ function j() {
   var r;
   return ((r = window.Module) == null ? void 0 : r.HEAPU8) ?? window.HEAPU8;
 }
-function tt() {
+function et() {
   var r;
   return ((r = window.Module) == null ? void 0 : r.HEAPU32) ?? window.HEAPU32;
 }
-function y() {
-  const r = et();
+function g() {
+  const r = Qe();
   if (!r)
     throw new Error("ccall is not available (core not booted yet?)");
   return r;
 }
-const X = "./core/", ue = "webnp2-core-script";
+const X = "./core/", fe = "webnp2-core-script";
 let Z = !1;
-function rt(r) {
+function tt(r) {
   var n;
   const e = ["[NekoProject21kai]", ((n = r.roms) == null ? void 0 : n.some((o) => o.name.toLowerCase() === "font.rom")) ?? !1 ? "fontfile=/font.rom" : "fontfile=/font.bmp"];
   r.hdd && e.push(`HDD1FILE=/disk/${r.hdd.name}`), e.push(`Latencys=${r.latencyMs ?? 40}`), e.push("keyrepeat_enable=true"), e.push("keyrepeat_delay=500"), e.push("keyrepeat_interval=50"), e.push("USEFMGEN=true"), e.push("PEGCPLNE=true");
@@ -38,7 +38,7 @@ function rt(r) {
 `) + `
 `;
 }
-function nt(r, s) {
+function rt(r, s) {
   return Z ? Promise.reject(new Error("core is already booted (reload the page to reboot)")) : (Z = !0, new Promise((e, t) => {
     let n = !1;
     const o = (l) => {
@@ -49,7 +49,7 @@ function nt(r, s) {
       canvas: s,
       preRun: [
         function() {
-          const u = le();
+          const u = ue();
           if (!u) {
             o(new Error("FS is not available in preRun"));
             return;
@@ -60,7 +60,7 @@ function nt(r, s) {
               u.writeFile(`/disk/${f.name}`, f.bytes);
             for (const f of r.roms ?? [])
               u.writeFile(`/${f.name}`, f.bytes);
-            u.createPreloadedFile("/", "font.bmp", `${X}font.bmp`, !0, !1), u.writeFile("/np21kai.cfg", rt(r));
+            u.createPreloadedFile("/", "font.bmp", `${X}font.bmp`, !0, !1), u.writeFile("/np21kai.cfg", tt(r));
           } catch (f) {
             o(f);
           }
@@ -73,7 +73,7 @@ function nt(r, s) {
       onRuntimeInitialized: () => {
         if (n) return;
         n = !0;
-        const l = le();
+        const l = ue();
         if (!l) {
           o(new Error("FS is not available after runtime init"));
           return;
@@ -85,10 +85,10 @@ function nt(r, s) {
       }
     }, a = s.getContext.bind(s);
     s.getContext = (l, u) => l === "webgl" || l === "webgl2" || l === "experimental-webgl" ? a(l, { ...u ?? {}, preserveDrawingBuffer: !0 }) : a(l, u), window.Module = i;
-    const c = document.getElementById(ue);
+    const c = document.getElementById(fe);
     c && c.remove();
     const d = document.createElement("script");
-    d.id = ue, d.src = `${X}emnp21kai_sdl2.js?v=${Date.now()}`, d.onerror = () => o(new Error(`failed to load ${d.src}`)), document.body.appendChild(d);
+    d.id = fe, d.src = `${X}emnp21kai_sdl2.js?v=${Date.now()}`, d.onerror = () => o(new Error(`failed to load ${d.src}`)), document.body.appendChild(d);
   }));
 }
 function U(r, s) {
@@ -102,59 +102,59 @@ function O(r, s) {
     return null;
   }
 }
-function st() {
-  y()("webnp2_reset", null, [], []);
+function nt() {
+  g()("webnp2_reset", null, [], []);
 }
 function H(r, s) {
-  y()("webnp2_set_fdd", null, ["number", "string"], [r, s]);
+  g()("webnp2_set_fdd", null, ["number", "string"], [r, s]);
 }
-function fe(r) {
-  return y()("webnp2_fdd_ready", "number", ["number"], [r]);
+function st(r) {
+  return g()("webnp2_fdd_ready", "number", ["number"], [r]);
 }
 function he(r) {
-  return y()("webnp2_statsave", "number", ["string"], [r]);
+  return g()("webnp2_statsave", "number", ["string"], [r]);
 }
 function me(r) {
-  return y()("webnp2_statload", "number", ["string"], [r]);
+  return g()("webnp2_statload", "number", ["string"], [r]);
 }
 function ot(r, s) {
-  y()("webnp2_mouse_move", null, ["number", "number"], [r, s]);
+  g()("webnp2_mouse_move", null, ["number", "number"], [r, s]);
 }
 function it() {
-  return y()("webnp2_mouse_pending", "number", [], []);
+  return g()("webnp2_mouse_pending", "number", [], []);
 }
 function z(r, s) {
-  y()("webnp2_mouse_button", null, ["number", "number"], [r, s]);
+  g()("webnp2_mouse_button", null, ["number", "number"], [r, s]);
 }
 function k(r, s) {
-  y()("webnp2_key", null, ["number", "number"], [r, s ? 1 : 0]);
+  g()("webnp2_key", null, ["number", "number"], [r, s ? 1 : 0]);
 }
 function we(r) {
-  return y()("webnp2_push_key_buffer", "number", ["number"], [r]);
+  return g()("webnp2_push_key_buffer", "number", ["number"], [r]);
 }
 function at(r, s) {
-  return y()("webnp2_push_key_buffer_pair", "number", ["number", "number"], [r, s]);
+  return g()("webnp2_push_key_buffer_pair", "number", ["number", "number"], [r, s]);
 }
 function J() {
-  return y()("webnp2_find_mailbox", "number", [], []);
+  return g()("webnp2_find_mailbox", "number", [], []);
 }
 function ct(r) {
-  return y()("webnp2_mailbox_space", "number", ["number"], [r]);
+  return g()("webnp2_mailbox_space", "number", ["number"], [r]);
 }
 function dt(r, s) {
-  return y()("webnp2_mailbox_put", "number", ["number", "number"], [r, s]);
+  return g()("webnp2_mailbox_put", "number", ["number", "number"], [r, s]);
 }
 function be(r, s) {
-  y()("webnp2_mailbox_pending", null, ["number", "number"], [r, s]);
+  g()("webnp2_mailbox_pending", null, ["number", "number"], [r, s]);
 }
 function lt() {
-  const r = y(), s = r("webnp2_read_tvram", "number", [], []), e = r("webnp2_tvram_size", "number", [], []), t = j();
+  const r = g(), s = r("webnp2_read_tvram", "number", [], []), e = r("webnp2_tvram_size", "number", [], []), t = j();
   if (!t)
     throw new Error("HEAPU8 is not available (core not booted yet?)");
   return t.slice(s, s + e);
 }
 function ut(r, s) {
-  const e = y(), t = e("webnp2_mem_ptr", "number", [], []), n = e("webnp2_mem_size", "number", [], []);
+  const e = g(), t = e("webnp2_mem_ptr", "number", [], []), n = e("webnp2_mem_size", "number", [], []);
   if (r < 0 || s < 0 || r + s > n)
     throw new Error(`coreReadMemory: out of range (addr=${r}, len=${s}, memSize=${n})`);
   const o = j();
@@ -163,7 +163,7 @@ function ut(r, s) {
   return o.slice(t + r, t + r + s);
 }
 function ft(r, s) {
-  const e = y(), t = e("webnp2_mem_ptr", "number", [], []), n = e("webnp2_mem_size", "number", [], []);
+  const e = g(), t = e("webnp2_mem_ptr", "number", [], []), n = e("webnp2_mem_size", "number", [], []);
   if (r < 0 || r + s.byteLength > n)
     throw new Error(`coreWriteMemory: out of range (addr=${r}, len=${s.byteLength}, memSize=${n})`);
   const o = j();
@@ -172,23 +172,23 @@ function ft(r, s) {
   o.set(s, t + r);
 }
 function ht(r) {
-  y()("webnp2_dbg_set_paused", null, ["number"], [r ? 1 : 0]);
+  g()("webnp2_dbg_set_paused", null, ["number"], [r ? 1 : 0]);
 }
 function mt() {
-  return y()("webnp2_dbg_paused", "number", [], []);
+  return g()("webnp2_dbg_paused", "number", [], []);
 }
 function wt(r) {
-  return y()("webnp2_dbg_step", "number", ["number"], [r]);
+  return g()("webnp2_dbg_step", "number", ["number"], [r]);
 }
 function bt() {
-  const r = y(), s = r("webnp2_dbg_regs", "number", [], []), e = r("webnp2_dbg_regs_size", "number", [], []), t = tt();
+  const r = g(), s = r("webnp2_dbg_regs", "number", [], []), e = r("webnp2_dbg_regs_size", "number", [], []), t = et();
   if (!s || !t || e <= 0 || s & 3 || e & 3)
     throw new Error("webnp2_dbg_regs returned an invalid buffer");
   const n = s >>> 2;
   return t.slice(n, n + (e >>> 2));
 }
-function gt(r, s, e) {
-  const t = y()(
+function yt(r, s, e) {
+  const t = g()(
     "webnp2_dbg_disasm",
     "number",
     ["number", "number", "number"],
@@ -202,8 +202,8 @@ function gt(r, s, e) {
     throw new Error("webnp2_dbg_disasm returned a non-terminated string");
   return new TextDecoder().decode(n.subarray(t, o));
 }
-function yt(r, s, e, t) {
-  y()(
+function gt(r, s, e, t) {
+  g()(
     "webnp2_dbg_set_bp",
     null,
     ["number", "number", "number", "number"],
@@ -211,7 +211,7 @@ function yt(r, s, e, t) {
   );
 }
 function pt(r) {
-  return y()("webnp2_dbg_run_until_bp", "number", ["number"], [r]);
+  return g()("webnp2_dbg_run_until_bp", "number", ["number"], [r]);
 }
 const St = "webnp2", Et = 1, T = "images";
 let K = null;
@@ -224,7 +224,7 @@ function N() {
     }, e.onsuccess = () => r(e.result), e.onerror = () => s(e.error ?? new Error("failed to open IndexedDB"));
   }), K);
 }
-async function D(r) {
+async function M(r) {
   const s = await N();
   return new Promise((e, t) => {
     const i = s.transaction(T, "readonly").objectStore(T).get(r);
@@ -239,7 +239,7 @@ async function B(r) {
   });
 }
 async function xt(r) {
-  const s = await D(r.sourceKey);
+  const s = await M(r.sourceKey);
   if (!s) {
     await B(r);
     return;
@@ -274,7 +274,7 @@ async function Tt(r) {
     n.objectStore(T).delete(r), n.oncomplete = () => e(), n.onerror = () => t(n.error ?? new Error("failed to delete from IndexedDB"));
   });
 }
-const A = {
+const v = {
   ESC: 0,
   BS: 14,
   TAB: 15,
@@ -361,7 +361,7 @@ const A = {
   ".": 49,
   "/": 50,
   " ": 52
-}, ge = {
+}, ye = {
   "!": 1,
   '"': 2,
   "#": 3,
@@ -384,21 +384,21 @@ const A = {
   "?": 50,
   _: 51
 };
-function ye(r) {
+function ge(r) {
   if (r === `
 ` || r === "\r")
-    return { code: A.ENTER, shift: !1 };
+    return { code: v.ENTER, shift: !1 };
   if (r.length === 1 && r >= "A" && r <= "Z") {
     const s = r.toLowerCase(), e = Q[s];
     return e !== void 0 ? { code: e, shift: !0 } : void 0;
   }
   if (Object.prototype.hasOwnProperty.call(Q, r))
     return { code: Q[r], shift: !1 };
-  if (Object.prototype.hasOwnProperty.call(ge, r))
-    return { code: ge[r], shift: !0 };
+  if (Object.prototype.hasOwnProperty.call(ye, r))
+    return { code: ye[r], shift: !0 };
 }
 let ee = null;
-function Ct() {
+function _t() {
   const r = /* @__PURE__ */ new Map(), s = new TextDecoder("shift_jis"), e = [
     [129, 159],
     [224, 239]
@@ -415,16 +415,16 @@ function Ct() {
         }
   return r;
 }
-function _t() {
-  return ee || (ee = Ct()), ee;
+function Ct() {
+  return ee || (ee = _t()), ee;
 }
 const pe = {
   "〜": "～",
   "−": "－",
   "―": "—"
 };
-function re(r) {
-  const s = _t(), e = [], t = [], n = Array.from(r);
+function ne(r) {
+  const s = Ct(), e = [], t = [], n = Array.from(r);
   for (let o = 0; o < n.length; o++) {
     let i = n[o];
     if (i === "\r") {
@@ -460,29 +460,29 @@ function re(r) {
   }
   return { units: e, skipped: t };
 }
-class P extends Error {
+class D extends Error {
   constructor(s, e, t = {}) {
     super(e), this.code = s, this.params = t, this.name = "DiskError";
   }
 }
-const Pt = [128, 256, 512, 1024, 2048], R = 32, Ne = 8, v = 16, Ue = 15, L = 229, I = 0;
+const Dt = [128, 256, 512, 1024, 2048], R = 32, Ie = 8, A = 16, Ne = 15, L = 229, I = 0;
 function E(r, s) {
   return r[s] | r[s + 1] << 8;
 }
-function _(r, s) {
+function C(r, s) {
   return (r[s] | r[s + 1] << 8 | r[s + 2] << 16 | r[s + 3] << 24) >>> 0;
 }
 function p(r, s, e) {
   r[s] = e & 255, r[s + 1] = e >> 8 & 255;
 }
-function ne(r, s, e) {
+function se(r, s, e) {
   r[s] = e & 255, r[s + 1] = e >>> 8 & 255, r[s + 2] = e >>> 16 & 255, r[s + 3] = e >>> 24 & 255;
 }
 function W(r, s = 0) {
   if (r.length < s + 512)
     throw new Error(`openFat: image too small (${r.length} bytes)`);
-  const e = r, t = s, n = E(e, t + 11), o = e[t + 13], i = E(e, t + 14), a = e[t + 16], c = E(e, t + 17), d = E(e, t + 19), l = E(e, t + 22), u = _(e, t + 32), f = d !== 0 ? d : u;
-  if (!Pt.includes(n))
+  const e = r, t = s, n = E(e, t + 11), o = e[t + 13], i = E(e, t + 14), a = e[t + 16], c = E(e, t + 17), d = E(e, t + 19), l = E(e, t + 22), u = C(e, t + 32), f = d !== 0 ? d : u;
+  if (!Dt.includes(n))
     throw new Error(`openFat: invalid BPB (bytes/sector=${n})`);
   if (o === 0)
     throw new Error("openFat: invalid BPB (sectors/cluster=0)");
@@ -492,7 +492,7 @@ function W(r, s = 0) {
     throw new Error("openFat: invalid BPB (sectors/FAT=0)");
   if (f === 0)
     throw new Error("openFat: invalid BPB (total sectors=0)");
-  const w = Math.ceil(c * R / n), m = i, h = m + a * l, b = h + w, x = f - b, S = Math.floor(x / o), C = S < 4085 ? "FAT12" : "FAT16";
+  const w = Math.ceil(c * R / n), m = i, h = m + a * l, b = h + w, x = f - b, S = Math.floor(x / o), _ = S < 4085 ? "FAT12" : "FAT16";
   return {
     image: r,
     imageOffset: s,
@@ -503,7 +503,7 @@ function W(r, s = 0) {
     rootEntries: c,
     sectorsPerFat: l,
     totalSectors: f,
-    fatType: C,
+    fatType: _,
     fatStartByte: t + m * n,
     rootStartByte: t + h * n,
     rootDirBytes: w * n,
@@ -512,8 +512,8 @@ function W(r, s = 0) {
     bytesPerCluster: o * n
   };
 }
-const Oe = { FAT12: 4095, FAT16: 65535 };
-function se(r, s) {
+const Ue = { FAT12: 4095, FAT16: 65535 };
+function oe(r, s) {
   const e = r.fatStartByte;
   if (r.fatType === "FAT12") {
     const n = e + Math.floor(s * 3 / 2), o = r.image[n], i = r.image[n + 1];
@@ -522,7 +522,7 @@ function se(r, s) {
   const t = e + s * 2;
   return E(r.image, t);
 }
-function oe(r, s, e) {
+function ie(r, s, e) {
   for (let t = 0; t < r.numFats; t++) {
     const n = r.fatStartByte + t * r.sectorsPerFat * r.bytesPerSector;
     if (r.fatType === "FAT12") {
@@ -534,37 +534,37 @@ function oe(r, s, e) {
     }
   }
 }
-function Mt(r, s) {
+function Pt(r, s) {
   return r.fatType === "FAT12" ? s >= 4087 : s >= 65527;
 }
-function ie(r) {
+function ae(r) {
   return r === 0;
 }
 function V(r, s) {
   return r.dataStartByte + (s - 2) * r.bytesPerCluster;
 }
-function ae(r, s) {
+function ce(r, s) {
   const e = [], t = /* @__PURE__ */ new Set();
   let n = s;
-  for (; n >= 2 && !Mt(r, n) && !ie(n) && !t.has(n); )
-    t.add(n), e.push(n), n = se(r, n);
+  for (; n >= 2 && !Pt(r, n) && !ae(n) && !t.has(n); )
+    t.add(n), e.push(n), n = oe(r, n);
   return e;
 }
-function He(r, s) {
+function Oe(r, s) {
   const e = [];
   for (let t = 2; t < r.totalClusters + 2 && e.length < s; t++)
-    ie(se(r, t)) && e.push(t);
+    ae(oe(r, t)) && e.push(t);
   if (e.length < s)
     throw new Error(
       `fatWriteFile: not enough free space (need ${s} cluster(s), found ${e.length})`
     );
   return e;
 }
-function ze(r, s) {
+function He(r, s) {
   if (s < 2) return;
-  const e = ae(r, s);
+  const e = ce(r, s);
   for (const t of e)
-    oe(r, t, 0);
+    ie(r, t, 0);
 }
 function G(r) {
   const s = r.toUpperCase(), e = s.lastIndexOf("."), t = e >= 0 ? s.slice(0, e) : s, n = e >= 0 ? s.slice(e + 1) : "";
@@ -576,7 +576,7 @@ function G(r) {
   const a = n.length > 0 ? `${t}.${n}` : t;
   return { rawName: o, rawExt: i, display: a };
 }
-function Ke(r, s) {
+function ze(r, s) {
   let e = "";
   for (let n = 0; n < 8 && r[n] !== 32; n++)
     e += String.fromCharCode(r[n]);
@@ -588,14 +588,14 @@ function Ke(r, s) {
 function Y(r) {
   return r.split(/[\\/]/).map((s) => s.trim()).filter((s) => s.length > 0);
 }
-function ce(r, s) {
+function de(r, s) {
   const e = [];
   if (s === null) {
     for (let o = 0; o < r.rootEntries; o++)
       e.push({ offset: r.rootStartByte + o * R });
     return e;
   }
-  const t = ae(r, s), n = Math.floor(r.bytesPerCluster / R);
+  const t = ce(r, s), n = Math.floor(r.bytesPerCluster / R);
   for (const o of t) {
     const i = V(r, o);
     for (let a = 0; a < n; a++)
@@ -603,45 +603,45 @@ function ce(r, s) {
   }
   return e;
 }
-function Dt(r, s, e) {
+function Mt(r, s, e) {
   const t = E(r, s), n = E(r, e), o = 1980 + (t >> 9 & 127), i = t >> 5 & 15, a = t & 31, c = n >> 11 & 31, d = n >> 5 & 63, l = (n & 31) * 2;
   return i === 0 || a === 0 ? 0 : new Date(o, i - 1, a, c, d, l).getTime();
 }
-function We(r, s, e, t) {
+function Ke(r, s, e, t) {
   const n = (t.getFullYear() - 1980 & 127) << 9 | t.getMonth() + 1 << 5 | t.getDate(), o = t.getHours() << 11 | t.getMinutes() << 5 | Math.floor(t.getSeconds() / 2);
   p(r, s, n), p(r, e, o);
 }
-function vt(r, s, e) {
+function At(r, s, e) {
   const t = r.image, n = s.offset, o = t[n];
   if (o === I || o === L) return null;
   const i = t[n + 11];
-  if (i === Ue || i & Ne) return null;
-  const a = t.subarray(n, n + 8), c = t.subarray(n + 8, n + 11), d = Ke(a, c);
+  if (i === Ne || i & Ie) return null;
+  const a = t.subarray(n, n + 8), c = t.subarray(n + 8, n + 11), d = ze(a, c);
   if (d === "." || d === "..") return null;
-  const l = E(t, n + 26), u = _(t, n + 28), f = Dt(t, n + 24, n + 22);
+  const l = E(t, n + 26), u = C(t, n + 28), f = Mt(t, n + 24, n + 22);
   return { slotIndex: e, offset: n, attr: i, name: d, cluster: l, size: u, mtime: f };
 }
 function q(r, s) {
-  const e = ce(r, s), t = [];
+  const e = de(r, s), t = [];
   for (let n = 0; n < e.length && r.image[e[n].offset] !== I; n++) {
-    const o = vt(r, e[n], n);
+    const o = At(r, e[n], n);
     o && t.push(o);
   }
   return t;
 }
-function je(r, s) {
+function We(r, s) {
   let e = null;
   for (let t = 0; t < s.length; t++) {
     const n = G(s[t]).display, i = q(r, e).find((a) => a.name === n);
     if (!i) throw new Error(`directory not found: ${s.slice(0, t + 1).join("/")}`);
-    if (!(i.attr & v))
+    if (!(i.attr & A))
       throw new Error(`not a directory: ${s.slice(0, t + 1).join("/")}`);
     e = i.cluster;
   }
   return e;
 }
-function de(r, s) {
-  return je(r, s.slice(0, -1));
+function le(r, s) {
+  return We(r, s.slice(0, -1));
 }
 const Se = "T98HDDIMAGE.R0", Ee = "VHD", xe = 220;
 function ke(r, s, e) {
@@ -649,14 +649,14 @@ function ke(r, s, e) {
   for (let n = 0; n < e; n++) t += String.fromCharCode(r[s + n]);
   return t;
 }
-function At(r, s) {
+function vt(r, s) {
   if (s.endsWith(".thd"))
     return { headerSize: 256, surfaces: 8, sectorsPerTrack: 33, bytesPerSector: 256 };
   if (s.endsWith(".nhd")) {
     if (r.length < 288 || ke(r, 0, Se.length) !== Se)
-      throw new P("hddInvalidHeader", "NHDヘッダが不正です", { format: "NHD" });
+      throw new D("hddInvalidHeader", "NHDヘッダが不正です", { format: "NHD" });
     return {
-      headerSize: _(r, 272),
+      headerSize: C(r, 272),
       surfaces: E(r, 280),
       sectorsPerTrack: E(r, 282),
       bytesPerSector: E(r, 284)
@@ -664,17 +664,17 @@ function At(r, s) {
   }
   if (s.endsWith(".hdi")) {
     if (r.length < 32)
-      throw new P("hddInvalidHeader", "HDIヘッダが不正です", { format: "HDI" });
+      throw new D("hddInvalidHeader", "HDIヘッダが不正です", { format: "HDI" });
     return {
-      headerSize: _(r, 8),
-      surfaces: _(r, 24),
-      sectorsPerTrack: _(r, 20),
-      bytesPerSector: _(r, 16)
+      headerSize: C(r, 8),
+      surfaces: C(r, 24),
+      sectorsPerTrack: C(r, 20),
+      bytesPerSector: C(r, 16)
     };
   }
   if (s.endsWith(".hdd")) {
     if (r.length < xe || ke(r, 0, Ee.length) !== Ee)
-      throw new P("hddInvalidHeader", "Virtual98(.hdd)ヘッダが不正です", {
+      throw new D("hddInvalidHeader", "Virtual98(.hdd)ヘッダが不正です", {
         format: "Virtual98(.hdd)"
       });
     return {
@@ -707,31 +707,31 @@ function Rt(r, s) {
   try {
     return W(r, s.headerSize);
   } catch {
-    throw new P("hddNoFatPartition", "HDDイメージ内にFAT16/12パーティションが見つかりません");
+    throw new D("hddNoFatPartition", "HDDイメージ内にFAT16/12パーティションが見つかりません");
   }
 }
 const Lt = 4096;
 function Te(r, s) {
   const e = s.toLowerCase();
   if (e.endsWith(".d88"))
-    throw new P("d88NotEditable", "D88形式は編集非対応です");
-  const t = At(r, e);
+    throw new D("d88NotEditable", "D88形式は編集非対応です");
+  const t = vt(r, e);
   if (t)
     return Rt(r, t);
   if (e.endsWith(".fdi")) {
     let n = Lt;
     if (r.length >= 16) {
-      const o = _(r, 8), i = _(r, 12);
+      const o = C(r, 8), i = C(r, 12);
       o >= 16 && o < r.length && i > 0 && o + i <= r.length && (n = o);
     }
     return W(r, n);
   }
   return W(r, 0);
 }
-const Ve = 1024, Ge = 8, It = 77, Ye = 2, Nt = Ve * Ge * It * Ye;
+const je = 1024, Ve = 8, It = 77, Ge = 2, Nt = je * Ve * It * Ge;
 function Ut() {
-  const r = Ve, s = 1, e = 1, t = 2, n = 192, o = 1232, i = 254, a = 2, c = new Uint8Array(Nt);
-  c[0] = 235, c[1] = 254, c[2] = 144, p(c, 11, r), c[13] = s, p(c, 14, e), c[16] = t, p(c, 17, n), p(c, 19, o), c[21] = i, p(c, 22, a), p(c, 24, Ge), p(c, 26, Ye), ne(c, 32, 0), c[510] = 85, c[511] = 170;
+  const r = je, s = 1, e = 1, t = 2, n = 192, o = 1232, i = 254, a = 2, c = new Uint8Array(Nt);
+  c[0] = 235, c[1] = 254, c[2] = 144, p(c, 11, r), c[13] = s, p(c, 14, e), c[16] = t, p(c, 17, n), p(c, 19, o), c[21] = i, p(c, 22, a), p(c, 24, Ve), p(c, 26, Ge), se(c, 32, 0), c[510] = 85, c[511] = 170;
   const d = e * r;
   for (let l = 0; l < t; l++) {
     const u = d + l * a * r;
@@ -739,28 +739,28 @@ function Ut() {
   }
   return c;
 }
-function Ce(r, s) {
-  const e = Y(s), t = je(r, e);
+function _e(r, s) {
+  const e = Y(s), t = We(r, e);
   return q(r, t).map((o) => ({
     name: o.name,
     size: o.size,
-    isDir: (o.attr & v) !== 0,
+    isDir: (o.attr & A) !== 0,
     cluster: o.cluster,
     mtime: o.mtime
   }));
 }
-function qe(r, s) {
+function Ye(r, s) {
   const e = Y(s);
   if (e.length === 0) throw new Error("empty file path");
-  const t = de(r, e), n = G(e[e.length - 1]).display, i = q(r, t).find((a) => a.name === n);
+  const t = le(r, e), n = G(e[e.length - 1]).display, i = q(r, t).find((a) => a.name === n);
   if (!i) throw new Error(`file not found: ${s}`);
   return { dirCluster: t, entry: i };
 }
-function _e(r, s) {
-  const { entry: e } = qe(r, s);
-  if (e.attr & v) throw new Error(`is a directory: ${s}`);
+function Ce(r, s) {
+  const { entry: e } = Ye(r, s);
+  if (e.attr & A) throw new Error(`is a directory: ${s}`);
   if (e.size === 0 || e.cluster === 0) return new Uint8Array(0);
-  const t = ae(r, e.cluster), n = new Uint8Array(e.size);
+  const t = ce(r, e.cluster), n = new Uint8Array(e.size);
   let o = 0;
   for (const i of t) {
     if (o >= e.size) break;
@@ -771,18 +771,18 @@ function _e(r, s) {
     throw new Error(`fatReadFile: cluster chain shorter than file size for ${s}`);
   return n;
 }
-function Pe(r, s, e) {
+function De(r, s, e) {
   const t = Y(s);
   if (t.length === 0) throw new Error("empty file path");
-  const n = de(r, t), { display: o, rawName: i, rawExt: a } = G(t[t.length - 1]), c = ce(r, n);
+  const n = le(r, t), { display: o, rawName: i, rawExt: a } = G(t[t.length - 1]), c = de(r, n);
   let d = -1, l = 0;
   for (let h = 0; h < c.length; h++) {
     const b = r.image[c[h].offset];
     if (b === I) break;
     if (b === L) continue;
     const x = r.image[c[h].offset + 11];
-    if (x === Ue || x & Ne) continue;
-    if (Ke(
+    if (x === Ne || x & Ie) continue;
+    if (ze(
       r.image.subarray(c[h].offset, c[h].offset + 8),
       r.image.subarray(c[h].offset + 8, c[h].offset + 11)
     ) === o) {
@@ -801,49 +801,49 @@ function Pe(r, s, e) {
     if (d < 0)
       throw new Error(`fatWriteFile: directory is full, cannot create ${s}`);
   }
-  l >= 2 && ze(r, l);
-  const u = e.length === 0 ? 0 : Math.ceil(e.length / r.bytesPerCluster), f = u > 0 ? He(r, u) : [];
+  l >= 2 && He(r, l);
+  const u = e.length === 0 ? 0 : Math.ceil(e.length / r.bytesPerCluster), f = u > 0 ? Oe(r, u) : [];
   let w = 0;
   for (let h = 0; h < f.length; h++) {
     const b = f[h], x = h === f.length - 1;
-    oe(r, b, x ? Oe[r.fatType] : f[h + 1]);
-    const S = V(r, b), C = Math.min(r.bytesPerCluster, e.length - w);
-    r.image.set(e.subarray(w, w + C), S), C < r.bytesPerCluster && r.image.fill(0, S + C, S + r.bytesPerCluster), w += C;
+    ie(r, b, x ? Ue[r.fatType] : f[h + 1]);
+    const S = V(r, b), _ = Math.min(r.bytesPerCluster, e.length - w);
+    r.image.set(e.subarray(w, w + _), S), _ < r.bytesPerCluster && r.image.fill(0, S + _, S + r.bytesPerCluster), w += _;
   }
   const m = c[d].offset;
-  r.image.set(i, m), r.image.set(a, m + 8), r.image[m + 11] = 32, r.image[m + 12] = 0, p(r.image, m + 14, 0), p(r.image, m + 16, 0), p(r.image, m + 18, 0), p(r.image, m + 20, 0), We(r.image, m + 24, m + 22, /* @__PURE__ */ new Date()), p(r.image, m + 26, f.length > 0 ? f[0] : 0), ne(r.image, m + 28, e.length);
+  r.image.set(i, m), r.image.set(a, m + 8), r.image[m + 11] = 32, r.image[m + 12] = 0, p(r.image, m + 14, 0), p(r.image, m + 16, 0), p(r.image, m + 18, 0), p(r.image, m + 20, 0), Ke(r.image, m + 24, m + 22, /* @__PURE__ */ new Date()), p(r.image, m + 26, f.length > 0 ? f[0] : 0), se(r.image, m + 28, e.length);
 }
 function te(r, s, e, t, n, o, i, a) {
-  r.image.set(e, s), r.image.set(t, s + 8), r.image[s + 11] = n, r.image[s + 12] = 0, p(r.image, s + 14, 0), p(r.image, s + 16, 0), p(r.image, s + 18, 0), p(r.image, s + 20, 0), We(r.image, s + 24, s + 22, a), p(r.image, s + 26, o), ne(r.image, s + 28, i);
+  r.image.set(e, s), r.image.set(t, s + 8), r.image[s + 11] = n, r.image[s + 12] = 0, p(r.image, s + 14, 0), p(r.image, s + 16, 0), p(r.image, s + 18, 0), p(r.image, s + 20, 0), Ke(r.image, s + 24, s + 22, a), p(r.image, s + 26, o), se(r.image, s + 28, i);
 }
-function Me(r) {
+function Pe(r) {
   const s = new Uint8Array(8).fill(32);
   for (let t = 0; t < r; t++) s[t] = 46;
   const e = new Uint8Array(3).fill(32);
   return { rawName: s, rawExt: e };
 }
-function De(r, s) {
+function Me(r, s) {
   const e = Y(s);
   if (e.length === 0) throw new Error("empty directory path");
-  const t = de(r, e), { display: n, rawName: o, rawExt: i } = G(e[e.length - 1]);
+  const t = le(r, e), { display: n, rawName: o, rawExt: i } = G(e[e.length - 1]);
   if (q(r, t).some((h) => h.name === n))
     throw new Error(`fatMakeDir: already exists: ${s}`);
-  const [c] = He(r, 1);
-  oe(r, c, Oe[r.fatType]);
+  const [c] = Oe(r, 1);
+  ie(r, c, Ue[r.fatType]);
   const d = V(r, c);
   r.image.fill(0, d, d + r.bytesPerCluster);
-  const l = /* @__PURE__ */ new Date(), u = Me(1), f = Me(2);
-  te(r, d, u.rawName, u.rawExt, v, c, 0, l), te(
+  const l = /* @__PURE__ */ new Date(), u = Pe(1), f = Pe(2);
+  te(r, d, u.rawName, u.rawExt, A, c, 0, l), te(
     r,
     d + R,
     f.rawName,
     f.rawExt,
-    v,
+    A,
     t ?? 0,
     0,
     l
   );
-  const w = ce(r, t);
+  const w = de(r, t);
   let m = -1;
   for (let h = 0; h < w.length; h++) {
     const b = r.image[w[h].offset];
@@ -854,23 +854,23 @@ function De(r, s) {
   }
   if (m < 0)
     throw new Error(`fatMakeDir: directory is full, cannot create ${s}`);
-  te(r, w[m].offset, o, i, v, c, 0, l);
+  te(r, w[m].offset, o, i, A, c, 0, l);
 }
-function ve(r, s) {
-  const { entry: e } = qe(r, s);
-  if (e.attr & v) throw new Error(`is a directory: ${s}`);
-  e.cluster >= 2 && ze(r, e.cluster), r.image[e.offset] = L;
+function Ae(r, s) {
+  const { entry: e } = Ye(r, s);
+  if (e.attr & A) throw new Error(`is a directory: ${s}`);
+  e.cluster >= 2 && He(r, e.cluster), r.image[e.offset] = L;
 }
-function Ae(r) {
+function ve(r) {
   let s = 0;
   for (let e = 2; e < r.totalClusters + 2; e++)
-    ie(se(r, e)) && s++;
+    ae(oe(r, e)) && s++;
   return {
     total: r.totalClusters * r.bytesPerCluster,
     free: s * r.bytesPerCluster
   };
 }
-const M = "/state0.sav";
+const P = "/state0.sav";
 function Ot(r) {
   const s = [], e = [], t = Array.from(r);
   for (let n = 0; n < t.length; n++) {
@@ -886,7 +886,7 @@ function Ot(r) {
       s.push(13, 10);
       continue;
     }
-    const { units: i, skipped: a } = re(o);
+    const { units: i, skipped: a } = ne(o);
     i.length > 0 && s.push(...i[0]), e.push(...a);
   }
   return { bytes: new Uint8Array(s), skipped: e };
@@ -907,7 +907,7 @@ function Be(r) {
   if (!e)
     throw new Error(`invalid guest path: ${r}`);
   if (!/^[A-Za-z0-9_\-$~!#%'@(){}^]{1,8}(\.[A-Za-z0-9_\-$~!#%'@(){}^]{1,3})?$/.test(e))
-    throw new P(
+    throw new D(
       "invalidShortName",
       `ファイル名は8.3形式にしてください(2バイト文字/長い名前は不可): ${e}`,
       { name: e }
@@ -945,8 +945,32 @@ class Gt {
         n(e);
   }
 }
-const Yt = 3e4, Re = 4096;
-class qt extends Gt {
+const Yt = 5e3, qt = 3e4, Re = 4096, Xt = 300;
+function Zt(r) {
+  const { isReady: s, raf: e, timeoutMs: t = 1e4, maxIdleFrames: n = Xt } = r, o = r.setTimeoutFn ?? ((a, c) => setTimeout(a, c)), i = r.clearTimeoutFn ?? ((a) => clearTimeout(a));
+  return s() ? Promise.resolve(!0) : new Promise((a) => {
+    let c = !1;
+    const d = () => {
+      c || (c = !0, i(l), a(s()));
+    }, l = o(d, t);
+    let u = 0;
+    const f = () => {
+      if (!c) {
+        if (s()) {
+          d();
+          return;
+        }
+        if (u += 1, u >= n) {
+          d();
+          return;
+        }
+        e(f);
+      }
+    };
+    e(f);
+  });
+}
+class Jt extends Gt {
   constructor(e) {
     super();
     F(this, "canvas");
@@ -954,7 +978,7 @@ class qt extends Gt {
     F(this, "mounted", /* @__PURE__ */ new Map());
     F(this, "persistTimer", null);
     F(this, "boundOnVisibilityChange", () => this.onVisibilityChange());
-    F(this, "boundOnPageHide", () => void this.persistNow());
+    F(this, "boundOnPageHide", () => void this.persistNow({ force: !0 }));
     /** ホスト側が推定するバスマウスのカーソル位置(0-639, 0-399)。null=未ホーミング(未確定)。 */
     F(this, "mousePos", null);
     /** persistNow の再入ガード。タイマーと visibilitychange が重なると二重保存になるため。 */
@@ -1008,7 +1032,7 @@ class qt extends Gt {
   /** 逆アセンブル文字列を解析し、各行のaddrを命令長の積算で補う。 */
   dbgDisasm(e, t, n) {
     if (!this.isBooted()) throw new Error("not booted");
-    const o = gt(e, t, Math.trunc(n));
+    const o = yt(e, t, Math.trunc(n));
     let i = t >>> 0;
     return o.split(`
 `).filter((a) => a.length > 0).map((a) => {
@@ -1029,7 +1053,7 @@ class qt extends Gt {
   /** index 0..7のソフトウェアブレークポイントを設定する。 */
   dbgSetBreakpoint(e, t, n, o) {
     if (!this.isBooted()) throw new Error("not booted");
-    yt(Math.trunc(e), t, n, o);
+    gt(Math.trunc(e), t, n, o);
   }
   /** 最大命令数まで実行し、ヒットしたブレークポイントindex（無ヒットは-1）を返す。 */
   dbgRunUntilBreakpoint(e) {
@@ -1056,7 +1080,7 @@ class qt extends Gt {
     const e = await Ft(), t = [];
     for (const n of e) {
       if (n.sourceKey.startsWith("rom:") || n.sourceKey.startsWith("state:")) continue;
-      const o = Le(n.name);
+      const o = re(n.name);
       o && t.push({
         sourceKey: n.sourceKey,
         name: n.name,
@@ -1077,12 +1101,12 @@ class qt extends Gt {
     }
     if (!n.ok)
       throw new Error(`failed to fetch ${t}: HTTP ${n.status} (CORSでブロックされている可能性があります)`);
-    const o = new Uint8Array(await n.arrayBuffer()), i = Jt(t);
+    const o = new Uint8Array(await n.arrayBuffer()), i = tr(t);
     return await this.insertFd(e, { name: i, bytes: o }, t, t), { name: i };
   }
   /** IndexedDBのディスクライブラリからsourceKeyで指定したイメージをFDドライブへ挿入する。 */
   async insertFdFromLibraryKey(e, t) {
-    const n = await D(t);
+    const n = await M(t);
     if (!n) throw new Error(`no library entry found for sourceKey: ${t}`);
     const o = n.name;
     return await this.insertFd(e, { name: o, bytes: new Uint8Array(n.bytes) }, t, n.url), { name: o };
@@ -1130,7 +1154,7 @@ class qt extends Gt {
       roms: e.roms
     };
     try {
-      const i = await nt(n, this.canvas);
+      const i = await rt(n, this.canvas);
       this.fs = i, this.mounted.clear(), e.hdd && this.mounted.set("hdd", {
         slot: "hdd",
         name: e.hdd.file.name,
@@ -1161,47 +1185,53 @@ class qt extends Gt {
     this.persistTimer !== null && (clearInterval(this.persistTimer), this.persistTimer = null), document.removeEventListener("visibilitychange", this.boundOnVisibilityChange), window.removeEventListener("pagehide", this.boundOnPageHide);
   }
   onVisibilityChange() {
-    document.hidden && this.persistNow();
+    document.hidden && this.persistNow({ force: !0 });
   }
-  /** マウント中の各イメージのうち変化したものだけ IndexedDB へ保存する。 */
-  async persistNow() {
+  /**
+   * マウント中の各イメージのうち変化したものだけ IndexedDB へ保存する。
+   * force=true では HDD の最短保存間隔を無視する(排出・タブ離脱・明示要求など、
+   * 「ここで保存できないと失われる」場面で間隔を理由に飛ばさないため)。
+   */
+  async persistNow(e) {
     if (this.fs && !this.persisting) {
       this.persisting = !0;
       try {
-        await this.persistNowInner();
+        await this.persistNowInner((e == null ? void 0 : e.force) ?? !1);
       } finally {
         this.persisting = !1;
       }
     }
   }
-  async persistNowInner() {
+  async persistNowInner(e) {
     if (!this.fs) return;
-    const e = performance.now();
-    let t = 0;
-    for (const o of this.mounted.values())
+    const t = performance.now();
+    let n = 0;
+    for (const i of this.mounted.values())
       try {
-        const i = O(this.fs, o.name);
-        if (i && o.lastSavedStat && i.mtimeMs === o.lastSavedStat.mtimeMs && i.size === o.lastSavedStat.size)
+        if (!e && re(i.name) === "hdd" && i.lastSavedAt !== void 0 && Date.now() - i.lastSavedAt < qt)
           continue;
-        const a = U(this.fs, o.name);
-        if (!i && !this.hasChanged(o, a)) continue;
+        const a = O(this.fs, i.name);
+        if (a && i.lastSavedStat && a.mtimeMs === i.lastSavedStat.mtimeMs && a.size === i.lastSavedStat.size)
+          continue;
+        const c = U(this.fs, i.name);
+        if (!a && !this.hasChanged(i, c)) continue;
         await xt({
-          sourceKey: o.sourceKey,
-          url: o.url,
-          name: o.name,
-          bytes: a.buffer.slice(a.byteOffset, a.byteOffset + a.byteLength),
+          sourceKey: i.sourceKey,
+          url: i.url,
+          name: i.name,
+          bytes: c.buffer.slice(c.byteOffset, c.byteOffset + c.byteLength),
           savedAt: Date.now()
-        }), t += a.byteLength, o.lastSavedSnapshot = this.snapshotOf(a), o.lastSavedStat = i ?? void 0, this.emit("persisted", { slot: o.slot, name: o.name });
-      } catch (i) {
+        }), n += c.byteLength, i.lastSavedSnapshot = this.snapshotOf(c), i.lastSavedStat = a ?? void 0, i.lastSavedAt = Date.now(), this.emit("persisted", { slot: i.slot, name: i.name });
+      } catch (a) {
         this.emit("log", {
           level: "error",
-          message: `persist failed for ${o.name}: ${String(i)}`
+          message: `persist failed for ${i.name}: ${String(a)}`
         });
       }
-    const n = performance.now() - e;
-    n > 50 && this.emit("log", {
+    const o = performance.now() - t;
+    o > 50 && this.emit("log", {
       level: "info",
-      message: `persist took ${n.toFixed(0)}ms (${(t / 1048576).toFixed(1)}MB written)`
+      message: `persist took ${o.toFixed(0)}ms (${(n / 1048576).toFixed(1)}MB written)`
     });
   }
   snapshotOf(e) {
@@ -1212,7 +1242,7 @@ class qt extends Gt {
     const n = e.lastSavedSnapshot;
     if (!n || n.length !== t.length) return !0;
     const o = this.snapshotOf(t);
-    return !Ie(n.head, o.head) || !Ie(n.tail, o.tail);
+    return !Le(n.head, o.head) || !Le(n.tail, o.tail);
   }
   /** 現在のイメージをダウンロードさせる。 */
   async exportDisk(e) {
@@ -1240,7 +1270,7 @@ class qt extends Gt {
   /** マシンをリセットする (pccore_cfgupdate + pccore_reset)。 */
   resetMachine() {
     if (!this.fs) throw new Error("not booted");
-    st();
+    nt();
   }
   /**
    * 実行中の FD ドライブへイメージを挿入する。既存スロットがマウント中なら先に永続化してから差し替える。
@@ -1249,10 +1279,14 @@ class qt extends Gt {
   async insertFd(e, t, n, o) {
     if (!this.fs) throw new Error("not booted");
     const i = e === 1 ? "fd1" : "fd2";
-    this.mounted.has(i) && await this.persistNow();
+    this.mounted.has(i) && await this.persistNow({ force: !0 });
     let a = t.bytes, c = t.name;
-    const d = await D(n);
-    d && (a = new Uint8Array(d.bytes), c = d.name), this.fs.writeFile(`/disk/${c}`, a), H(e - 1, `/disk/${c}`), await this.waitForFddReady(e), this.mounted.set(i, {
+    const d = await M(n);
+    if (d && (a = new Uint8Array(d.bytes), c = d.name), this.fs.writeFile(`/disk/${c}`, a), H(e - 1, `/disk/${c}`), !await this.waitForFddReady(e))
+      throw new Error(
+        `FDドライブ${e}の準備がタイムアウトしました(挿入遅延の間、webnp2_fdd_readyが0のままでした。CPUが極端に遅い/タブが背面化している可能性があります)`
+      );
+    this.mounted.set(i, {
       slot: i,
       name: c,
       sourceKey: n,
@@ -1265,30 +1299,54 @@ class qt extends Gt {
    * FDドライブが読み書きできる状態になるまで待つ。
    *
    * NP2kai は挿入から 20 フレーム(約0.4秒)を Not Ready として模倣する(実機どおり)。
-   * この遅延は **エミュレート1フレームごと** に減るので、実時間での sleep では
-   * 足りる保証がない。挿入直後にゲストへコマンドを投げる用途では必ずこれで待つこと。
+   * この遅延はコア(NP2kai)側の comment 通り **エミュレート1フレームごと**(np2exec の
+   * メインループが1周するたび)に減る。CPUが HLT で止まっていてもフレーム/割り込みは
+   * 進むため、CPUのEIPが変化しているかどうかはこの遅延の進み方と直結しない
+   * (EIPは「CPUが命令を実行したか」であり「フレームが1つ進んだか」ではないため、
+   * DOSが正当にHLT待機している間もEIPが動かないまま遅延だけは明ける、という
+   * ケースを誤検出しうる。EIPを主指標に採用しなかった理由はこれ)。
+   * 実時間での sleep では足りる保証がない(**スロットル中・タブ背面化中は特に**)。
+   * 挿入直後にゲストへコマンドを投げる用途では必ずこれで待つこと。
+   *
+   * 打ち切りは requestAnimationFrame の呼び出し回数(=描画フレームの実際の到着回数)を
+   * 主基準にする(pollUntilReady参照)。rAFはブラウザの合成タイミングに紐づき、
+   * NP2kaiのメインループもrAF駆動で1フレームずつ進むため、同じ描画フレームの中で
+   * 両者は基本的に足並みが揃う。つまり「rAFが呼ばれた回数」は「コアが実際に処理した
+   * フレーム数」の妥当な代理指標になる(タブ背面化やCPU飽和でrAF自体が来なくなる
+   * 場合は後述の壁時計が拾う)。
+   *
+   * 実測(CPU 4倍スロットリング、Chrome DevTools Emulation.setCPUThrottlingRate):
+   * 挿入から準備完了までに要したrAF呼び出し回数は 20〜24 回(20フレームの遅延と一致、
+   * 誤差はスケジューリングのジッタ)。壁時計では約3.2秒だった。つまり「フレーム数」は
+   * スロットル倍率に関わらずほぼ一定(≈20)で、壁時計だけが伸びる。
+   * FDD_READY_MAX_IDLE_FRAMES=300 はこの実測値(20〜24)の10倍超の余裕を持たせた値で、
+   * 「20フレームでは説明できないほど長くrAFが来続けているのに一向に準備が整わない」
+   * ことをもって初めて諦める(=より重い環境でも早期に見捨てない側に倒す)。
    * @param drive 1|2
-   * @param timeoutMs 上限(既定10秒)。超えたら false を返す(例外にはしない)
+   * @param timeoutMs 保険の壁時計上限(既定10秒)。rAFそのものが一切来なくなる
+   *   (タブが完全に背面化/凍結する等)場合だけの最終防波堤。
+   *   フレーム基準より先に効くことは通常想定していない。
    */
   async waitForFddReady(e, t = 1e4) {
     if (!this.fs) throw new Error("not booted");
-    const n = Date.now() + t;
-    for (; Date.now() < n; ) {
-      if (fe(e - 1) !== 0) return !0;
-      await this.sleep(16);
-    }
-    return fe(e - 1) !== 0;
+    return Zt({
+      isReady: () => st(e - 1) !== 0,
+      raf: (n) => {
+        requestAnimationFrame(n);
+      },
+      timeoutMs: t
+    });
   }
   /** 実行中の FD ドライブからイメージを排出する。 */
   async ejectFd(e) {
     if (!this.fs) throw new Error("not booted");
     const t = e === 1 ? "fd1" : "fd2";
-    this.mounted.has(t) && await this.persistNow(), H(e - 1, ""), this.mounted.delete(t), this.emit("fdChanged", { drive: e, name: void 0 });
+    this.mounted.has(t) && await this.persistNow({ force: !0 }), H(e - 1, ""), this.mounted.delete(t), this.emit("fdChanged", { drive: e, name: void 0 });
   }
   /** 'fd1'|'fd2' 以外(hdd等)が渡された場合にErrorを投げる。FAT操作はFDのみ対応。 */
   assertFdSlot(e) {
     if (e !== "fd1" && e !== "fd2")
-      throw new P("hddSlotUnsupported", `HDDは未対応です(fd1/fd2のみ): ${e}`);
+      throw new D("hddSlotUnsupported", `HDDは未対応です(fd1/fd2のみ): ${e}`);
   }
   /** 指定スロットにマウント中のイメージ名を返す。マウントが無ければError。 */
   getSlotImageName(e) {
@@ -1312,32 +1370,34 @@ class qt extends Gt {
   async writeBackSlotImage(e, t, n) {
     if (!this.fs) throw new Error("not booted");
     const o = e === "fd1" ? 1 : 2;
-    this.fs.writeFile(`/disk/${t}`, n), H(o - 1, `/disk/${t}`), await this.waitForFddReady(o), await this.persistNow();
+    if (this.fs.writeFile(`/disk/${t}`, n), H(o - 1, `/disk/${t}`), !await this.waitForFddReady(o))
+      throw new Error(`FDドライブ${o}の準備がタイムアウトしました(書き戻しの再挿入後)`);
+    await this.persistNow({ force: !0 });
   }
   /** FD内のFAT12/16ディスクイメージのファイル一覧と空き容量を返す。path省略時はルート。 */
   async diskListFiles(e, t = "") {
-    const { vol: n } = this.openSlotFat(e), o = Ce(n, t), { free: i, total: a } = Ae(n);
+    const { vol: n } = this.openSlotFat(e), o = _e(n, t), { free: i, total: a } = ve(n);
     return { entries: o, free: i, total: a };
   }
   /** FD内のFAT12/16ディスクイメージからファイルを読み出す。 */
   async diskReadFile(e, t) {
     const { vol: n } = this.openSlotFat(e);
-    return _e(n, t);
+    return Ce(n, t);
   }
   /** FD内のFAT12/16ディスクイメージへファイルを書き込む(新規作成/上書き)。 */
   async diskWriteFile(e, t, n) {
     const { name: o, image: i, vol: a } = this.openSlotFat(e);
-    Pe(a, t, n), await this.writeBackSlotImage(e, o, i);
+    De(a, t, n), await this.writeBackSlotImage(e, o, i);
   }
   /** FD内のFAT12/16ディスクイメージからファイルを削除する。 */
   async diskDeleteFile(e, t) {
     const { name: n, image: o, vol: i } = this.openSlotFat(e);
-    ve(i, t), await this.writeBackSlotImage(e, n, o);
+    Ae(i, t), await this.writeBackSlotImage(e, n, o);
   }
   /** FD内のFAT12/16ディスクイメージにディレクトリを作成する(ファイルマネージャUI向け)。 */
   async diskMakeDir(e, t) {
     const { name: n, image: o, vol: i } = this.openSlotFat(e);
-    De(i, t), await this.writeBackSlotImage(e, n, o);
+    Me(i, t), await this.writeBackSlotImage(e, n, o);
   }
   /** sourceKey が現在いずれかのスロットにマウント中かどうかを返す。 */
   isSourceKeyMounted(e) {
@@ -1347,7 +1407,7 @@ class qt extends Gt {
   }
   /** IndexedDB上のライブラリイメージを読み出し FAT ボリュームとして開く。 */
   async openLibraryFat(e) {
-    const t = await D(e);
+    const t = await M(e);
     if (!t) throw new Error(`no library entry found for sourceKey: ${e}`);
     const n = new Uint8Array(t.bytes), o = Te(n, t.name);
     return { stored: t, image: n, vol: o };
@@ -1355,34 +1415,34 @@ class qt extends Gt {
   /** 変更系ライブラリ操作の前提チェック(マウント中/起動後HDD)。問題があればErrorを投げる。 */
   assertLibraryWritable(e, t) {
     if (this.isSourceKeyMounted(e))
-      throw new P("mountedUseSlotApi", "マウント中のイメージはスロット側APIを使ってください");
-    if (Le(t) === "hdd" && this.isBooted())
-      throw new P("hddEditBeforeBootOnly", "HDDイメージの編集は起動前のみ可能です");
+      throw new D("mountedUseSlotApi", "マウント中のイメージはスロット側APIを使ってください");
+    if (re(t) === "hdd" && this.isBooted())
+      throw new D("hddEditBeforeBootOnly", "HDDイメージの編集は起動前のみ可能です");
   }
   /** ライブラリ(未マウント)イメージ内のファイル一覧と空き容量を返す。マウント中でも読み取りは許可する。 */
   async libraryListFiles(e, t = "") {
-    const { vol: n } = await this.openLibraryFat(e), o = Ce(n, t), { free: i, total: a } = Ae(n);
+    const { vol: n } = await this.openLibraryFat(e), o = _e(n, t), { free: i, total: a } = ve(n);
     return { entries: o, free: i, total: a };
   }
   /** ライブラリ(未マウント)イメージ内のファイルを読み出す。マウント中でも読み取りは許可する。 */
   async libraryReadFile(e, t) {
     const { vol: n } = await this.openLibraryFat(e);
-    return _e(n, t);
+    return Ce(n, t);
   }
   /** ライブラリ(未マウント)イメージへファイルを書き込み、IndexedDBへ書き戻す。 */
   async libraryWriteFile(e, t, n) {
     const { stored: o, image: i, vol: a } = await this.openLibraryFat(e);
-    this.assertLibraryWritable(e, o.name), Pe(a, t, n), await this.putLibraryImage(o, i);
+    this.assertLibraryWritable(e, o.name), De(a, t, n), await this.putLibraryImage(o, i);
   }
   /** ライブラリ(未マウント)イメージからファイルを削除し、IndexedDBへ書き戻す。 */
   async libraryDeleteFile(e, t) {
     const { stored: n, image: o, vol: i } = await this.openLibraryFat(e);
-    this.assertLibraryWritable(e, n.name), ve(i, t), await this.putLibraryImage(n, o);
+    this.assertLibraryWritable(e, n.name), Ae(i, t), await this.putLibraryImage(n, o);
   }
   /** ライブラリ(未マウント)イメージ内にディレクトリを作成し、IndexedDBへ書き戻す。 */
   async libraryMakeDir(e, t) {
     const { stored: n, image: o, vol: i } = await this.openLibraryFat(e);
-    this.assertLibraryWritable(e, n.name), De(i, t), await this.putLibraryImage(n, o);
+    this.assertLibraryWritable(e, n.name), Me(i, t), await this.putLibraryImage(n, o);
   }
   /** 変更後のライブラリイメージ全体をIndexedDBへ書き戻す。 */
   async putLibraryImage(e, t) {
@@ -1517,13 +1577,13 @@ class qt extends Gt {
       this.emit("log", { level: "error", message: "saveState: no mounted image to key the state by" });
       return;
     }
-    const t = he(M);
+    const t = he(P);
     if (t < 0) {
       this.emit("log", { level: "error", message: `saveState failed (rc=${t})` });
       return;
     }
     t !== 0 && this.emit("log", { level: "info", message: `saveState finished with warnings (rc=${t})` });
-    const n = this.fs.readFile(M, { encoding: "binary" });
+    const n = this.fs.readFile(P, { encoding: "binary" });
     await B({
       sourceKey: `state:${e.sourceKey}`,
       name: "state0.sav",
@@ -1539,15 +1599,15 @@ class qt extends Gt {
       this.emit("log", { level: "error", message: "loadState: no mounted image to key the state by" });
       return;
     }
-    if (!this.fs.analyzePath(M).exists) {
-      const n = await D(`state:${e.sourceKey}`);
+    if (!this.fs.analyzePath(P).exists) {
+      const n = await M(`state:${e.sourceKey}`);
       if (!n) {
         this.emit("log", { level: "error", message: "loadState: no saved state found" });
         return;
       }
-      this.fs.writeFile(M, new Uint8Array(n.bytes));
+      this.fs.writeFile(P, new Uint8Array(n.bytes));
     }
-    const t = me(M);
+    const t = me(P);
     if (t < 0) {
       this.emit("log", { level: "error", message: `loadState failed (rc=${t})` });
       return;
@@ -1589,7 +1649,7 @@ class qt extends Gt {
       this.emit("log", { level: "error", message: "loadStateSlot: no mounted image to key the state by" });
       return;
     }
-    const o = `/state_${t}.sav`, i = await D(`state:${n.sourceKey}:${t}`);
+    const o = `/state_${t}.sav`, i = await M(`state:${n.sourceKey}:${t}`);
     if (!i) {
       this.emit("log", { level: "error", message: `loadStateSlot: no saved state found for slot "${t}"` });
       return;
@@ -1656,8 +1716,8 @@ class qt extends Gt {
           continue;
         }
         if (x >= 33) {
-          const S = x, C = b & 255, Xe = (S + 1 >> 1) + (S < 95 ? 112 : 176), Ze = C + (S & 1 ? C < 96 ? 31 : 32 : 126);
-          u.push(Xe & 255, Ze & 255), f = !0;
+          const S = x, _ = b & 255, qe = (S + 1 >> 1) + (S < 95 ? 112 : 176), Xe = _ + (S & 1 ? _ < 96 ? 31 : 32 : 126);
+          u.push(qe & 255, Xe & 255), f = !0;
           continue;
         }
         u.push(46), f = !1;
@@ -1794,13 +1854,13 @@ class qt extends Gt {
     const t = e.split("+").map((d) => d.trim());
     if (t.length === 0 || t.some((d) => d.length === 0))
       throw new Error(`invalid key combo: ${e}`);
-    const n = t[t.length - 1], i = t.slice(0, -1).filter((d) => Object.prototype.hasOwnProperty.call(A, d.toUpperCase())).map((d) => A[d.toUpperCase()]);
+    const n = t[t.length - 1], i = t.slice(0, -1).filter((d) => Object.prototype.hasOwnProperty.call(v, d.toUpperCase())).map((d) => v[d.toUpperCase()]);
     let a;
-    const c = A[n.toUpperCase()];
+    const c = v[n.toUpperCase()];
     if (c !== void 0)
       a = c;
     else {
-      const d = ye(n);
+      const d = ge(n);
       if (!d)
         throw new Error(`cannot resolve key: ${n}`);
       a = d.code;
@@ -1897,13 +1957,13 @@ class qt extends Gt {
   async typeText(e) {
     if (!this.isBooted()) throw new Error("not booted");
     for (const t of e) {
-      const n = ye(t);
+      const n = ge(t);
       if (!n) {
         this.emit("log", { level: "info", message: `typeText: skipped unresolvable char ${JSON.stringify(t)}` });
         continue;
       }
       const { code: o, shift: i } = n;
-      i ? (k(A.SHIFT, !0), await this.sleep(30), k(o, !0), await this.sleep(30), k(o, !1), await this.sleep(30), k(A.SHIFT, !1), await this.sleep(30)) : (k(o, !0), await this.sleep(30), k(o, !1), await this.sleep(30));
+      i ? (k(v.SHIFT, !0), await this.sleep(30), k(o, !0), await this.sleep(30), k(o, !1), await this.sleep(30), k(v.SHIFT, !1), await this.sleep(30)) : (k(o, !0), await this.sleep(30), k(o, !1), await this.sleep(30));
     }
   }
   /**
@@ -1928,7 +1988,7 @@ class qt extends Gt {
    * 現在の入力待ちを完了させて次の要求でTSRに拾わせる。
    */
   async pasteTextViaMailbox(e, t) {
-    const { units: n, skipped: o } = re(t), i = n.flat();
+    const { units: n, skipped: o } = ne(t), i = n.flat();
     be(e, 1);
     let a = 0;
     for (const c of i) {
@@ -1945,7 +2005,7 @@ class qt extends Gt {
    * バックプレッシャで長文を流す。
    */
   async pasteTextViaKeyBuffer(e) {
-    const { units: t, skipped: n } = re(e);
+    const { units: t, skipped: n } = ne(e);
     let o = 0, i = 0;
     for (const a of t) {
       for (; !(a.length === 2 ? at(a[0], a[1]) : we(a[0])); )
@@ -2018,19 +2078,19 @@ class qt extends Gt {
     const e = this.primaryEntry();
     if (e)
       try {
-        const t = await D(`state:${e.sourceKey}`);
-        t && !this.fs.analyzePath(M).exists && this.fs.writeFile(M, new Uint8Array(t.bytes));
+        const t = await M(`state:${e.sourceKey}`);
+        t && !this.fs.analyzePath(P).exists && this.fs.writeFile(P, new Uint8Array(t.bytes));
       } catch (t) {
         this.emit("log", { level: "error", message: `restoreStateIfPresent failed: ${String(t)}` });
       }
   }
 }
-const Xt = [".thd", ".hdi", ".nhd", ".hdd"], Zt = [".d88", ".fdi", ".xdf", ".dup", ".fdd", ".hdm"];
-function Le(r) {
+const Qt = [".thd", ".hdi", ".nhd", ".hdd"], er = [".d88", ".fdi", ".xdf", ".dup", ".fdd", ".hdm"];
+function re(r) {
   const s = r.toLowerCase();
-  return Xt.some((e) => s.endsWith(e)) ? "hdd" : Zt.some((e) => s.endsWith(e)) ? "fd" : null;
+  return Qt.some((e) => s.endsWith(e)) ? "hdd" : er.some((e) => s.endsWith(e)) ? "fd" : null;
 }
-function Jt(r) {
+function tr(r) {
   try {
     const e = new URL(r, typeof location < "u" ? location.href : void 0).pathname, t = e.slice(e.lastIndexOf("/") + 1);
     return decodeURIComponent(t) || "disk.xdf";
@@ -2039,16 +2099,16 @@ function Jt(r) {
     return s.slice(s.lastIndexOf("/") + 1) || "disk.xdf";
   }
 }
-function Ie(r, s) {
+function Le(r, s) {
   if (r.length !== s.length) return !1;
   for (let e = 0; e < r.length; e++)
     if (r[e] !== s[e]) return !1;
   return !0;
 }
-function or(r) {
-  return new qt(r);
+function cr(r) {
+  return new Jt(r);
 }
-class Qt {
+class rr {
   constructor(s) {
     F(this, "pauseListeners", /* @__PURE__ */ new Set());
     F(this, "breakpointListeners", /* @__PURE__ */ new Set());
@@ -2106,10 +2166,10 @@ class Qt {
     return this.breakpointListeners.add(s), () => this.breakpointListeners.delete(s);
   }
 }
-function ir(r) {
-  return new Qt(r);
+function dr(r) {
+  return new rr(r);
 }
-function g(r, s = {}) {
+function y(r, s = {}) {
   const e = document.createElement(r);
   for (const [t, n] of Object.entries(s))
     t === "class" ? e.className = n : e.setAttribute(t, n);
@@ -2118,11 +2178,11 @@ function g(r, s = {}) {
 function $(r, s) {
   return (r >>> 0).toString(16).toUpperCase().padStart(s, "0");
 }
-function er(r, s) {
+function nr(r, s) {
   return `${r & 65535}:${s >>> 0}`;
 }
-function ar(r, s) {
-  const e = g("div", { class: "debugger-toolbar" }), t = g("button", { type: "button", "data-debugger-pause": "true" }), n = g("button", { type: "button", "data-debugger-step": "true" }), o = g("button", { type: "button", "data-debugger-step10": "true" }), i = g("button", { type: "button", "data-debugger-run": "true" }), a = g("button", { type: "button", class: "debugger-close-btn" });
+function lr(r, s) {
+  const e = y("div", { class: "debugger-toolbar" }), t = y("button", { type: "button", "data-debugger-pause": "true" }), n = y("button", { type: "button", "data-debugger-step": "true" }), o = y("button", { type: "button", "data-debugger-step10": "true" }), i = y("button", { type: "button", "data-debugger-run": "true" }), a = y("button", { type: "button", class: "debugger-close-btn" });
   e.append(t, n, o, i, a), r.append(e);
   let c = s.labels, d = !1;
   const l = () => {
@@ -2140,7 +2200,7 @@ function ar(r, s) {
     }
   };
 }
-const tr = [
+const sr = [
   "eax",
   "ecx",
   "edx",
@@ -2158,24 +2218,24 @@ const tr = [
   "fs",
   "gs",
   "cr0"
-], rr = /* @__PURE__ */ new Set(["cs", "ds", "es", "ss", "fs", "gs"]), nr = [["CF", 0], ["PF", 2], ["AF", 4], ["ZF", 6], ["SF", 7], ["TF", 8], ["IF", 9], ["DF", 10], ["OF", 11]];
-function cr(r) {
-  const s = g("div", { class: "debugger-register-grid" });
+], or = /* @__PURE__ */ new Set(["cs", "ds", "es", "ss", "fs", "gs"]), ir = [["CF", 0], ["PF", 2], ["AF", 4], ["ZF", 6], ["SF", 7], ["TF", 8], ["IF", 9], ["DF", 10], ["OF", 11]];
+function ur(r) {
+  const s = y("div", { class: "debugger-register-grid" });
   r.append(s);
   let e;
   return {
     update(t) {
       s.replaceChildren();
-      for (const n of tr) {
-        const o = g("div", {
+      for (const n of sr) {
+        const o = y("div", {
           class: e && e[n] !== t[n] ? "debugger-register changed" : "debugger-register",
           "data-debugger-register": n
-        }), i = g("span", { class: "debugger-register-name" });
+        }), i = y("span", { class: "debugger-register-name" });
         i.textContent = n.toUpperCase();
-        const a = g("span", { class: "debugger-register-value" });
-        if (a.textContent = $(t[n], rr.has(n) ? 4 : 8), o.append(i, a), n === "eflags") {
-          const c = g("span", { class: "debugger-flags" });
-          c.textContent = nr.filter(([, d]) => (t.eflags & 1 << d) !== 0).map(([d]) => d).join(" ") || "—", o.append(c);
+        const a = y("span", { class: "debugger-register-value" });
+        if (a.textContent = $(t[n], or.has(n) ? 4 : 8), o.append(i, a), n === "eflags") {
+          const c = y("span", { class: "debugger-flags" });
+          c.textContent = ir.filter(([, d]) => (t.eflags & 1 << d) !== 0).map(([d]) => d).join(" ") || "—", o.append(c);
         }
         s.append(o);
       }
@@ -2186,27 +2246,27 @@ function cr(r) {
     }
   };
 }
-function dr(r, s) {
-  const e = g("div", { class: "debugger-disasm-list" });
+function fr(r, s) {
+  const e = y("div", { class: "debugger-disasm-list" });
   r.append(e);
   let t = { addBreakpoint: s.addBreakpointLabel, removeBreakpoint: s.removeBreakpointLabel }, n;
   const o = ({ seg: i, eip: a, lines: c, breakpoints: d }) => {
     e.replaceChildren();
     for (const l of c) {
-      const u = d.has(er(i, l.addr)), f = g("button", {
+      const u = d.has(nr(i, l.addr)), f = y("button", {
         type: "button",
         class: `debugger-disasm-row${l.addr === a ? " current" : ""}${u ? " breakpoint" : ""}`,
         "data-debugger-disasm-row": "true",
         "data-seg": String(i),
         "data-off": String(l.addr),
         "aria-label": u ? t.removeBreakpoint : t.addBreakpoint
-      }), w = g("span", { class: "debugger-bp-marker", "aria-hidden": "true" });
+      }), w = y("span", { class: "debugger-bp-marker", "aria-hidden": "true" });
       w.textContent = u ? "●" : "○";
-      const m = g("span", { class: "debugger-disasm-address" });
+      const m = y("span", { class: "debugger-disasm-address" });
       m.textContent = `${$(i, 4)}:${$(l.addr, 8)}`;
-      const h = g("span", { class: "debugger-disasm-bytes" });
+      const h = y("span", { class: "debugger-disasm-bytes" });
       h.textContent = l.bytes.map((x) => $(x, 2)).join(" ");
-      const b = g("span", { class: "debugger-disasm-text" });
+      const b = y("span", { class: "debugger-disasm-text" });
       b.textContent = l.text, f.append(w, m, h, b), f.addEventListener("click", () => s.onToggleBreakpoint(i, l.addr)), e.append(f);
     }
   };
@@ -2222,15 +2282,15 @@ function dr(r, s) {
     }
   };
 }
-function lr(r, s) {
-  const e = g("input", {
+function hr(r, s) {
+  const e = y("input", {
     type: "text",
     inputmode: "text",
     value: "00000000",
     class: "debugger-memory-address"
-  }), t = g("button", { type: "button", class: "debugger-memory-read" }), n = g("div", { class: "debugger-memory-controls" });
+  }), t = y("button", { type: "button", class: "debugger-memory-read" }), n = y("div", { class: "debugger-memory-controls" });
   n.append(e, t);
-  const o = g("div", { class: "debugger-memory-dump" });
+  const o = y("div", { class: "debugger-memory-dump" });
   r.append(n, o);
   let i = s.labels;
   const a = () => {
@@ -2256,11 +2316,11 @@ function lr(r, s) {
     update(l, u) {
       o.replaceChildren();
       for (let f = 0; f < u.length; f += 16) {
-        const w = u.subarray(f, f + 16), m = g("div", { class: "debugger-memory-row" }), h = g("span", { class: "debugger-memory-offset" });
+        const w = u.subarray(f, f + 16), m = y("div", { class: "debugger-memory-row" }), h = y("span", { class: "debugger-memory-offset" });
         h.textContent = $(l + f, 8);
-        const b = g("span", { class: "debugger-memory-hex" });
+        const b = y("span", { class: "debugger-memory-hex" });
         b.textContent = Array.from(w, (S) => $(S, 2)).join(" ");
-        const x = g("span", { class: "debugger-memory-ascii" });
+        const x = y("span", { class: "debugger-memory-ascii" });
         x.textContent = Array.from(w, (S) => S >= 32 && S <= 126 ? String.fromCharCode(S) : ".").join(""), m.append(h, b, x), o.append(m);
       }
     },
@@ -2278,14 +2338,14 @@ function lr(r, s) {
   return a(), d;
 }
 export {
-  Qt as DebuggerController,
-  er as breakpointKey,
-  ir as createDebugger,
-  or as createWebNP2,
-  _e as fatReadFile,
-  ar as mountDebuggerToolbar,
-  dr as mountDisassemblyView,
-  lr as mountMemoryDump,
-  cr as mountRegisterView,
+  rr as DebuggerController,
+  nr as breakpointKey,
+  dr as createDebugger,
+  cr as createWebNP2,
+  Ce as fatReadFile,
+  lr as mountDebuggerToolbar,
+  fr as mountDisassemblyView,
+  hr as mountMemoryDump,
+  ur as mountRegisterView,
   Te as openDiskImage
 };

@@ -1246,7 +1246,13 @@ async function mountProgramFd(built) {
     // 自力で消えていると**コマンド行へ打ち込まれてしまう**（実測: `A:\>RRRAB:\E0LOAD …`
     // となり次のコマンドが壊れた）。取りこぼした文字を必ず流してからコマンドを組み立てる。
     await engine.pasteText('\r\r\r');
-    screen = await waitForCurrentDosPrompt(engine, { baseline: beforeSeparator.text, timeout: 30_000 });
+    // この区切り行は見た目だけの処理で、失敗しても下のcatchで無視して先へ進む。
+    // 失敗が無害なぶん、ここへ壁時計30秒もの予算を割く理由がない。
+    // 実測: ページ読込直後に#runを挟まず初回デバッグへ進むと、CPU 4倍スロットリング下で
+    // ここが実に30秒(実測30000ms超)を使い切ってから諦めていた。これは「実行を挟むと
+    // 問題が起きない」不具合調査で見つかった、初回デバッグ全体の滞留の最大の要因
+    // （その後のFD差し替え自体より大きい）。無害な演出に長時間を使わせない。
+    screen = await waitForCurrentDosPrompt(engine, { baseline: beforeSeparator.text, timeout: 3_000 });
     setScreenText(screen.text);
   } catch (error) {
     // 区切り行は見た目だけの処理なので、ここでの失敗でマウント自体を止めない。
