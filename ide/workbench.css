@@ -148,20 +148,19 @@ body.splitting-horizontal { cursor: row-resize; }
 #debug:hover { background: var(--vsc-toolbar-hover); }
 /*
  * VS Code風フローティングデバッグツールバー。.editor-card(position:relative)を基準に、
- * エディタ内容領域(#editor)の上端中央へ絶対配置する。位置はJSが#debug-toolbar-grip経由で
- * --debug-toolbar-offsetへ書き込む(既定0=中央)。containing blockは.editor-cardの
- * padding edge(=border-box - border幅)なので、左右中央合わせのtranslateX(-50%)はその基準に揃う。
+ * #editorの矩形の内側で自由に(水平・垂直とも)ドラッグできる。left/topはJSが
+ * #debug-toolbar-grip経由で直接pxを書き込む(既定は#editor上端から8px下・水平中央)。
+ * containing blockは.editor-cardのpadding edge(=border-box - border幅)。
  */
 .debug-toolbar-float {
   position: absolute;
-  left: 50%;
-  transform: translateX(calc(-50% + var(--debug-toolbar-offset, 0px)));
   /*
-   * 実測で判明: left:50%とrightを指定しないabsolute要素はshrink-to-fit幅の計算に
-   * 「50%地点から containing block 右端まで」を使うため、幅がcontaining block幅の
-   * 半分(実測255px≒cardの512.625pxの半分)に切り詰められ、6ボタン+グリップ(必要幅
-   * 約290px)が収まらず2段折り返しになっていた(#debug-stopだけ2行目)。
-   * width: max-content で「内容が要求する幅」を明示し、shrink-to-fit計算を無効にする。
+   * 実測で判明: かつてleft:50%+transform:translateX(-50%)で中央合わせしていた頃、
+   * rightを指定しないabsolute要素はshrink-to-fit幅の計算に「50%地点から containing
+   * block右端まで」を使うため、幅がcontaining block幅の半分(実測255px≒cardの
+   * 512.625pxの半分)に切り詰められ、6ボタン+グリップ(必要幅約290px)が収まらず
+   * 2段折り返しになっていた(#debug-stopだけ2行目)。left/topを直接指定する現方式は
+   * その計算自体が発生しないが、width: max-content は内容幅を明示する安全策として残す。
    */
   width: max-content;
   /* エディタを極端に狭めた(スプリッタの可動域は0まで)ときも幅を強制的に収め、
@@ -279,8 +278,6 @@ body.maximized-editor #editor { height: min(78vh, 900px); }
   /* 375px級ではドラッグ可能な浮遊物が操作の邪魔になるため、インフロー表示に戻す。 */
   .debug-toolbar-float {
     position: static;
-    left: auto;
-    transform: none;
     width: 100%;
     flex-wrap: wrap;
     margin: 0;

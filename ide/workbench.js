@@ -91,12 +91,14 @@ let sidebarPreference = null;
 let sidebarView = 'explorer';
 let lastShortcut = null;
 let debugToolbarOffset = 0;
+let debugToolbarOffsetY = 0;
 const PANES_SWAPPED_KEY = 'pc98dev:panes-swapped';
 const SIDEBAR_KEY = 'pc98dev:sidebar';
 const SIDEBAR_VIEW_KEY = 'pc98dev:sidebar-view';
 const SPLIT_EDITOR_KEY = 'pc98dev:split-editor';
 const SPLIT_DISASSEMBLY_KEY = 'pc98dev:split-disassembly';
 const DEBUG_TOOLBAR_KEY = 'pc98dev:debug-toolbar-x';
+const DEBUG_TOOLBAR_Y_KEY = 'pc98dev:debug-toolbar-y';
 // 画面幅が狭い環境ではPC-98画面を等倍(640px)まで広げられなくなるため、可動域は絞らない。
 // 片側を潰しきってもスプリッタ自体は残るので、いつでも引き戻せる。
 const MIN_EDITOR_WIDTH = 0;
@@ -316,25 +318,39 @@ function restoreEditorWidth() {
 }
 
 /**
- * フローティングデバッグツールバーの可動範囲。containing block(.editor-cardの
- * padding edge = border-boxからborder幅を引いた内側)からはみ出さないよう、
- * ツールバー自身の実測幅の半分だけ中心から離れられる範囲に絞る。
+ * フローティングデバッグツールバーの可動範囲・既定位置。
+ * タブ列やビルド状況欄に被せても操作の邪魔になるだけなので、.editor-card全体ではなく
+ * #editorの矩形の内側だけに収める。left/topは.editor-card(position:relative)の
+ * padding edge(border-boxからborder幅を引いた内側)を基準にしたpx値で直接指定する。
  */
 function debugToolbarBounds() {
+  const cardRect = nodes.editorCard.getBoundingClientRect();
   const cardStyle = getComputedStyle(nodes.editorCard);
-  const containingWidth = nodes.editorCard.getBoundingClientRect().width
-    - parseFloat(cardStyle.borderLeftWidth) - parseFloat(cardStyle.borderRightWidth);
-  const toolbarWidth = nodes.debugActions.getBoundingClientRect().width || 0;
-  const half = Math.max(0, (containingWidth - toolbarWidth) / 2);
-  return { min: -half, max: half };
+  const containingLeft = cardRect.left + parseFloat(cardStyle.borderLeftWidth);
+  const containingTop = cardRect.top + parseFloat(cardStyle.borderTopWidth);
+  const editorRect = nodes.editor.getBoundingClientRect();
+  const toolbarRect = nodes.debugActions.getBoundingClientRect();
+  const toolbarWidth = toolbarRect.width || 0;
+  const toolbarHeight = toolbarRect.height || 0;
+  const editorLeft = editorRect.left - containingLeft;
+  const editorTop = editorRect.top - containingTop;
+  const halfX = Math.max(0, (editorRect.width - toolbarWidth) / 2);
+  // 既定は#editor上端から8px下。上端方向はそこから8px戻ればeditor矩形の上端に達する。
+  // 下端方向はeditor矩形の下端(editorTop + editorRect.height)を超えない範囲まで。
+  const maxY = Math.max(-8, editorRect.height - toolbarHeight - 8);
+  return {
+    defaultLeft: editorLeft + halfX,
+    defaultTop: editorTop + 8,
+    x: { min: -halfX, max: halfX },
+    y: { min: -8, max: maxY },
+  };
 }
 
-/** #editorの上端+8pxへ追従させる。パネル見出し/タブ列の高さは実測し、値を決め打ちしない。 */
-function positionDebugToolbarTop() {
+function applyDebugToolbarPosition() {
   if (nodes.debugActions.hidden) return;
-  const cardRect = nodes.editorCard.getBoundingClientRect();
-  const editorRect = nodes.editor.getBoundingClientRect();
-  nodes.debugActions.style.top = `${Math.round(editorRect.top - cardRect.top + 8)}px`;
+  const bounds = debugToolbarBounds();
+  nodes.debugActions.style.left = `${Math.round(bounds.defaultLeft + debugToolbarOffset)}px`;
+  nodes.debugActions.style.top = `${Math.round(bounds.defaultTop + debugToolbarOffsetY)}px`;
 }
 
 function setDebugToolbarOffset(px, { persist = true } = {}) {
@@ -345,40 +361,65 @@ function setDebugToolbarOffset(px, { persist = true } = {}) {
     }
   } else {
     const requested = Number(px);
-    if (!Number.isFinite(requested)) throw new TypeError('デバッグツールバーの位置は数値または null で指定してください');
-    const { min, max } = debugToolbarBounds();
-    debugToolbarOffset = Math.min(max, Math.max(min, Math.round(requested)));
+    if (!Number.isFinite(requested)) throw new TypeError('デバッグツールバーの水平位置は数値または null で指定してください');
+    const { x } = debugToolbarBounds();
+    debugToolbarOffset = Math.min(x.max, Math.max(x.min, Math.round(requested)));
     if (persist) {
       try { localStorage.setItem(DEBUG_TOOLBAR_KEY, String(debugToolbarOffset)); } catch {}
     }
   }
-  nodes.debugActions.style.setProperty('--debug-toolbar-offset', `${debugToolbarOffset}px`);
+  applyDebugToolbarPosition();
   return debugToolbarOffset;
 }
 
+function setDebugToolbarOffsetY(px, { persist = true } = {}) {
+  if (px === null) {
+    debugToolbarOffsetY = 0;
+    if (persist) {
+      try { localStorage.removeItem(DEBUG_TOOLBAR_Y_KEY); } catch {}
+    }
+  } else {
+    const requested = Number(px);
+    if (!Number.isFinite(requested)) throw new TypeError('デバッグツールバーの垂直位置は数値または null で指定してください');
+    const { y } = debugToolbarBounds();
+    debugToolbarOffsetY = Math.min(y.max, Math.max(y.min, Math.round(requested)));
+    if (persist) {
+      try { localStorage.setItem(DEBUG_TOOLBAR_Y_KEY, String(debugToolbarOffsetY)); } catch {}
+    }
+  }
+  applyDebugToolbarPosition();
+  return debugToolbarOffsetY;
+}
+
 /**
- * エディタ幅が変わりうるすべての操作(スプリッタ・サイドバー開閉・最大化・viewport変化)の
- * あとに呼ぶ。reclampExplicitEditorWidth()と同じ考え方で、保存済みの論理オフセットを
- * 現在の可動範囲へ当てはめ直すだけで、ユーザーの意図(中心からのズレ)は保持する。
+ * #editorの矩形が変わりうるすべての操作(スプリッタ・サイドバー開閉・最大化・
+ * viewport変化・逆アセンブルパネルの開閉とその高さ調整)のあとに呼ぶ。2軸を必ず
+ * 一緒に再クランプする(片方だけ直して他方を取りこぼす事故を構造的に防ぐ)。
+ * reclampExplicitEditorWidth()と同じ考え方で、保存済みの論理オフセットを現在の
+ * 可動範囲へ当てはめ直すだけで、ユーザーの意図(既定位置からのズレ)は保持する。
  */
 function reclampDebugToolbarOffset() {
   setDebugToolbarOffset(debugToolbarOffset, { persist: false });
-  positionDebugToolbarTop();
+  setDebugToolbarOffsetY(debugToolbarOffsetY, { persist: false });
 }
 
 function restoreDebugToolbarOffset() {
-  try {
-    const stored = localStorage.getItem(DEBUG_TOOLBAR_KEY);
-    if (stored === null) return setDebugToolbarOffset(0, { persist: false });
-    const offset = Number(stored);
-    if (!Number.isFinite(offset)) {
-      localStorage.removeItem(DEBUG_TOOLBAR_KEY);
-      return setDebugToolbarOffset(0, { persist: false });
+  const restoreAxis = (key, setter) => {
+    try {
+      const stored = localStorage.getItem(key);
+      if (stored === null) return setter(0, { persist: false });
+      const offset = Number(stored);
+      if (!Number.isFinite(offset)) {
+        localStorage.removeItem(key);
+        return setter(0, { persist: false });
+      }
+      return setter(offset);
+    } catch {
+      return setter(0, { persist: false });
     }
-    return setDebugToolbarOffset(offset);
-  } catch {
-    return setDebugToolbarOffset(0, { persist: false });
-  }
+  };
+  restoreAxis(DEBUG_TOOLBAR_KEY, setDebugToolbarOffset);
+  restoreAxis(DEBUG_TOOLBAR_Y_KEY, setDebugToolbarOffsetY);
 }
 
 function getSplit() {
@@ -396,7 +437,9 @@ function getSplit() {
     debugToolbar: {
       floating: getComputedStyle(nodes.debugActions).position === 'absolute',
       offset: debugToolbarOffset,
+      offsetY: debugToolbarOffsetY,
       left: debugToolbarRect.left,
+      top: debugToolbarRect.top,
       width: debugToolbarRect.width,
     },
   };
@@ -441,6 +484,8 @@ function setDisassemblyHeight(px, { persist = true } = {}) {
       try { localStorage.setItem(SPLIT_DISASSEMBLY_KEY, String(applied)); } catch {}
     }
   }
+  // #editorの高さが変わるため、フローティングデバッグツールバーの縦位置も追従させる。
+  reclampDebugToolbarOffset();
   return nodes.disassemblyPanel.getBoundingClientRect().height;
 }
 
@@ -476,13 +521,10 @@ function editorWidthAtPointer(clientX, drag) {
   return splitterLeft - gap - editorLeft;
 }
 
-function installSplitter({
-  node, axis, decreaseKey, increaseKey, getValue, setValue, valueAtPointer, draggingClasses,
-}) {
+function installSplitter({ node, axis, decreaseKey, increaseKey, getValue, setValue, valueAtPointer }) {
   let drag;
   const coordinate = (event) => (axis === 'vertical' ? event.clientX : event.clientY);
   const size = (rect) => (axis === 'vertical' ? rect.width : rect.height);
-  const classes = draggingClasses ?? ['splitting', `splitting-${axis}`];
   node.addEventListener('pointerdown', (event) => {
     if (event.button !== 0 || node.offsetParent === null) return;
     const rect = node.getBoundingClientRect();
@@ -495,7 +537,7 @@ function installSplitter({
       splitterSize: size(rect),
     };
     node.setPointerCapture(event.pointerId);
-    document.body.classList.add(...classes);
+    document.body.classList.add('splitting', `splitting-${axis}`);
     event.preventDefault();
   });
   node.addEventListener('pointermove', (event) => {
@@ -509,7 +551,7 @@ function installSplitter({
     if (drag?.pointerId !== event.pointerId) return;
     const { pointerId, value } = drag;
     drag = undefined;
-    document.body.classList.remove(...classes);
+    document.body.classList.remove('splitting', `splitting-${axis}`);
     if (node.hasPointerCapture(pointerId)) node.releasePointerCapture(pointerId);
     setValue(value);
   };
@@ -539,14 +581,58 @@ installSplitter({
   getValue: () => nodes.disassemblyPanel.getBoundingClientRect().height,
   setValue: setDisassemblyHeight,
 });
-installSplitter({
-  // 水平ドラッグのみ(VS Code同様、上端に沿って左右)。cursorは resize系ではなくgrab/grabbing。
-  node: nodes.debugToolbarGrip, axis: 'vertical', decreaseKey: 'ArrowLeft', increaseKey: 'ArrowRight',
-  getValue: () => debugToolbarOffset,
-  setValue: setDebugToolbarOffset,
-  valueAtPointer: (clientX, drag) => drag.startValue + (clientX - drag.startCoordinate),
-  draggingClasses: ['dragging-debug-toolbar'],
-});
+
+/**
+ * デバッグツールバーのグリップは水平・垂直の2軸ドラッグ。installSplitter()は1軸専用
+ * なので流用せず専用の2軸版を用意するが、pointer capture・キーボード(Home含む)・
+ * ドラッグ中クラスの作法はそのまま踏襲する。
+ */
+function installDebugToolbarGripDrag(node) {
+  let drag;
+  node.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0 || node.offsetParent === null) return;
+    drag = {
+      pointerId: event.pointerId,
+      startClientX: event.clientX, startClientY: event.clientY,
+      startOffsetX: debugToolbarOffset, startOffsetY: debugToolbarOffsetY,
+    };
+    node.setPointerCapture(event.pointerId);
+    document.body.classList.add('dragging-debug-toolbar');
+    event.preventDefault();
+  });
+  node.addEventListener('pointermove', (event) => {
+    if (drag?.pointerId !== event.pointerId) return;
+    setDebugToolbarOffset(drag.startOffsetX + (event.clientX - drag.startClientX), { persist: false });
+    setDebugToolbarOffsetY(drag.startOffsetY + (event.clientY - drag.startClientY), { persist: false });
+  });
+  const finish = (event) => {
+    if (drag?.pointerId !== event.pointerId) return;
+    const { pointerId } = drag;
+    drag = undefined;
+    document.body.classList.remove('dragging-debug-toolbar');
+    if (node.hasPointerCapture(pointerId)) node.releasePointerCapture(pointerId);
+    setDebugToolbarOffset(debugToolbarOffset);
+    setDebugToolbarOffsetY(debugToolbarOffsetY);
+  };
+  node.addEventListener('pointerup', finish);
+  node.addEventListener('pointercancel', finish);
+  node.addEventListener('dblclick', () => { setDebugToolbarOffset(null); setDebugToolbarOffsetY(null); });
+  node.addEventListener('keydown', (event) => {
+    if (event.key === 'Home') {
+      event.preventDefault();
+      setDebugToolbarOffset(null);
+      setDebugToolbarOffsetY(null);
+    } else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+      event.preventDefault();
+      setDebugToolbarOffset(debugToolbarOffset + (event.key === 'ArrowLeft' ? -16 : 16));
+    } else if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+      event.preventDefault();
+      setDebugToolbarOffsetY(debugToolbarOffsetY + (event.key === 'ArrowUp' ? -16 : 16));
+    }
+  });
+}
+
+installDebugToolbarGripDrag(nodes.debugToolbarGrip);
 
 /** TVRAMダンプは常に最新が見えるよう、行が増えたら最下段へ追従させる。 */
 function setScreenText(text) {
@@ -1267,7 +1353,7 @@ function setDebugControls(active) {
   nodes.editorToolbar.hidden = active;
   nodes.buildActions.hidden = active;
   nodes.debugActions.hidden = !active;
-  if (active) { positionDebugToolbarTop(); reclampDebugToolbarOffset(); }
+  if (active) reclampDebugToolbarOffset();
   nodes.debugPanel.hidden = !active;
   nodes.debugEmpty.hidden = active;
   nodes.disassemblySplitter.hidden = !active;
@@ -1612,7 +1698,7 @@ window.pc98workbench = {
   setMaximizedPane, getMaximizedPane,
   setSidebarVisible, getSidebarVisible,
   setSidebarView, getSidebarView,
-  setEditorWidth, setDisassemblyHeight, getSplit, setDebugToolbarOffset,
+  setEditorWidth, setDisassemblyHeight, getSplit, setDebugToolbarOffset, setDebugToolbarOffsetY,
   getLastShortcut: () => lastShortcut,
   getScreenScaling: syncScreenScaling,
   getGuardedKeyboardTargets: () => [...GUARDED_KEYBOARD_TARGETS],

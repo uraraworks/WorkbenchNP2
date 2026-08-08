@@ -777,15 +777,21 @@ try {
   assert.throws(() => assert.equal(rowCheck.uniqueTopCount, 2));
   assert.throws(() => assert.ok(rowCheck.toolbarHeight < rowCheck.buttonHeight * 0.5));
 
-  // ドラッグ(実ポインタ操作)でグリップから位置が動くこと
+  // ドラッグ(実ポインタ操作)でグリップから位置が斜め(水平・垂直とも)に動くこと
   const gripRect = await page.$eval('#debug-toolbar-grip', (node) => node.getBoundingClientRect().toJSON());
   await page.mouse.move(gripRect.left + gripRect.width / 2, gripRect.top + gripRect.height / 2);
   await page.mouse.down();
-  await page.mouse.move(gripRect.left + gripRect.width / 2 + 40, gripRect.top + gripRect.height / 2, { steps: 5 });
+  await page.mouse.move(gripRect.left + gripRect.width / 2 + 40, gripRect.top + gripRect.height / 2 + 25, { steps: 5 });
   await page.mouse.up();
-  const afterDrag = await page.evaluate(() => window.pc98workbench.getSplit().debugToolbar.offset);
-  assert.ok(afterDrag > 0, `グリップのドラッグで右へ位置が動きません: ${afterDrag}`);
-  assert.throws(() => assert.equal(afterDrag, 0));
+  const afterDrag = await page.evaluate(() => window.pc98workbench.getSplit().debugToolbar);
+  assert.ok(afterDrag.offset > 0, `グリップのドラッグで右へ位置が動きません: ${afterDrag.offset}`);
+  assert.ok(afterDrag.offsetY > 0, `グリップのドラッグで下へ位置が動きません(2軸化前は縦は動かなかった): ${afterDrag.offsetY}`);
+  assert.throws(() => assert.equal(afterDrag.offset, 0));
+  assert.throws(() => assert.equal(afterDrag.offsetY, 0));
+  await page.evaluate(() => {
+    window.pc98workbench.setDebugToolbarOffset(null);
+    window.pc98workbench.setDebugToolbarOffsetY(null);
+  });
 
   // キーボード: ←/→で16px、Homeで既定(中央)へ
   await page.focus('#debug-toolbar-grip');
@@ -802,40 +808,129 @@ try {
   assert.equal(afterHome, 0, 'Homeで既定位置(中央)へ戻りません');
   assert.throws(() => assert.notEqual(afterHome, 0));
 
-  // 極端な値(±99999)でクランプされ、エディタカードの内側に収まること
-  const withinCard = (rect, cardRect, margin = 0.5) => rect.left >= cardRect.left - margin
-    && rect.left + rect.width <= cardRect.left + cardRect.width + margin;
+  /*
+   * Step14.1: 上下にもドラッグできるように拡張。可動域は.editor-cardではなく
+   * #editorの矩形の内側(タブ列やビルド状況欄には被せない)。
+   */
+  const withinEditor = (rect, editorRect, margin = 1) => rect.left >= editorRect.left - margin
+    && rect.left + rect.width <= editorRect.left + editorRect.width + margin
+    && rect.top >= editorRect.top - margin
+    && rect.top + rect.height <= editorRect.top + editorRect.height + margin;
+
+  // ↑/↓で垂直位置が16px単位で動くこと(既存の水平←/→の作法をそのまま縦へ広げた)
+  await page.focus('#debug-toolbar-grip');
+  const beforeArrowY = await page.evaluate(() => window.pc98workbench.getSplit().debugToolbar.offsetY);
+  await page.keyboard.press('ArrowDown');
+  const afterArrowDown = await page.evaluate(() => window.pc98workbench.getSplit().debugToolbar.offsetY);
+  assert.ok(Math.abs(afterArrowDown - (beforeArrowY + 16)) <= 1,
+    `ArrowDownで16px動きません: ${beforeArrowY} -> ${afterArrowDown}`);
+  await page.keyboard.press('ArrowUp');
+  const afterArrowUp = await page.evaluate(() => window.pc98workbench.getSplit().debugToolbar.offsetY);
+  assert.ok(Math.abs(afterArrowUp - beforeArrowY) <= 1, `ArrowUpで元へ戻りません: ${afterArrowUp}`);
+  assert.throws(() => assert.ok(Math.abs(afterArrowDown - beforeArrowY) <= 1));
+
+  // Homeで水平・垂直の両方とも既定位置(#editor上端中央)へ戻ること
+  const beforeHomeXY = await page.evaluate(() => {
+    const wb = window.pc98workbench;
+    wb.setDebugToolbarOffset(50);
+    wb.setDebugToolbarOffsetY(50);
+    return wb.getSplit().debugToolbar;
+  });
+  await page.keyboard.press('Home');
+  const afterHomeXY = await page.evaluate(() => window.pc98workbench.getSplit().debugToolbar);
+  assert.deepEqual({ offset: afterHomeXY.offset, offsetY: afterHomeXY.offsetY }, { offset: 0, offsetY: 0 },
+    `Homeで水平・垂直の両方とも既定位置へ戻りません(手前: ${JSON.stringify(beforeHomeXY)} / 直後: ${JSON.stringify(afterHomeXY)})`);
+  // 規律: 「縦のリセットだけ外れて横だけ戻る」取りこぼしを検出できるか、
+  // 縦を戻す前の値を正解として期待させてFAILすることを実測してから戻す。
+  assert.throws(() => assert.deepEqual(
+    { offset: afterHomeXY.offset, offsetY: afterHomeXY.offsetY }, { offset: 0, offsetY: 50 },
+  ));
+
+  // 極端な値(±99999)でクランプされ、#editorの矩形の内側に収まること(水平・垂直とも)
   const clampCheck = await page.evaluate(() => {
     const wb = window.pc98workbench;
     wb.setDebugToolbarOffset(99999);
+    wb.setDebugToolbarOffsetY(99999);
     const high = document.querySelector('#debug-actions').getBoundingClientRect().toJSON();
     wb.setDebugToolbarOffset(-99999);
+    wb.setDebugToolbarOffsetY(-99999);
     const low = document.querySelector('#debug-actions').getBoundingClientRect().toJSON();
     wb.setDebugToolbarOffset(null);
-    const cardRect = document.querySelector('.editor-card').getBoundingClientRect().toJSON();
-    return { high, low, cardRect };
+    wb.setDebugToolbarOffsetY(null);
+    const editorRect = document.querySelector('#editor').getBoundingClientRect().toJSON();
+    return { high, low, editorRect };
   });
-  assert.ok(withinCard(clampCheck.high, clampCheck.cardRect),
-    `setDebugToolbarOffset(99999)でカード外へはみ出します: ${JSON.stringify(clampCheck)}`);
-  assert.ok(withinCard(clampCheck.low, clampCheck.cardRect),
-    `setDebugToolbarOffset(-99999)でカード外へはみ出します: ${JSON.stringify(clampCheck)}`);
+  assert.ok(withinEditor(clampCheck.high, clampCheck.editorRect),
+    `setDebugToolbarOffset/Y(99999)で#editorの外へはみ出します: ${JSON.stringify(clampCheck)}`);
+  assert.ok(withinEditor(clampCheck.low, clampCheck.editorRect),
+    `setDebugToolbarOffset/Y(-99999)で#editorの外へはみ出します: ${JSON.stringify(clampCheck)}`);
   // 規律: マージンを大きく緩めて「はみ出しても通る」判定にするとFAILしない(=検査が効いている)ことを確認する。
-  assert.throws(() => assert.ok(withinCard(clampCheck.high, clampCheck.cardRect, -10000)));
+  assert.throws(() => assert.ok(withinEditor(clampCheck.high, clampCheck.editorRect, -10000)));
 
-  // スプリッタでエディタを狭めたあとも内側に収まる(再クランプが効いている)
+  // スプリッタでエディタを狭めたあとも内側に収まる(横の再クランプが効いている)
   const narrowCheck = await page.evaluate(() => {
     const wb = window.pc98workbench;
     wb.setDebugToolbarOffset(60);
     wb.setEditorWidth(260);
     const rect = document.querySelector('#debug-actions').getBoundingClientRect().toJSON();
-    const cardRect = document.querySelector('.editor-card').getBoundingClientRect().toJSON();
+    const editorRect = document.querySelector('#editor').getBoundingClientRect().toJSON();
     wb.setEditorWidth(null);
     wb.setDebugToolbarOffset(null);
-    return { rect, cardRect };
+    return { rect, editorRect };
   });
-  assert.ok(withinCard(narrowCheck.rect, narrowCheck.cardRect),
-    `エディタを260pxへ狭めた後にツールバーがカード外へはみ出します(再クランプ不足): ${JSON.stringify(narrowCheck)}`);
-  assert.throws(() => assert.ok(withinCard(narrowCheck.rect, narrowCheck.cardRect, -10000)));
+  assert.ok(withinEditor(narrowCheck.rect, narrowCheck.editorRect),
+    `エディタを260pxへ狭めた後にツールバーが#editorの外へはみ出します(再クランプ不足): ${JSON.stringify(narrowCheck)}`);
+  assert.throws(() => assert.ok(withinEditor(narrowCheck.rect, narrowCheck.editorRect, -10000)));
+
+  // 縦へ動かした状態でエディタの高さを変えた(最大化トグル)あとも#editorの内側に収まる(縦の再クランプ)
+  const heightChangeCheck = await page.evaluate(() => {
+    const wb = window.pc98workbench;
+    wb.setDebugToolbarOffsetY(9999);
+    const beforeMaximize = document.querySelector('#debug-actions').getBoundingClientRect().toJSON();
+    wb.setMaximizedPane('editor');
+    const whileMaximized = {
+      rect: document.querySelector('#debug-actions').getBoundingClientRect().toJSON(),
+      editorRect: document.querySelector('#editor').getBoundingClientRect().toJSON(),
+    };
+    wb.setMaximizedPane(null);
+    const afterRestore = {
+      rect: document.querySelector('#debug-actions').getBoundingClientRect().toJSON(),
+      editorRect: document.querySelector('#editor').getBoundingClientRect().toJSON(),
+    };
+    wb.setDebugToolbarOffsetY(null);
+    return { beforeMaximize, whileMaximized, afterRestore };
+  });
+  assert.ok(withinEditor(heightChangeCheck.whileMaximized.rect, heightChangeCheck.whileMaximized.editorRect),
+    `エディタ最大化でエディタの高さが変わった直後に#editorの外へはみ出します(縦の再クランプ不足): ${JSON.stringify(heightChangeCheck)}`);
+  assert.ok(withinEditor(heightChangeCheck.afterRestore.rect, heightChangeCheck.afterRestore.editorRect),
+    `最大化解除後も#editorの外へはみ出します: ${JSON.stringify(heightChangeCheck)}`);
+  assert.throws(() => assert.ok(
+    withinEditor(heightChangeCheck.whileMaximized.rect, heightChangeCheck.whileMaximized.editorRect, -10000),
+  ));
+
+  /*
+   * 上の最大化トグルは実測すると「縦の再クランプが無くてもFAILしない」ケースだった:
+   * 最大化で#editorが大きくなる方向にしか変わらないため、古い(広い方の範囲でクランプ
+   * 済みの)offsetYが偶然そのまま収まってしまい、解除後も元の大きさへ戻るだけなので
+   * 検出力が無い(実測して確認済み)。#editorが縮む方向(逆アセンブルパネルを広げてエディタを
+   * 圧迫する経路)でこそ、縦の再クランプが無いとオーバーフローする。そちらを主たる
+   * 回帰検査にする。
+   */
+  const shrinkHeightCheck = await page.evaluate(() => {
+    const wb = window.pc98workbench;
+    wb.setDebugToolbarOffsetY(9999);
+    wb.setDisassemblyHeight(420);
+    const rect = document.querySelector('#debug-actions').getBoundingClientRect().toJSON();
+    const editorRect = document.querySelector('#editor').getBoundingClientRect().toJSON();
+    wb.setDisassemblyHeight(null);
+    wb.setDebugToolbarOffsetY(null);
+    return { rect, editorRect };
+  });
+  assert.ok(withinEditor(shrinkHeightCheck.rect, shrinkHeightCheck.editorRect),
+    `逆アセンブルパネルを広げて#editorが縮んだ後に#editorの外へはみ出します(縦の再クランプ不足): ${JSON.stringify(shrinkHeightCheck)}`);
+  // 規律: 縦の再クランプを外すと実際にオーバーフローしてFAILすることを実測してから戻す
+  // (このアサーション自体はマージンを緩めるだけでFAILすることを確認する)。
+  assert.throws(() => assert.ok(withinEditor(shrinkHeightCheck.rect, shrinkHeightCheck.editorRect, -10000)));
 
   /*
    * width: max-content にしても、極端に狭いとき(setEditorWidth(0)相当)の折り返し
@@ -1268,22 +1363,25 @@ try {
   await page.screenshot({ path: MOBILE_SHOT });
   console.log(`[PASS] screen scaling: desktop x${desktopScaling.scale.toFixed(2)} pixelated / mobile x${mobileScaling.scale.toFixed(2)} ${mobileScaling.rendering}`);
 
-  // --- サイドバービュー/デバッグツールバー位置の永続化: リロード後もlocalStorageから復元される ---
+  // --- サイドバービュー/デバッグツールバー位置(縦横とも)の永続化: リロード後もlocalStorageから復元される ---
   await page.evaluate(() => {
     window.pc98workbench.setSidebarView('debug');
     window.pc98workbench.setDebugToolbarOffset(37);
+    window.pc98workbench.setDebugToolbarOffsetY(23);
   });
   await page.reload({ waitUntil: 'networkidle2' });
   await page.evaluate(() => window.pc98workbench.ready);
   const restoredView = await page.evaluate(() => window.pc98workbench.getSidebarView());
-  const restoredDebugToolbarOffset = await page.evaluate(() => window.pc98workbench.getSplit().debugToolbar.offset);
+  const restoredDebugToolbar = await page.evaluate(() => window.pc98workbench.getSplit().debugToolbar);
   assert.equal(restoredView, 'debug', 'リロード後にサイドバービュー(debug)の選択が復元されません');
-  assert.equal(restoredDebugToolbarOffset, 37, 'リロード後にデバッグツールバーの位置(37px)が復元されません');
+  assert.equal(restoredDebugToolbar.offset, 37, 'リロード後にデバッグツールバーの水平位置(37px)が復元されません');
+  assert.equal(restoredDebugToolbar.offsetY, 23, 'リロード後にデバッグツールバーの垂直位置(23px)が復元されません');
   // 規律: わざと違う値を期待させてFAILすることを実測してから元に戻す。
   assert.throws(() => assert.equal(restoredView, 'explorer'));
-  assert.throws(() => assert.equal(restoredDebugToolbarOffset, 0));
+  assert.throws(() => assert.equal(restoredDebugToolbar.offset, 0));
+  assert.throws(() => assert.equal(restoredDebugToolbar.offsetY, 0));
   console.log('[PASS] activity bar: initial explorer view, click-to-switch, click-to-toggle with aria-selected retained, reload persistence, debug auto-switch, maximize hiding, mobile row layout');
-  console.log('[PASS] floating debug toolbar: absolute positioning, centered default, drag/keyboard/Home, extreme-offset and narrow-editor clamping, reload persistence, mobile static fallback');
+  console.log('[PASS] floating debug toolbar: absolute positioning, centered default, 2-axis drag/keyboard/Home, extreme-offset and narrow/height-change clamping (within #editor), reload persistence, mobile static fallback');
 
   console.log(`[PASS] file/edit/IndexedDB/build/run: ${output}`);
   console.log('[PASS] machine status/prewarm: one status line, asynchronous boot completed, build/debug transitions');
