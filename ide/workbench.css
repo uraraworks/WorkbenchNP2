@@ -202,6 +202,9 @@ body.debugging .cm-content { caret-color: var(--vsc-transparent); }
 .cm-selectionBackground, .cm-content ::selection, .cm-focused .cm-selectionBackground { background: var(--vsc-selection) !important; }
 .cm-breakpoint-gutter { width: 16px; cursor: pointer; }
 .cm-breakpoint-gutter .cm-gutterElement:hover { background: var(--vsc-toolbar-hover); }
+/* 行番号gutterもBPトグル対象。押せると分かるようBP用gutterと同じhover反応にする。 */
+.cm-lineNumbers { cursor: pointer; }
+.cm-lineNumbers .cm-gutterElement:hover { background: var(--vsc-toolbar-hover); }
 .cm-breakpoint-dot { display: block; color: var(--vsc-breakpoint); font-size: 11px; line-height: 1.4; text-align: center; }
 .cm-breakpoint-spacer { display: block; visibility: hidden; font-size: 11px; line-height: 1.4; }
 .cm-debug-current { background: var(--vsc-stack-frame); box-shadow: inset 3px 0 0 var(--vsc-debugging); }

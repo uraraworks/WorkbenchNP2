@@ -744,7 +744,17 @@ const editor = new EditorView({
     extensions: [
       breakpointGutter,
       readOnly.of([]),
-      lineNumbers(), highlightActiveLineGutter(), highlightSpecialChars(), history(), drawSelection(),
+      // 行番号gutterもBPトグル対象にする（狭いBP用gutterだけだと当てにくいとのフィードバック）。
+      // CodeMirror既定の「行番号クリックで行選択」は失われるが、これは了承済みのトレードオフ。
+      lineNumbers({
+        domEventHandlers: {
+          mousedown(view, block) {
+            toggleBreakpoint(view.state.doc.lineAt(block.from).number);
+            return true;
+          },
+        },
+      }),
+      highlightActiveLineGutter(), highlightSpecialChars(), history(), drawSelection(),
       dropCursor(), EditorState.allowMultipleSelections.of(true), indentOnInput(), bracketMatching(),
       rectangularSelection(), crosshairCursor(), highlightActiveLine(), syntaxHighlighting(darkHighlightStyle),
       // アセンブラは「命令のあとにタブでコメント桁を揃える」書き方をするので、Tabは行頭の

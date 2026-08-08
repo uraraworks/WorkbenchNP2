@@ -57,6 +57,23 @@ function assertErrorLine(state, expectedLine) {
   assert.equal(state.errors[0].line, expectedLine, 'エラー行が不一致です');
 }
 
+/**
+ * 指定行のgutter要素を実クリックするための画面座標を求める。y座標は行番号gutter
+ * (`.cm-lineNumbers`)のテキストから該当行を特定して決め、x座標だけ`gutterSelector`側の
+ * gutter幅の中心を使う。実DOMクリックで検証するのは、合成dispatchEventでは
+ * domEventHandlersの当たり判定の広さそのものを確認できないため。
+ */
+async function gutterClickPoint(targetPage, gutterSelector, lineNumber) {
+  return targetPage.evaluate(({ gutterSelector, lineNumber }) => {
+    const numberEl = [...document.querySelectorAll('.cm-lineNumbers .cm-gutterElement')]
+      .find((el) => el.textContent.trim() === String(lineNumber));
+    if (!numberEl) return null;
+    const numberRect = numberEl.getBoundingClientRect();
+    const gutterRect = document.querySelector(gutterSelector).getBoundingClientRect();
+    return { x: gutterRect.left + gutterRect.width / 2, y: numberRect.top + numberRect.height / 2 };
+  }, { gutterSelector, lineNumber });
+}
+
 let server; let browser; let profile; let page;
 try {
   if (!process.env.PC98DEV_URL) server = await startServer();
@@ -325,6 +342,52 @@ try {
   const afterBuildStatus = await page.evaluate(() => window.pc98workbench.getMachineStatus());
   assert.notEqual(afterBuildStatus, beforeBuildStatus, 'ビルド後に統合状況表示が変化しません');
   assert.equal(afterBuildStatus, 'ビルド完了。実行できます');
+
+  // --- BP当たり判定: 行番号gutter(.cm-lineNumbers)のクリックでもBPをトグルできる ---
+  // 「BP用gutterが狭くて当てにくい」というフィードバックへの対応。実DOMクリックで検証する。
+  const debuggableLine = 11; // hello.asm: mov ax,4C00h（生成アドレスあり）
+  const nonDebuggableLine = 1; // hello.asm: コメント行（生成アドレスなし）
+  const lineNumberPoint = await gutterClickPoint(page, '.cm-lineNumbers', debuggableLine);
+  const bpGutterPoint = await gutterClickPoint(page, '.cm-breakpoint-gutter', debuggableLine);
+  const rejectPoint = await gutterClickPoint(page, '.cm-lineNumbers', nonDebuggableLine);
+  assert.ok(lineNumberPoint && bpGutterPoint && rejectPoint, 'gutterクリック座標の算出に失敗しました');
+
+  const beforeAnyClick = await page.evaluate(() => window.pc98workbench.getEditorMarks().breakpointDots);
+  assert.equal(beforeAnyClick, 0, 'クリック検証開始前にBPが残っています');
+
+  await page.mouse.click(lineNumberPoint.x, lineNumberPoint.y);
+  const afterLineNumberAdd = await page.evaluate(() => ({
+    dots: window.pc98workbench.getEditorMarks().breakpointDots,
+    list: window.pc98workbench.getBreakpointList(),
+  }));
+  assert.equal(afterLineNumberAdd.dots, 1, '行番号gutterクリックでBP印が付きません');
+  assert.deepEqual(afterLineNumberAdd.list, [{ line: debuggableLine, label: `hello.asm:${debuggableLine}` }],
+    '行番号gutterクリックでBP一覧が更新されません');
+  // 規律: 期待値をわざと逆にしてFAILすることを実測してから戻す。
+  assert.throws(() => assert.equal(afterLineNumberAdd.dots, 0));
+
+  await page.mouse.click(lineNumberPoint.x, lineNumberPoint.y);
+  const afterLineNumberRemove = await page.evaluate(() => window.pc98workbench.getEditorMarks().breakpointDots);
+  assert.equal(afterLineNumberRemove, 0, '行番号gutterの再クリックでBPが解除されません');
+
+  // 回帰: BP用gutター(.cm-breakpoint-gutter)自体のクリックも従来どおり効くこと。
+  await page.mouse.click(bpGutterPoint.x, bpGutterPoint.y);
+  const afterBpGutterAdd = await page.evaluate(() => window.pc98workbench.getEditorMarks().breakpointDots);
+  assert.equal(afterBpGutterAdd, 1, 'BP用gutterのクリックが効きません（回帰）');
+  await page.mouse.click(bpGutterPoint.x, bpGutterPoint.y);
+  const afterBpGutterRemove = await page.evaluate(() => window.pc98workbench.getEditorMarks().breakpointDots);
+  assert.equal(afterBpGutterRemove, 0, 'BP用gutterの再クリックでBPが解除されません（回帰）');
+
+  // 生成アドレスの無い行では、行番号クリックでもBPを張れない（拒否挙動は変えない）。
+  await page.mouse.click(rejectPoint.x, rejectPoint.y);
+  const afterRejectClick = await page.evaluate(() => ({
+    dots: window.pc98workbench.getEditorMarks().breakpointDots,
+    list: window.pc98workbench.getBreakpointList(),
+  }));
+  assert.equal(afterRejectClick.dots, 0, '生成アドレスの無い行に行番号クリックでBPが張られました');
+  assert.deepEqual(afterRejectClick.list, [], '生成アドレスの無い行のBPが一覧に現れています');
+  // 規律: 期待値をわざと逆にしてFAILすることを実測してから戻す。
+  assert.throws(() => assert.equal(afterRejectClick.dots, 1));
 
   const run = await page.evaluate(() => window.pc98workbench.runCurrent());
   assert.equal(run.ok, true);
