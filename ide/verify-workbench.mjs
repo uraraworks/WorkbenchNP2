@@ -1467,6 +1467,39 @@ try {
   console.log('[PASS] activity bar: initial explorer view, click-to-switch, click-to-toggle with aria-selected retained, reload persistence, debug auto-switch, maximize hiding, mobile row layout');
   console.log('[PASS] floating debug toolbar: absolute positioning, centered default, 2-axis drag/keyboard/Home, extreme-offset and narrow/height-change clamping (within #editor), reload persistence, mobile static fallback');
 
+  // --- 回帰: ページ読込直後、#runを一度も押さずに初回デバッグがエントリ停止まで到達する ---
+  // 既存の検証はどれも#run(runCurrent)を先に一度通してからデバッグへ進んでおり、
+  // 「ページ読込直後にいきなりデバッグ」という経路(WebNP2のwaitForFddReady/insertFdの
+  // 不具合調査で問題になった経路)を一度も検査していなかった。直前のreloadでbootedは
+  // リセットされているので、ここが「ページ読込直後」の代わりになる。
+  // 合格条件には所要時間も含める。今回の不具合は「最終的には動くが異常に遅い(あるいは
+  // 例外を握り潰して不整合のまま進む)」形で現れたため、到達したかどうかだけでは
+  // 再発を検出できない。
+  // 実測(スロットリング無し、この検証環境で3回計測、修正後コード): 17.5秒・17.8秒・
+  // 18.1秒。上限はこの実測値に環境差の余裕を持たせつつ、真のハング(分単位)とは
+  // 明確に区別できる60秒とする。
+  // 検出力の確認: WebNP2をこの不具合の直前のコミット(e04b3c9、waitForFddReadyが
+  // 壁時計10秒のポーリングのみでinsertFdが戻り値を握り潰す実装)へ戻してこの検証を
+  // 実行したところ、この無スロットリングのheadless環境では17.5〜17.8秒で普通に到達し、
+  // FAILしなかった(2回実測)。つまりこの検査は無スロットリング環境では当該の
+  // 不具合そのものを再現できておらず、検出力があるのは「一般的な低速化・完全停止」
+  // に対してのみである。それでも将来の真の退行(タイムアウト例外や無限待ち)を
+  // 検出できる回帰ガードとして価値があるため残す。
+  const freshDebugStart = Date.now();
+  await page.evaluate(async () => {
+    const wb = window.pc98workbench;
+    await wb.openFile('sample', 'samples/second-run.asm');
+    await wb.buildCurrent();
+  });
+  const freshDebug = await page.evaluate(() => window.pc98workbench.startDebug());
+  const freshDebugMs = Date.now() - freshDebugStart;
+  assert.equal(freshDebug.control.kind, 0, '#runを挟まない初回デバッグがCOMエントリで停止しません');
+  assert.ok(freshDebugMs < 60_000, `#runを挟まない初回デバッグが遅すぎます: ${freshDebugMs}ms`);
+  // 規律: 上限を明らかに満たせない値にしてFAILすることを実測してから元に戻す。
+  assert.throws(() => assert.ok(freshDebugMs < 1, 'わざと失敗させる自己検査'));
+  await page.evaluate(() => window.pc98workbench.stopDebug());
+  console.log(`[PASS] fresh debug without #run: reached COM entry stop in ${freshDebugMs}ms (<60000ms)`);
+
   console.log(`[PASS] file/edit/IndexedDB/build/run: ${output}`);
   console.log('[PASS] machine status/prewarm: one status line, asynchronous boot completed, build/debug transitions');
   console.log('[PASS] header/status bar: WebNP2 header, VS Code status colors, 7 license links returned HTTP 200');
