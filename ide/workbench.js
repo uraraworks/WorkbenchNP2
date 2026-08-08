@@ -1465,7 +1465,15 @@ async function startDebug() {
   }
   session.setBreakpointLines([...tab.breakpoints]);
   const view = refreshDebugViews();
-  if (unmapped.length === 0 && !recoveredDriveError) {
+  if (started.noDebuggableLines) {
+    // 生成行が1つも無いビルドでは最初の生成行まで進めようがないため、黙って素のエントリで
+    // 止めたままにせず、その旨を状況表示へ出す。
+    setDebugStatus(
+      `${built.dosName} に生成行が無いため素のエントリで停止しました CS:IP=`
+      + `${HEX(started.control.cs, 4)}:${HEX(started.control.ip, 4)}`,
+      true,
+    );
+  } else if (unmapped.length === 0 && !recoveredDriveError) {
     setDebugStatus(`${built.dosName} エントリ停止 CS:IP=${HEX(started.control.cs, 4)}:${HEX(started.control.ip, 4)}`);
   }
   renderBreakpointList();

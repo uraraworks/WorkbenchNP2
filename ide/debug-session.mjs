@@ -5,6 +5,12 @@ import { CONTROL, parseLoaderControl, releaseLoaderAtEntry, waitForLoaderControl
  * 6番は「次の行まで実行」の一時BP専用にする。利用者BPは0〜5の6本まで。
  * ローダ終了BPは、対象エントリ到達時に解除済みの7番を時分割で再利用する。
  * 同時に有効にならないため、利用者BP 6本を減らさない。
+ *
+ * 7番はさらに、素のエントリ停止の直後にも一時的に再利用する: Cのexeはエントリが
+ * main ではなく SmallerC のスタートアップ(行情報なし)なので、行マップ上の最初の
+ * 生成行(debuggableLines()[0])まで走らせてから止め直す(advanceToFirstDebuggableLine)。
+ * この2回目の利用も、直前の利用(エントリBP)が解除済みのあとに限って行い、
+ * 完了後は必ず解除するため、loaderExitとの時分割にも利用者BP 6本にも影響しない。
  */
 export const BREAKPOINT_SLOTS = { user: [0, 1, 2, 3, 4, 5], stepOver: 6, entry: 7, loaderExit: 7 };
 const KIND = { COM: 0, EXE: 1 };
@@ -35,6 +41,37 @@ export function createDebugSession(debug) {
     return regs.cs === control.cs ? map.lineAt(regs.eip) : null;
   };
 
+  /**
+   * 素のエントリ(4B01h返却CS:IP)から、行マップ上の最初の生成行(debuggableLines()[0])
+   * まで走らせてから止め直す。ASMのCOM(ORG 100h)はエントリ自体が最初の生成行なので
+   * 何もしない。生成行が1つも無いビルドでは素のエントリのまま返し、
+   * noDebuggableLines:true で呼び出し側(workbench.js)に状況表示を委ねる。
+   * 使うBP枠は、直前にreleaseLoaderAtEntryが使い終えて解除済みのentry(7番)を
+   * 再利用する(loaderExitとの時分割は「同時に有効にしない」契約なので衝突しない)。
+   */
+  const advanceToFirstDebuggableLine = (entryRegisters) => {
+    const lines = map?.debuggableLines() ?? [];
+    if (lines.length === 0) return { registers: entryRegisters, noDebuggableLines: true };
+    const firstLine = lines[0];
+    if (entryRegisters.cs === control.cs && map.lineAt(entryRegisters.eip) === firstLine) {
+      return { registers: entryRegisters, noDebuggableLines: false };
+    }
+    const offsets = map.breakpointOffsets(firstLine);
+    // 行マップが返した行に生成offsetが無いのは契約違反だが、素のエントリのまま
+    // 返して迷子にしない(黙って別の行へ寄せない既存方針を踏襲)。
+    if (offsets.length === 0) return { registers: entryRegisters, noDebuggableLines: false };
+    const slot = BREAKPOINT_SLOTS.entry;
+    for (const offset of offsets) debug.setBreakpoint(slot, control.cs, offset, true);
+    let hit;
+    try {
+      hit = debug.runUntilBreakpoint(5_000_000);
+    } finally {
+      for (const offset of offsets) debug.setBreakpoint(slot, control.cs, offset, false);
+    }
+    if (hit !== slot) throw new Error(`最初の生成行(${firstLine}行目)へ到達できませんでした (hit=${hit})`);
+    return { registers: debug.readRegisters(), noDebuggableLines: false };
+  };
+
   return {
     get control() { return control; },
     get map() { return map; },
@@ -44,7 +81,10 @@ export function createDebugSession(debug) {
     currentLine,
     breakpointLines: () => assignments.map((item) => item.line),
 
-    /** ローダへコマンドを渡し、READY制御ブロックを検出してから対象の1命令目手前で止める。 */
+    /**
+     * ローダへコマンドを渡し、READY制御ブロックを検出してから対象の1命令目手前で止め、
+     * さらに行マップ上の最初の生成行まで進めてから止め直す(advanceToFirstDebuggableLine)。
+     */
     async start(engine, command, debugMap, expectedKind) {
       control = undefined;
       assignments = [];
@@ -61,7 +101,8 @@ export function createDebugSession(debug) {
       }
       control = found;
       const entryRegisters = releaseLoaderAtEntry(debug, found, BREAKPOINT_SLOTS.entry);
-      return { control: found, registers: entryRegisters, driveErrorRetries };
+      const { registers: settledRegisters, noDebuggableLines } = advanceToFirstDebuggableLine(entryRegisters);
+      return { control: found, registers: settledRegisters, driveErrorRetries, noDebuggableLines };
     },
 
     /**

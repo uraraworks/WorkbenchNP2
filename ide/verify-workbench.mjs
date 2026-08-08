@@ -644,6 +644,53 @@ try {
   assert.equal(cBuild.ok, true, JSON.stringify(cBuild.errors));
   assert.equal(cBuild.dosName, 'HELLO-C.EXE');
 
+  /*
+   * Step15: デバッグ開始時の停止位置を「最初の生成行」へ統一する不具合対応の回帰検査。
+   * hello-c.cのエントリはmainではなくSmallerCのスタートアップ(行情報なし)なので、
+   * 修正前は停止行がnullになり、そこからのステップオーバーで
+   * 「次の生成行がありません」(ide/debug-session.mjs:105)が出ていた。
+   * 期待値は5をハードコードせず、行マップ由来のdebuggableLines[0]と突き合わせる。
+   */
+  const cEntryDebug = await page.evaluate(async () => {
+    const wb = window.pc98workbench;
+    await wb.buildCurrent();
+    const debuggable = wb.getDebugState().debuggableLines;
+    const started = await wb.startDebug();
+    const state = wb.getDebugState();
+    const marks = wb.getEditorMarks();
+    let stepped = null;
+    let stepError = null;
+    try { stepped = wb.stepOverLine(); } catch (error) { stepError = error.message; }
+    const breakpointListLength = wb.getBreakpointList().length;
+    await wb.stopDebug();
+    return {
+      debuggable, control: started.control, noDebuggableLines: started.noDebuggableLines,
+      entryLine: started.line, stateLine: state.currentLine, stateBreakpoints: state.breakpoints,
+      marksCurrentLine: marks.currentLine, marksBreakpointDots: marks.breakpointDots,
+      stepped, stepError, breakpointListLength,
+    };
+  });
+  assert.equal(cEntryDebug.control.kind, 1, 'hello-c.cがMZ EXEとして通知されていません');
+  assert.ok(cEntryDebug.debuggable.length > 0, 'hello-c.cに生成行がありません(テスト前提が崩れています)');
+  assert.equal(cEntryDebug.noDebuggableLines, false, '生成行があるのにnoDebuggableLines扱いです');
+  const expectedFirstLine = cEntryDebug.debuggable[0];
+  assert.equal(cEntryDebug.entryLine, expectedFirstLine,
+    `デバッグ開始の停止行が最初の生成行(${expectedFirstLine}行目)ではありません: ${JSON.stringify(cEntryDebug)}`);
+  assert.equal(cEntryDebug.stateLine, expectedFirstLine);
+  assert.equal(cEntryDebug.marksCurrentLine, expectedFirstLine, 'エディタの停止行強調が最初の生成行にありません');
+  assert.equal(cEntryDebug.marksBreakpointDots, 0, '自動停止のBP印がgutterに出ています');
+  assert.deepEqual(cEntryDebug.stateBreakpoints, [], '自動停止が利用者BP枠を消費しています');
+  assert.equal(cEntryDebug.breakpointListLength, 0, 'BP一覧に自動BPが現れています');
+  assert.equal(cEntryDebug.stepError, null,
+    `エントリ停止行からのステップオーバーが失敗しました: ${cEntryDebug.stepError}`);
+  assert.notEqual(cEntryDebug.stepped?.line, null, 'ステップオーバー後の停止行がありません');
+  assert.equal(cEntryDebug.stepped?.line, cEntryDebug.stepped?.expectedLine,
+    'ステップオーバーの到達行が期待行と不一致です');
+  // 規律: 期待値をわざと逆にしてFAILすることを実測してから戻す。
+  assert.throws(() => assert.equal(cEntryDebug.entryLine, expectedFirstLine + 1));
+  assert.throws(() => assert.deepEqual(cEntryDebug.stateBreakpoints, [expectedFirstLine]));
+  assert.throws(() => assert.equal(cEntryDebug.stepError, 'dummy'));
+
   await page.evaluate(async () => {
     await window.pc98workbench.createFile('project/error.asm');
     window.pc98workbench.setValue('CPU 8086\nBITS 16\nORG 100h\nmov ax,\n');
@@ -1239,6 +1286,45 @@ try {
   const cResume = await page.evaluate(() => window.pc98workbench.stopDebug());
   assertRun(cResume, '3');
   assert.throws(() => assertRun(cResume, '4'));
+
+  /*
+   * 利用者BP枠(0〜5の6本)は自動停止(最初の生成行)に消費されていないことを確認する。
+   * STRLEN.Cは生成行が7つ([11,12,19,20,22,23,25])あるため、6本ちょうど張れて
+   * 7本目で既存の「枠を超える」エラーになることを実測できる。
+   */
+  const slotCapacity = await page.evaluate(async () => {
+    const wb = window.pc98workbench;
+    wb.toggleBreakpoint(22); // 直前のcDebugで張ったままの22行目を落として素の状態から始める。
+    const debuggable = wb.getDebugState().debuggableLines;
+    const started = await wb.startDebug();
+    const afterStart = wb.getDebugState().breakpoints;
+    const toggled = debuggable.slice(0, 6).map((line) => wb.toggleBreakpoint(line));
+    const afterSix = wb.getDebugState().breakpoints;
+    const statusBeforeSeventh = wb.getMachineStatus();
+    const seventh = wb.toggleBreakpoint(debuggable[6]);
+    const afterSeventh = wb.getDebugState().breakpoints;
+    const statusAfterSeventh = wb.getMachineStatus();
+    await wb.stopDebug();
+    for (const line of debuggable.slice(0, 6)) wb.toggleBreakpoint(line); // 後続テストへ持ち越さない。
+    return {
+      debuggableCount: debuggable.length, noDebuggableLines: started.noDebuggableLines,
+      afterStart, toggled, afterSix, seventh, afterSeventh,
+      statusChanged: statusAfterSeventh !== statusBeforeSeventh,
+    };
+  });
+  assert.equal(slotCapacity.debuggableCount, 7, 'STRLEN.Cの生成行が7つという前提が崩れています');
+  assert.equal(slotCapacity.noDebuggableLines, false);
+  assert.deepEqual(slotCapacity.afterStart, [],
+    `デバッグ開始直後に利用者BPが自動で入っています(自動停止が枠を消費しています): ${JSON.stringify(slotCapacity.afterStart)}`);
+  assert.deepEqual(slotCapacity.toggled, [true, true, true, true, true, true], '生成行6本ぶんのBPを張れません');
+  assert.equal(slotCapacity.afterSix.length, 6, '利用者BPが6本張れていません');
+  assert.equal(slotCapacity.seventh, false, '7本目のBPが張れてしまいます(枠上限が壊れています)');
+  assert.equal(slotCapacity.afterSeventh.length, 6, '7本目を弾いたのにBP本数が変わっています');
+  assert.ok(slotCapacity.statusChanged, '7本目を弾いたときにエラー状況表示が出ていません');
+  // 規律: 期待値をわざと逆にしてFAILすることを実測してから戻す。
+  assert.throws(() => assert.equal(slotCapacity.seventh, true));
+  assert.throws(() => assert.deepEqual(slotCapacity.afterStart, [11]));
+  assert.throws(() => assert.equal(slotCapacity.afterSix.length, 5));
 
   // 固定待ちを0にして媒体交換を急がせ、DOS画面を見た自己回復経路を可能な限り強制する。
   const forcedRecovery = await page.evaluate(async () => {
