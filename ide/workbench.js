@@ -68,7 +68,6 @@ let debugTabId;
 let confirmTabClose = (message) => window.confirm(message);
 let freeDos;
 let runSequence = 0;
-let FD_SWAP_MS = 300;
 let driveErrorRetries = 0;
 let driveRemounts = 0;
 let booted;
@@ -1180,14 +1179,7 @@ async function buildCurrent() {
  * 短い待ちは通常経路の最適化にすぎない。正しさはDOS画面のエラー検出と、
  * Rで直らない場合に排出からメディア交換をやり直す二段の自己回復で担保する。
  */
-const FD_INSERT_SETTLE_FACTOR = 3;
 const settle = (ms) => new Promise((resolveSettle) => { setTimeout(resolveSettle, ms); });
-
-function setFdSwapDelay(ms) {
-  if (!Number.isFinite(ms) || ms < 0) throw new TypeError('FD差し替え待ちは0以上の数値にしてください');
-  FD_SWAP_MS = Math.trunc(ms);
-  return FD_SWAP_MS;
-}
 
 function recordDriveErrorRetries(count) {
   const added = Number.isInteger(count) && count > 0 ? count : 0;
@@ -1722,8 +1714,6 @@ window.pc98workbench = {
   getCursorLine: () => editor.state.doc.lineAt(editor.state.selection.main.head).number,
   getMachineStatus: () => nodes.machineStatus.textContent,
   getToolbarMode: () => (nodes.debugActions.hidden ? 'build' : 'debug'),
-  setFdSwapDelay,
-  getFdSwapDelay: () => FD_SWAP_MS,
   getDriveErrorRetries: () => driveErrorRetries,
   getDriveRemounts: () => driveRemounts,
   getBuiltOutput: () => (activeTab()?.build?.output ? Array.from(activeTab().build.output) : null),

@@ -1326,34 +1326,32 @@ try {
   assert.throws(() => assert.deepEqual(slotCapacity.afterStart, [11]));
   assert.throws(() => assert.equal(slotCapacity.afterSix.length, 5));
 
-  // 固定待ちを0にして媒体交換を急がせ、DOS画面を見た自己回復経路を可能な限り強制する。
+  // FD差し替え(実行→デバッグ→復帰)を連続して行い、DOS画面を見た自己回復経路が
+  // 壊れていないことを確認する。かつてはここで setFdSwapDelay(0) により「待ちを詰めて
+  // 自己回復を強制する」ことを狙っていたが、FD_SWAP_MS はどこからも待ちとして
+  // 参照されていない死んだ変数だったため(挿入遅延はコア側の準備完了検出
+  // (webnp2_fdd_ready)へ既に置き換わっている)、実際には何も強制していなかった。
+  // 死んだAPIごと削除し、この一連の操作が成立することだけを見る。
   const forcedRecovery = await page.evaluate(async () => {
     const wb = window.pc98workbench;
     const retriesBefore = wb.getDriveErrorRetries();
     const remountsBefore = wb.getDriveRemounts();
-    wb.setFdSwapDelay(0);
-    const forcedDelay = wb.getFdSwapDelay();
-    try {
-      await wb.openFile('sample', 'samples/second-run.asm');
-      await wb.buildCurrent();
-      const run = await wb.runCurrent();
-      const debug = await wb.startDebug();
-      const resumed = await wb.stopDebug();
-      return {
-        run, debug, resumed, forcedDelay,
-        retriesBefore, retriesAfter: wb.getDriveErrorRetries(),
-        remountsBefore, remountsAfter: wb.getDriveRemounts(),
-      };
-    } finally {
-      wb.setFdSwapDelay(300);
-    }
+    await wb.openFile('sample', 'samples/second-run.asm');
+    await wb.buildCurrent();
+    const run = await wb.runCurrent();
+    const debug = await wb.startDebug();
+    const resumed = await wb.stopDebug();
+    return {
+      run, debug, resumed,
+      retriesBefore, retriesAfter: wb.getDriveErrorRetries(),
+      remountsBefore, remountsAfter: wb.getDriveRemounts(),
+    };
   });
-  assert.equal(forcedRecovery.forcedDelay, 0, 'FD差し替え待ちを0msへ設定できません');
   assertRun(forcedRecovery.run.screen, 'Second debug run!');
-  assert.equal(forcedRecovery.debug.control.kind, 0, '待ち0のデバッグがCOMエントリで停止しません');
+  assert.equal(forcedRecovery.debug.control.kind, 0, 'デバッグがCOMエントリで停止しません');
   assertRun(forcedRecovery.resumed, 'Second debug run!');
-  assert.equal(await page.evaluate(() => window.pc98workbench.getFdSwapDelay()), 300,
-    '強制検証後にFD差し替え待ちが300msへ戻っていません');
+  assert.equal(await page.evaluate(() => 'setFdSwapDelay' in window.pc98workbench), false,
+    '死んだgetFdSwapDelay/setFdSwapDelay APIが残っています');
   const forcedRetryCount = forcedRecovery.retriesAfter - forcedRecovery.retriesBefore;
   const forcedRemountCount = forcedRecovery.remountsAfter - forcedRecovery.remountsBefore;
 
@@ -1491,9 +1489,9 @@ try {
   console.log('[PASS] pane swap: desktop order reversed/restored and localStorage persisted');
   console.log(`[PASS] C debug in editor: STRLEN.C line 22 "${cDebug.sourceLine}" stop, resumed output "3"`);
   if (forcedRetryCount > 0 || forcedRemountCount > 0) {
-    console.log(`[PASS] FD swap self-recovery: delay=0ms retries=${forcedRetryCount} remounts=${forcedRemountCount}`);
+    console.log(`[PASS] FD swap self-recovery: retries=${forcedRetryCount} remounts=${forcedRemountCount}`);
   } else {
-    console.log('[INFO] FD swap self-recovery: この環境では待ち0でもドライブエラーを再現しなかったためスキップ');
+    console.log('[INFO] FD swap self-recovery: この環境ではドライブエラーを再現しなかったためスキップ');
   }
   console.log('[PASS] disassembly splitter: visible in debug, 80-420px clamp, keyboard guard and restore');
   console.log(`[PASS] sidebar/status overflow: desktop ${desktopChrome.actions}/${desktopChrome.footer}px mobile ${mobileChrome.actions}/${mobileChrome.footer}px`);
