@@ -36,7 +36,7 @@ function startServer() {
           '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
           '.asm': 'text/plain; charset=utf-8', '.c': 'text/plain; charset=utf-8',
           '.h': 'text/plain; charset=utf-8', '.md': 'text/plain; charset=utf-8',
-          '.txt': 'text/plain; charset=utf-8',
+          '.txt': 'text/plain; charset=utf-8', '.svg': 'image/svg+xml',
         };
         response.writeHead(200, { 'Content-Type': types[extname(file)] ?? 'application/octet-stream' });
         response.end(body);
@@ -123,9 +123,40 @@ try {
     const response = await fetch(href);
     assert.equal(response.status, 200, `フッタリンクがHTTP 200ではありません: ${href}`);
   }
+
+  // --- タブ名/アイコン/タグラインの英語化（WebNP2と書式を揃える） ---
+  const EXPECTED_TITLE = 'PC98Dev - PC-98 Development Environment';
+  const EXPECTED_TAGLINE = 'The online PC-98 development environment powered by NASM, SmallerC and WebNP2';
+  const branding = await page.evaluate(() => ({
+    title: document.title,
+    tagline: document.querySelector('.app-tagline')?.textContent ?? '',
+    faviconHref: document.querySelector('link[rel="icon"]')?.href ?? null,
+    headerIconWidth: document.querySelector('.app-icon')?.getBoundingClientRect().width ?? 0,
+  }));
+  assert.equal(branding.title, EXPECTED_TITLE, '起動直後のtitleが期待値ではありません');
+  assert.equal(branding.tagline, EXPECTED_TAGLINE, 'タグラインが期待の英文ではありません');
+  // 規律: 期待値をわざと逆にしてFAILすることを実測してから戻す。
+  assert.throws(() => assert.equal(branding.tagline, 'ブラウザだけで書いて、ビルドして、PC-98で動かす。'));
+  assert.ok(branding.faviconHref, 'ファビコンのlink[rel="icon"]がありません');
+  assert.ok(branding.headerIconWidth > 0, 'ヘッダのアイコン画像(.app-icon)が表示されていません');
+  const faviconResponse = await fetch(branding.faviconHref);
+  assert.equal(faviconResponse.status, 200, `ファビコンがHTTP 200ではありません: ${branding.faviconHref}`);
+
   await page.evaluate(() => window.pc98workbench.prewarm);
   assert.equal(await page.evaluate(() => window.pc98workbench.getMachineStatus()),
     'エミュレータ起動しました。実行の準備ができています', 'プリウォーム完了表示が不一致です');
+  // 同梱コアはエミュレータ起動完了時にdocument.titleをSDLウィンドウタイトルへ直接書き換える
+  // （実測: 起動完了時に1回、「Neko Project II kai + IA-32」へ）。ここが最重要の検査:
+  // 起動前だけ見ても不具合は再現しないので、起動完了後のtitleを確認する。
+  const afterBoot = await page.evaluate(() => ({
+    title: document.title,
+    overwrites: window.pc98workbench.getTitleOverwriteCount(),
+  }));
+  assert.ok(afterBoot.overwrites >= 1,
+    'コアによるdocument.titleの書き換えが観測できていません（検査の前提が崩れています）');
+  assert.equal(afterBoot.title, EXPECTED_TITLE, 'エミュレータ起動後にtitleがコアの値へ書き換わったままです');
+  // 規律: 期待値をわざと逆にしてFAILすることを実測してから戻す。
+  assert.throws(() => assert.equal(afterBoot.title, 'Neko Project II kai + IA-32'));
   assert.deepEqual(await page.evaluate(() => window.pc98workbench.getState()), {
     currentPath: 'samples/hello.asm', currentOrigin: 'sample', dirty: false, errors: [], built: null,
   });

@@ -55,6 +55,23 @@ const nodes = {
   registers: document.querySelector('#registers'), breakpointCount: document.querySelector('#breakpoint-count'),
   breakpointList: document.querySelector('#breakpoint-list'),
 };
+
+/**
+ * 同梱コア(emnp21kai_sdl2.js)はSDLウィンドウタイトルをemscripten経由でdocument.titleへ
+ * 直接代入する(`document.title=UTF8ToString(title)`)。実測ではエミュレータ起動完了時に
+ * 1回だけ「Neko Project II kai + IA-32」へ書き換わる。コア/WebNP2側は変更できないので、
+ * <title>要素をMutationObserverで監視し、意図した値から外れたら即座に戻す。
+ */
+const APP_TITLE = document.title;
+let titleOverwriteCount = 0;
+const titleGuard = new MutationObserver(() => {
+  if (document.title !== APP_TITLE) {
+    titleOverwriteCount += 1;
+    document.title = APP_TITLE;
+  }
+});
+titleGuard.observe(document.querySelector('title'), { childList: true, characterData: true, subtree: true });
+
 const language = new Compartment();
 const readOnly = new Compartment();
 const projectFS = new IndexedDbProjectFS();
@@ -1792,4 +1809,6 @@ window.pc98workbench = {
     readOnly: editor.state.readOnly,
   }),
   isEditorReadOnly: () => editor.state.readOnly,
+  /** コアがdocument.titleを書き換えた回数。titleGuardが機能しているかの検証用。 */
+  getTitleOverwriteCount: () => titleOverwriteCount,
 };
