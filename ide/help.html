@@ -1,0 +1,576 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="./pc98dev-icon.svg" />
+    <title>WorkbenchNP2 使い方</title>
+    <style>
+      /* 姉妹プロジェクト WebPaint98 の help.html と同じ構成・言語切替の仕組みをそのまま流用してある。
+         日本語/英語は body[data-lang] で .lang-ja / .lang-en を出し分ける(1ファイル2言語)。
+         配色は workbench.css の --vsc-* 変数に合わせ、IDE本体と地続きに見えるようにする。 */
+      :root {
+        color-scheme: dark;
+        --bg: #1f1f1f;
+        --bg-panel: #181818;
+        --border: #2b2b2b;
+        --text: #cccccc;
+        --text-dim: #9d9d9d;
+        --accent: #0078d4;
+        --header-bg: #0c0c0c;
+        --header-text: #f2f2f2;
+        --header-tagline-text: #a8a8a8;
+        --page-footer-bg: #181818;
+        --page-footer-text: #9d9d9d;
+        --page-footer-border: #2b2b2b;
+        --btn-bg: #313131;
+        --btn-border: #3c3c3c;
+        --btn-text: #cccccc;
+        --code-bg: #313131;
+        --note-bg: #20303f;
+        --note-border: #0078d4;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        height: 100%;
+      }
+
+      body {
+        margin: 0;
+        padding: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Yu Gothic', sans-serif;
+        min-height: 100%;
+        display: flex;
+        flex-direction: column;
+        line-height: 1.7;
+      }
+
+      header.help-header {
+        flex: 0 0 auto;
+        background: var(--header-bg);
+        padding: 10px 16px;
+        box-shadow:
+          inset 0 -1px 0 rgba(255, 255, 255, 0.06),
+          0 2px 6px rgba(0, 0, 0, 0.4);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .help-header-title {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .help-header-title img {
+        width: 24px;
+        height: 24px;
+        display: block;
+      }
+
+      .help-header-title h1 {
+        font-size: 15px;
+        font-weight: 600;
+        margin: 0;
+        color: var(--header-text);
+        letter-spacing: 0.03em;
+      }
+
+      .help-header-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .help-header-actions a,
+      .help-header-actions button {
+        font: inherit;
+        font-size: 12px;
+        color: var(--btn-text);
+        background: var(--btn-bg);
+        border: 1px solid var(--btn-border);
+        border-radius: 4px;
+        padding: 4px 10px;
+        cursor: pointer;
+        text-decoration: none;
+      }
+
+      .help-header-actions a:hover,
+      .help-header-actions button:hover {
+        background: #3a3a3a;
+      }
+
+      main {
+        flex: 1 1 auto;
+        width: 100%;
+        max-width: 920px;
+        margin: 0 auto;
+        padding: 24px 16px 40px;
+      }
+
+      h2 {
+        font-size: 18px;
+        margin: 32px 0 8px;
+        padding-bottom: 6px;
+        border-bottom: 2px solid var(--border);
+        color: #ffffff;
+      }
+
+      h2:first-of-type {
+        margin-top: 8px;
+      }
+
+      h3 {
+        font-size: 15px;
+        margin: 20px 0 6px;
+        color: #ffffff;
+      }
+
+      p,
+      ul,
+      ol {
+        margin: 8px 0;
+      }
+
+      ul,
+      ol {
+        padding-left: 24px;
+      }
+
+      figure {
+        margin: 12px 0 20px;
+        padding: 12px;
+        background: var(--bg-panel);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+      }
+
+      figure img {
+        display: block;
+        max-width: 100%;
+        height: auto;
+        margin: 0 auto;
+        border-radius: 4px;
+      }
+
+      figcaption {
+        font-size: 12px;
+        color: var(--text-dim);
+        margin-top: 8px;
+        text-align: center;
+      }
+
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        margin: 12px 0;
+        font-size: 14px;
+      }
+
+      th,
+      td {
+        border: 1px solid var(--border);
+        padding: 6px 10px;
+        text-align: left;
+        vertical-align: top;
+      }
+
+      th {
+        background: var(--code-bg);
+        color: #ffffff;
+      }
+
+      kbd {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px;
+        background: var(--code-bg);
+        border: 1px solid var(--border);
+        border-bottom-width: 2px;
+        border-radius: 4px;
+        padding: 1px 5px;
+      }
+
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 13px;
+        background: var(--code-bg);
+        border-radius: 3px;
+        padding: 1px 4px;
+      }
+
+      .note {
+        background: var(--note-bg);
+        border: 1px solid var(--note-border);
+        border-radius: 6px;
+        padding: 10px 14px;
+        margin: 12px 0;
+        font-size: 14px;
+      }
+
+      footer.help-footer {
+        flex: 0 0 auto;
+        width: 100%;
+        font-size: 11px;
+        color: var(--page-footer-text);
+        text-align: center;
+        padding: 8px 16px;
+        background: var(--page-footer-bg);
+        border-top: 1px solid var(--page-footer-border);
+      }
+
+      footer.help-footer a {
+        color: var(--page-footer-text);
+      }
+
+      /* 言語切替: 既定(ja)は .lang-en を隠し、data-lang='en' で反転する。 */
+      .lang-en {
+        display: none;
+      }
+
+      body[data-lang='en'] .lang-ja {
+        display: none;
+      }
+
+      body[data-lang='en'] .lang-en {
+        display: block;
+      }
+
+      body[data-lang='en'] table .lang-en,
+      body[data-lang='en'] li .lang-en,
+      body[data-lang='en'] figcaption .lang-en {
+        display: inline;
+      }
+    </style>
+  </head>
+  <body data-lang="ja">
+    <header class="help-header">
+      <div class="help-header-title">
+        <img src="./pc98dev-icon.svg" alt="" width="24" height="24" />
+        <h1><span class="lang-ja">WorkbenchNP2 使い方</span><span class="lang-en">WorkbenchNP2 Help</span></h1>
+      </div>
+      <div class="help-header-actions">
+        <button id="langToggleBtn" type="button">EN</button>
+        <a href="./index.html"><span class="lang-ja">アプリへ戻る</span><span class="lang-en">Back to app</span></a>
+      </div>
+    </header>
+
+    <main>
+      <!-- ================= はじめに ================= -->
+      <section>
+        <h2><span class="lang-ja">WorkbenchNP2 とは</span><span class="lang-en">What is WorkbenchNP2?</span></h2>
+
+        <div class="lang-ja">
+          <p>
+            WorkbenchNP2 は、ブラウザだけで PC-98 向けのアセンブラ／C を書き、実行し、
+            ソース行単位でデバッグできる実験的な開発環境です。インストールも会員登録も不要で、
+            このページを開けばすぐに使えます。
+          </p>
+          <p>
+            実行基盤には <strong>NP2kai</strong>（WebNP2 として wasm 化した Neko Project II 系エミュレータ）を
+            使い、アセンブラには <strong>NASM</strong>、C コンパイラには <strong>SmallerC</strong>、
+            動作させる OS には <strong>FreeDOS(98)</strong> を使っています。書いたコードはブラウザ内で
+            その場でアセンブル／コンパイルされ、フロッピーディスクイメージに変換されて、
+            すぐ隣の PC-98 画面で実行されます。
+          </p>
+        </div>
+        <div class="lang-en">
+          <p>
+            WorkbenchNP2 is an experimental development environment that lets you write PC-98
+            assembly or C, run it, and debug it line by line — entirely in your browser. No
+            install, no sign-up: open this page and you're ready to go.
+          </p>
+          <p>
+            It runs on <strong>NP2kai</strong> (the same Neko Project II-derived emulator core
+            used by WebNP2, compiled to wasm), assembles with <strong>NASM</strong>, compiles C
+            with <strong>SmallerC</strong>, and boots <strong>FreeDOS(98)</strong> as the guest OS.
+            Your source is assembled or compiled on the spot in your browser, packaged into a
+            floppy disk image, and run on the PC-98 screen right next to the editor.
+          </p>
+        </div>
+
+        <figure>
+          <img src="./help/overview.png" alt="WorkbenchNP2 起動直後。左にエクスプローラー、中央にエディタ、右にPC-98画面" />
+          <figcaption>
+            <span class="lang-ja">起動直後の画面。左のエクスプローラーに作業ファイル（まだ0件）とサンプルの一覧、中央にエディタ、右にPC-98画面。</span>
+            <span class="lang-en">The screen right after launch: the Explorer on the left lists your work files (empty at first) and the bundled samples, the editor is in the middle, and the PC-98 screen is on the right.</span>
+          </figcaption>
+        </figure>
+      </section>
+
+      <!-- ================= 使い方 ================= -->
+      <section>
+        <h2><span class="lang-ja">使い方</span><span class="lang-en">How to use it</span></h2>
+
+        <div class="lang-ja">
+          <ol>
+            <li>左のエクスプローラーから<strong>サンプル</strong>（<code>hello.asm</code> など）を開くか、
+              新規ファイルを作ります。</li>
+            <li>エディタ下のツールバーの<strong>実行ボタン</strong>（▷）を押すと、ビルドして
+              右の PC-98 画面で実行します。</li>
+            <li>行番号の余白（gutter）を<strong>クリック</strong>すると、その行に
+              ブレークポイントが付きます（付けられるのは実際にコードが生成される行だけです）。</li>
+            <li><strong>デバッグボタン</strong>を押すと、対象の1命令目の手前で止まった状態で
+              デバッグを開始します。左のサイドバーにレジスタとブレークポイントの一覧が出ます。</li>
+          </ol>
+        </div>
+        <div class="lang-en">
+          <ol>
+            <li>Open a <strong>sample</strong> (e.g. <code>hello.asm</code>) from the Explorer on
+              the left, or create a new file.</li>
+            <li>Press the <strong>Run button</strong> (▷) in the toolbar below the editor to
+              build and run it on the PC-98 screen on the right.</li>
+            <li><strong>Click</strong> the gutter next to a line number to set a breakpoint there
+              (only lines that actually generate code can take one).</li>
+            <li>Press the <strong>Debug button</strong> to start debugging, stopped right before
+              the target's first instruction. The sidebar on the left shows registers and your
+              breakpoint list.</li>
+          </ol>
+        </div>
+
+        <figure>
+          <img src="./help/run.png" alt="サンプルを実行し、PC-98画面に出力が表示されている状態" />
+          <figcaption>
+            <span class="lang-ja">実行した直後。PC-98画面に実行結果が表示されている。</span>
+            <span class="lang-en">Right after running: the PC-98 screen shows the program's output.</span>
+          </figcaption>
+        </figure>
+
+        <figure>
+          <img src="./help/debug.png" alt="ブレークポイントで停止し、レジスタとデバッグツールバーが見えている状態" />
+          <figcaption>
+            <span class="lang-ja">デバッグ中。ブレークポイントで停止し、左にレジスタ、エディタ上部にフローティングのデバッグツールバーが出ている。</span>
+            <span class="lang-en">While debugging: stopped at a breakpoint, with registers on the left and the floating debug toolbar over the editor.</span>
+          </figcaption>
+        </figure>
+      </section>
+
+      <!-- ================= 保存 ================= -->
+      <section>
+        <h2><span class="lang-ja">ファイルと保存</span><span class="lang-en">Files and saving</span></h2>
+
+        <div class="lang-ja">
+          <p>
+            エクスプローラーは <strong>「作業ファイル」</strong> と <strong>「サンプル」</strong> の
+            2 グループに分かれています。
+          </p>
+          <div class="note">
+            <strong>作業ファイルの保存先について</strong>: 「作業ファイル」は<strong>このブラウザの中
+            （IndexedDB）にだけ</strong>保存されます。他の端末やブラウザからは見えず、ブラウザの
+            データ（サイトデータ／キャッシュ）を消すと一緒に消えます。パソコンなど外へ持ち出したい
+            場合は、必ず<strong>ダウンロードボタン</strong>でファイルとして保存してください。
+          </div>
+          <p>
+            「サンプル」は<strong>読み取り専用</strong>です。編集して保存すると、サンプル自体は
+            書き換わらず、同じ内容が「作業ファイル」側へ<strong>複製</strong>されます
+            （例: <code>samples/hello.asm</code> を編集して保存すると <code>hello.asm</code> という
+            作業ファイルができます）。
+          </p>
+        </div>
+        <div class="lang-en">
+          <p>
+            The Explorer has two groups: <strong>"Work files"</strong> and
+            <strong>"Samples."</strong>
+          </p>
+          <div class="note">
+            <strong>Where work files live</strong>: work files are stored <strong>only inside this
+            browser</strong> (IndexedDB). They are not visible from another device or browser, and
+            they are deleted along with your browser's site data/cache. To take a file out to your
+            computer, always use the <strong>Download button</strong>.
+          </div>
+          <p>
+            Samples are <strong>read-only</strong>. Editing and saving one does not change the
+            sample itself — it <strong>copies</strong> the content into a work file instead (e.g.
+            editing and saving <code>samples/hello.asm</code> creates a work file named
+            <code>hello.asm</code>).
+          </p>
+        </div>
+      </section>
+
+      <!-- ================= 制約 ================= -->
+      <section>
+        <h2><span class="lang-ja">制約</span><span class="lang-en">Limitations</span></h2>
+
+        <div class="lang-ja">
+          <ul>
+            <li><strong>1 ファイル＝1 プログラム</strong>です。複数のファイルをまとめて
+              1 つのプログラムとしてビルドすることはできません。</li>
+            <li><code>#include</code> できるのは<strong>同梱の標準ヘッダのみ</strong>です。
+              利用者が作成した別ファイルをヘッダとして読み込むことはできません。</li>
+            <li>扱えるファイルの拡張子は <code>.asm</code> と <code>.c</code> の 2 種類だけです。</li>
+          </ul>
+        </div>
+        <div class="lang-en">
+          <ul>
+            <li><strong>One file equals one program.</strong> You cannot combine several files
+              into a single build.</li>
+            <li><code>#include</code> only works for the <strong>bundled standard headers</strong>.
+              A header file you write yourself cannot be included.</li>
+            <li>Only two file extensions are supported: <code>.asm</code> and <code>.c</code>.</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- ================= ショートカット ================= -->
+      <section>
+        <h2><span class="lang-ja">キーボードショートカット</span><span class="lang-en">Keyboard shortcuts</span></h2>
+
+        <div class="lang-ja">
+          <p>次のキーが登録されています。</p>
+        </div>
+        <div class="lang-en">
+          <p>The following keys are registered:</p>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th><span class="lang-ja">キー</span><span class="lang-en">Key</span></th>
+              <th><span class="lang-ja">動作</span><span class="lang-en">Action</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><kbd>F5</kbd></td>
+              <td><span class="lang-ja">続行 — ブレークポイントまで実行する（デバッグ中のみ）</span><span class="lang-en">Continue — run until the next breakpoint (while debugging only)</span></td>
+            </tr>
+            <tr>
+              <td><kbd>F10</kbd></td>
+              <td><span class="lang-ja">ステップオーバー — 次のソース行まで実行する。<code>call</code> は飛び越える（デバッグ中のみ）</span><span class="lang-en">Step over — run to the next source line, stepping over <code>call</code>s (while debugging only)</span></td>
+            </tr>
+            <tr>
+              <td><kbd>F11</kbd></td>
+              <td><span class="lang-ja">ステップイン — <code>call</code> なら呼び先へ入る（デバッグ中のみ）</span><span class="lang-en">Step into — enters a <code>call</code>'s target (while debugging only)</span></td>
+            </tr>
+            <tr>
+              <td><kbd>Enter</kbd></td>
+              <td><span class="lang-ja">新規ファイルのポップアップで、入力した名前でファイルを作成する</span><span class="lang-en">In the new-file popup, creates the file with the entered name</span></td>
+            </tr>
+            <tr>
+              <td><kbd>Esc</kbd></td>
+              <td><span class="lang-ja">新規ファイルのポップアップを閉じる</span><span class="lang-en">Closes the new-file popup</span></td>
+            </tr>
+            <tr>
+              <td><kbd>←</kbd> / <kbd>→</kbd></td>
+              <td><span class="lang-ja">エディタとPC-98画面の境界（スプリッタ）にフォーカスがあるとき、幅を16pxずつ調整する</span><span class="lang-en">With the editor/PC-98 splitter focused, adjusts the width by 16px per press</span></td>
+            </tr>
+            <tr>
+              <td><kbd>Home</kbd></td>
+              <td><span class="lang-ja">スプリッタまたはデバッグツールバーのつまみにフォーカスがあるとき、既定の位置へ戻す</span><span class="lang-en">With the splitter or the debug toolbar's grip focused, resets it to its default position</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- ================= クレジット ================= -->
+      <section>
+        <h2><span class="lang-ja">クレジットと権利について</span><span class="lang-en">Credits and rights</span></h2>
+
+        <div class="lang-ja">
+          <p>WorkbenchNP2 は次のソフトウェアを利用・同梱しています。</p>
+          <ul>
+            <li><strong>NP2kai</strong>（Neko Project II 系）— GPLv2 以降</li>
+            <li><strong>WebNP2</strong> — NP2kai を wasm 化し、ブラウザ向けにホストする姉妹プロジェクト</li>
+            <li><strong>FreeDOS(98)</strong> — ゲスト OS として同梱</li>
+            <li><strong>CodeMirror</strong> — エディタ（MIT）</li>
+            <li><strong>NASM</strong> — アセンブラ（BSD 2-Clause）</li>
+            <li><strong>SmallerC</strong> — C コンパイラ（BSD 2-Clause）</li>
+          </ul>
+          <p>各ライセンスの詳細は、アプリ画面下部のステータスバーにあるリンクから参照できます。</p>
+          <p>
+            <strong>PC-9801、PC-9821 は日本電気株式会社（NEC）の商標です。</strong>
+            本プロジェクトは NEC とは関係がなく、NEC による承認・提携・協賛を受けたものでもありません。
+          </p>
+          <p>
+            本プロジェクトは実行基盤として <strong>NP2kai</strong>（Neko Project II 系）を
+            ビルドし同梱しています。NP2kai および Neko Project II の作者とも関係がなく、
+            公認を受けたものではありません。
+          </p>
+        </div>
+        <div class="lang-en">
+          <p>WorkbenchNP2 uses and bundles the following software.</p>
+          <ul>
+            <li><strong>NP2kai</strong> (a Neko Project II derivative) — GPLv2 or later</li>
+            <li><strong>WebNP2</strong> — the sister project that compiles NP2kai to wasm and hosts it in the browser</li>
+            <li><strong>FreeDOS(98)</strong> — bundled as the guest OS</li>
+            <li><strong>CodeMirror</strong> — the editor (MIT)</li>
+            <li><strong>NASM</strong> — the assembler (BSD 2-Clause)</li>
+            <li><strong>SmallerC</strong> — the C compiler (BSD 2-Clause)</li>
+          </ul>
+          <p>Full license texts are linked from the status bar at the bottom of the app.</p>
+          <p>
+            <strong>PC-9801 and PC-9821 are trademarks of NEC Corporation.</strong> This project
+            has no relationship with NEC, and is not approved, affiliated with, or sponsored by
+            NEC.
+          </p>
+          <p>
+            This project builds and bundles <strong>NP2kai</strong> (a Neko Project II derivative)
+            as its execution engine. It has no relationship with the authors of NP2kai or Neko
+            Project II, and is not an officially endorsed derivative.
+          </p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="help-footer">
+      <a href="./index.html"><span class="lang-ja">アプリへ戻る</span><span class="lang-en">Back to app</span></a>
+    </footer>
+
+    <script>
+      (function () {
+        // 言語の決め方は WebPaint98 / WebNP2 の help.html と同じ:
+        // URL ?lang= ＞ localStorage ＞ navigator.language(ja判定) ＞ 既定 'en'。
+        var STORAGE_KEY = 'workbenchnp2.lang';
+
+        function readStoredLang() {
+          try {
+            var v = localStorage.getItem(STORAGE_KEY);
+            return v === 'ja' || v === 'en' ? v : null;
+          } catch (e) {
+            return null;
+          }
+        }
+
+        function resolveLang() {
+          var fromUrl = new URLSearchParams(location.search).get('lang');
+          if (fromUrl === 'ja' || fromUrl === 'en') return fromUrl;
+          var stored = readStoredLang();
+          if (stored) return stored;
+          if (navigator.language && navigator.language.toLowerCase().indexOf('ja') === 0) return 'ja';
+          return 'en';
+        }
+
+        function setLang(lang) {
+          try {
+            localStorage.setItem(STORAGE_KEY, lang);
+          } catch (e) {
+            // localStorage が使えない環境ではメモリ上の切替のみ有効。
+          }
+          document.body.setAttribute('data-lang', lang);
+          document.documentElement.setAttribute('lang', lang);
+          document.title = lang === 'ja' ? 'WorkbenchNP2 使い方' : 'WorkbenchNP2 Help';
+          var btn = document.getElementById('langToggleBtn');
+          if (btn) btn.textContent = lang === 'ja' ? 'EN' : '日本語';
+        }
+
+        var current = resolveLang();
+        setLang(current);
+
+        var btn = document.getElementById('langToggleBtn');
+        if (btn) {
+          btn.addEventListener('click', function () {
+            current = current === 'ja' ? 'en' : 'ja';
+            setLang(current);
+          });
+        }
+      })();
+    </script>
+  </body>
+</html>

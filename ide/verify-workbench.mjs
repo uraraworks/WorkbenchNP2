@@ -1819,6 +1819,50 @@ try {
   console.log('[PASS] disassembly splitter: visible in debug, 80-420px clamp, keyboard guard and restore');
   console.log(`[PASS] sidebar/status overflow: desktop ${desktopChrome.actions}/${desktopChrome.footer}px mobile ${mobileChrome.actions}/${mobileChrome.footer}px`);
   console.log(`[PASS] responsive DOM: desktop editor/screen=${Math.round(desktopLayout.editor.width)}/${Math.round(desktopLayout.screen.width)} mobile=${Math.round(mobile.editor.width)}/${Math.round(mobile.screen.width)}`);
+  // --- ヘルプページ: HTTP到達性・言語切替・画像リンク切れの検出 ---
+  const helpUrl = new URL('help.html', BASE_URL).href;
+  const helpResponse = await fetch(helpUrl);
+  assert.equal(helpResponse.status, 200, `help.htmlがHTTP 200ではありません: ${helpUrl}`);
+
+  const helpPage = await browser.newPage();
+  try {
+    await helpPage.goto(`${helpUrl}?lang=en`, { waitUntil: 'networkidle2' });
+    const helpEn = await helpPage.evaluate(() => ({
+      dataLang: document.body.getAttribute('data-lang'),
+      jaVisible: [...document.querySelectorAll('.lang-ja')].some((node) => node.offsetParent !== null),
+      enVisible: [...document.querySelectorAll('.lang-en')].some((node) => node.offsetParent !== null),
+      title: document.title,
+    }));
+    assert.equal(helpEn.dataLang, 'en', '?lang=enでbody[data-lang]がenになりません');
+    assert.equal(helpEn.jaVisible, false, '?lang=enなのに日本語(.lang-ja)が見えています');
+    assert.equal(helpEn.enVisible, true, '?lang=enなのに英語(.lang-en)が見えていません');
+    assert.equal(helpEn.title, 'WorkbenchNP2 Help', '?lang=enでtitleが英語になりません');
+
+    await helpPage.goto(`${helpUrl}?lang=ja`, { waitUntil: 'networkidle2' });
+    const helpJa = await helpPage.evaluate(() => ({
+      dataLang: document.body.getAttribute('data-lang'),
+      jaVisible: [...document.querySelectorAll('.lang-ja')].some((node) => node.offsetParent !== null),
+      enVisible: [...document.querySelectorAll('.lang-en')].some((node) => node.offsetParent !== null),
+      title: document.title,
+      imgSrcs: [...document.querySelectorAll('main img')].map((img) => img.src),
+    }));
+    assert.equal(helpJa.dataLang, 'ja', '?lang=jaでbody[data-lang]がjaになりません');
+    assert.equal(helpJa.jaVisible, true, '?lang=jaなのに日本語(.lang-ja)が見えていません');
+    assert.equal(helpJa.enVisible, false, '?lang=jaなのに英語(.lang-en)が見えています');
+    assert.equal(helpJa.title, 'WorkbenchNP2 使い方', '?lang=jaでtitleが日本語になりません');
+    // 規律: 期待値をわざと逆にしてFAILすることを実測してから戻す。
+    assert.throws(() => assert.equal(helpJa.jaVisible, false));
+
+    assert.equal(helpJa.imgSrcs.length, 3, 'help.htmlが参照する画像が3枚ではありません');
+    for (const src of helpJa.imgSrcs) {
+      const response = await fetch(src);
+      assert.equal(response.status, 200, `help.htmlの画像がHTTP 200ではありません: ${src}`);
+    }
+  } finally {
+    await helpPage.close();
+  }
+  console.log('[PASS] help.html: HTTP 200, ?lang=en/ja切替(表示/title), 参照画像3枚すべてHTTP 200');
+
   console.log(`[SHOT] ${DESKTOP_SHOT}`);
   console.log(`[SHOT] ${MOBILE_SHOT}`);
 } catch (error) {
