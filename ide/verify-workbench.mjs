@@ -303,7 +303,7 @@ try {
     await window.pc98workbench.closeTab(extra.id);
   });
   const toolButtonIds = [
-    'build', 'run', 'debug', 'debug-continue', 'debug-step-over', 'debug-step-into',
+    'run', 'debug', 'debug-continue', 'debug-step-over', 'debug-step-into',
     'debug-step-instruction', 'debug-restart', 'debug-stop',
   ];
   // Step14でデバッグ用の6ボタン(#debug-actions)はフローティング化のため.editor-toolbarの
@@ -325,7 +325,7 @@ try {
     debugHidden: document.querySelector('#debug-actions').hidden,
     buildWidth: document.querySelector('#build-actions').getBoundingClientRect().width,
   }));
-  assert.deepEqual(normalToolbar.map((button) => button.id), toolButtonIds, 'ツールバーの9ボタン構成が不一致です');
+  assert.deepEqual(normalToolbar.map((button) => button.id), toolButtonIds, 'ツールバーの8ボタン構成が不一致です');
   assert.ok(normalToolbar.every((button) => button.title && button.ariaLabel), 'ツールバーに説明の無いアイコンがあります');
   assert.ok(normalToolbar.every((button) => button.title === button.ariaLabel), 'titleとaria-labelの説明が一致しません');
   assert.ok(normalToolbar.every((button) => button.insideToolbar && button.hasSvg && button.text === ''),
@@ -356,31 +356,7 @@ try {
   assert.equal((await page.evaluate(() => window.pc98workbench.getState())).currentPath, 'hello.asm',
     'サンプル保存後、開いているタブのpathがbasenameへ揃っていません');
   assert.deepEqual(await page.$$eval('#file-tree .file-group-heading', (nodes) => nodes.map((node) => node.textContent)),
-    ['作業ファイル — このブラウザに保存', 'サンプル — 読み取り専用'], 'フォルダ未接続時のファイルツリーが2グループではありません');
-  const connectedTreeGroups = await page.evaluate(async () => {
-    const root = await navigator.storage.getDirectory();
-    for await (const [name] of root.entries()) await root.removeEntry(name, { recursive: true });
-    const file = await root.getFileHandle('tree.asm', { create: true });
-    const writable = await file.createWritable();
-    await writable.write('CPU 8086\nBITS 16\nORG 100h\nret\n');
-    await writable.close();
-    await window.pc98workbench.connectDirectory(root, { persist: false });
-    const directoryName = window.pc98workbench.getDirectoryState().name;
-    const connected = [...document.querySelectorAll('#file-tree .file-group-heading')]
-      .map((node) => node.textContent);
-    await window.pc98workbench.disconnectDirectory();
-    const disconnected = [...document.querySelectorAll('#file-tree .file-group-heading')]
-      .map((node) => node.textContent);
-    return { connected, disconnected, directoryName };
-  });
-  // フォルダ接続中は保存先グループがフォルダの1つだけになる。プロジェクト(このブラウザ)側に
-  // hello.asmが残っていても、書き込み先の判別を見た目で一意にするため出さない。
-  assert.equal(connectedTreeGroups.connected.length, 2, 'フォルダ接続時のファイルツリーが2グループ(フォルダ+サンプル)ではありません');
-  assert.equal(connectedTreeGroups.connected[0],
-    `${connectedTreeGroups.directoryName} — PCのフォルダに保存（1件）`, 'フォルダグループの見出しが期待形式ではありません');
-  assert.equal(connectedTreeGroups.connected[1], 'サンプル — 読み取り専用');
-  assert.deepEqual(connectedTreeGroups.disconnected,
-    ['作業ファイル — このブラウザに保存', 'サンプル — 読み取り専用'], 'フォルダ切断後のツリーが2グループへ戻りません');
+    ['作業ファイル — このブラウザに保存', 'サンプル — 読み取り専用'], 'ファイルツリーが2グループ(作業ファイル+サンプル)ではありません');
 
   const beforeBuildStatus = await page.evaluate(() => window.pc98workbench.getMachineStatus());
   const firstBuild = await page.evaluate(() => window.pc98workbench.buildCurrent());
@@ -695,14 +671,31 @@ try {
   assert.notEqual(tabbed.cursor?.color, 'rgb(0, 0, 0)', 'カーソル色が黒のままで暗色背景に埋もれます');
   await page.evaluate((source) => window.pc98workbench.setValue(source), beforeTab);
 
+  // --- 新規作成ポップアップ: 既定は非表示、#new-fileボタンで開くと入力へフォーカスする ---
+  const popupInitiallyHidden = await page.$eval('#new-file-popup', (node) => node.hidden);
+  assert.equal(popupInitiallyHidden, true, '新規作成ポップアップが既定で非表示ではありません');
+  await page.click('#new-file');
+  const popupOpened = await page.evaluate(() => ({
+    hidden: document.querySelector('#new-file-popup').hidden,
+    focusedId: document.activeElement.id,
+  }));
+  assert.equal(popupOpened.hidden, false, '#new-fileクリックでポップアップが開きません');
+  assert.equal(popupOpened.focusedId, 'new-path', 'ポップアップを開いたときに入力欄へフォーカスしません');
+
   const formScreen = await page.evaluate(() => window.pc98workbench.getScreenText().text);
-  await page.click('#new-path');
   await page.keyboard.type('guarded/main.asm');
   assert.equal(await page.$eval('#new-path', (node) => node.value), 'guarded/main.asm');
   const formScreenAfter = await page.evaluate(() => window.pc98workbench.getScreenText().text);
   assert.equal(formScreenAfter, formScreen, 'ファイル名の実キー入力がゲスト画面を変えました');
   assert.ok(!formScreenAfter.toLowerCase().includes('guarded/main.asm'), 'ファイル名がゲストへ漏れました');
-  await page.$eval('#new-path', (node) => { node.value = ''; });
+
+  // Escで閉じる。ポップアップの外をクリックしても閉じる（両方とも実キー/実クリックで確認）。
+  await page.keyboard.press('Escape');
+  assert.equal(await page.$eval('#new-file-popup', (node) => node.hidden), true, 'Escで新規作成ポップアップが閉じません');
+  await page.click('#new-file');
+  await page.keyboard.type('outside-click-guard.asm');
+  await page.click('#screen');
+  assert.equal(await page.$eval('#new-file-popup', (node) => node.hidden), true, '外側クリックで新規作成ポップアップが閉じません');
 
   const canvasScreen = await page.evaluate(() => window.pc98workbench.getScreenText().text);
   await page.click('#screen');
@@ -1253,7 +1246,7 @@ try {
     debugPanelVisible: !document.querySelector('#debug-panel').hidden,
   }));
   assert.deepEqual(debugToolbar.map((button) => button.id), toolButtonIds, 'デバッグ中にツールバー構成が変わりました');
-  assert.ok(debugToolbar.slice(3).every((button) => !button.disabled), 'デバッグ中に無効なデバッグ操作があります');
+  assert.ok(debugToolbar.slice(2).every((button) => !button.disabled), 'デバッグ中に無効なデバッグ操作があります');
   assert.deepEqual({
     mode: debugToolbarMode.mode, buildHidden: debugToolbarMode.buildHidden,
     debugHidden: debugToolbarMode.debugHidden, debugPanelVisible: debugToolbarMode.debugPanelVisible,
@@ -1477,15 +1470,13 @@ try {
     return {
       actions: actions.scrollWidth - actions.clientWidth,
       footer: footer.scrollWidth - footer.clientWidth,
-      folderOpen: document.querySelector('#folder-open').getBoundingClientRect().width > 0,
-      folderState: document.querySelector('#folder-state').textContent,
+      downloadButton: document.querySelector('#download-file').getBoundingClientRect().width > 0,
     };
   });
   const desktopChrome = await chromeOverflow();
   assert.ok(desktopChrome.actions <= 1, `デスクトップのサイドバー操作列がはみ出しています: ${desktopChrome.actions}px`);
   assert.ok(desktopChrome.footer <= 1, `デスクトップのステータスバーがはみ出しています: ${desktopChrome.footer}px`);
-  assert.equal(desktopChrome.folderOpen, true, 'フォルダを開くボタンが表示されていません');
-  assert.equal(desktopChrome.folderState, 'フォルダ未接続', '未接続時のフォルダ表示が期待と不一致です');
+  assert.equal(desktopChrome.downloadButton, true, 'ダウンロードボタンが表示されていません');
   await page.evaluate(() => window.pc98workbench.setSidebarVisible(false));
   await page.evaluate(() => new Promise((resolveWait) => requestAnimationFrame(resolveWait)));
 
@@ -1509,7 +1500,7 @@ try {
     const measured = {
       actions: actions.scrollWidth - actions.clientWidth,
       footer: footer.scrollWidth - footer.clientWidth,
-      folderOpen: document.querySelector('#folder-open').getBoundingClientRect().width > 0,
+      downloadButton: document.querySelector('#download-file').getBoundingClientRect().width > 0,
     };
     wb.setSidebarVisible(false);
     return measured;
@@ -1526,7 +1517,7 @@ try {
     `モバイルPC-98画面がviewportにありません: ${JSON.stringify(mobile.screen)}`);
   assert.ok(mobileChrome.actions <= 1, `モバイルのサイドバー操作列がはみ出しています: ${mobileChrome.actions}px`);
   assert.ok(mobileChrome.footer <= 1, `モバイルのステータスバーがはみ出しています: ${mobileChrome.footer}px`);
-  assert.equal(mobileChrome.folderOpen, true, 'モバイルでフォルダを開くボタンが表示されていません');
+  assert.equal(mobileChrome.downloadButton, true, 'モバイルでダウンロードボタンが表示されていません');
   assert.equal(mobileSplitterHidden, true, '375px幅でスプリッタが非表示ではありません');
   // 375px幅ではアクティビティバーは横並びの帯になる（幅=viewport相当、高さ<幅）。
   const mobileActivity = await page.$eval('#activity-bar', (node) => node.getBoundingClientRect().toJSON());
@@ -1645,7 +1636,7 @@ try {
   console.log('[PASS] delete UI: save-target entries only (not samples), delete button removes file and its open tab');
 
   // --- 削除UI: 最後の1枚のタブを削除してもタブ0枚経由の処理が例外にならず、
-  //     disconnectDirectory()と同じ考え方で同梱サンプルへ戻ること ---
+  //     同梱サンプルへ戻ること ---
   const deleteToZero = await page.evaluate(async () => {
     const wb = window.pc98workbench;
     wb.setConfirm(() => true);
@@ -1674,7 +1665,7 @@ try {
       currentPath: wb.getState().currentPath,
       currentOrigin: wb.getState().currentOrigin,
       saveStateText: document.querySelector('#save-state').textContent,
-      buildDisabled: document.querySelector('#build').disabled,
+      runDisabled: document.querySelector('#run').disabled,
     };
   });
   assert.deepEqual(deleteToZero.tabsBefore, ['scratch-delete-last.asm'], '削除前提: タブが1枚に絞れていません');
@@ -1685,9 +1676,108 @@ try {
   assert.equal(deleteToZero.currentPath, 'samples/hello.asm');
   assert.equal(deleteToZero.currentOrigin, 'sample');
   assert.ok(deleteToZero.saveStateText, 'タブ0枚経由の復帰後にステータスバー表示が空です');
-  assert.equal(deleteToZero.buildDisabled, false, 'タブ0枚経由の復帰後にビルドボタンが無効のままです');
+  assert.equal(deleteToZero.runDisabled, false, 'タブ0枚経由の復帰後に実行ボタンが無効のままです');
   await page.evaluate(() => window.pc98workbench.setConfirm((message) => window.confirm(message)));
   console.log('[PASS] delete UI: closing the last remaining tab falls back to the bundled sample without throwing');
+
+  // --- フォルダ関連UIが存在しないこと（1ファイル=1プログラム方針でローカルフォルダ機能を削除済み） ---
+  const noFolderUi = await page.evaluate(() => ({
+    folderOpen: document.querySelector('#folder-open'),
+    folderDisconnect: document.querySelector('#folder-disconnect'),
+    folderState: document.querySelector('#folder-state'),
+    connectDirectory: 'connectDirectory' in window.pc98workbench,
+    disconnectDirectory: 'disconnectDirectory' in window.pc98workbench,
+    getDirectoryState: 'getDirectoryState' in window.pc98workbench,
+  }));
+  assert.equal(noFolderUi.folderOpen, null, '#folder-openが残っています');
+  assert.equal(noFolderUi.folderDisconnect, null, '#folder-disconnectが残っています');
+  assert.equal(noFolderUi.folderState, null, '#folder-stateが残っています');
+  assert.equal(noFolderUi.connectDirectory, false, 'connectDirectory APIが残っています');
+  assert.equal(noFolderUi.disconnectDirectory, false, 'disconnectDirectory APIが残っています');
+  assert.equal(noFolderUi.getDirectoryState, false, 'getDirectoryState APIが残っています');
+  console.log('[PASS] folder UI removed: #folder-open/#folder-disconnect/#folder-state and directory APIs are gone');
+
+  // 直前のデバッグ検証でサイドバーを畳んでdebugビューにしてあるため、エクスプローラーの
+  // ボタンは描画されていない。DOM経由のクリックを測る前に必ず表示状態へ戻す。
+  await page.evaluate(() => {
+    window.pc98workbench.setSidebarView('explorer');
+    window.pc98workbench.setSidebarVisible(true);
+  });
+
+  // --- ダウンロード: downloadActiveFile()の戻り値が{name, text}で、サンプルタブでも動く ---
+  await page.evaluate(() => window.pc98workbench.openFile('sample', 'samples/hello.asm'));
+  const sampleDownload = await page.evaluate(() => window.pc98workbench.downloadActiveFile());
+  assert.equal(sampleDownload.name, 'hello.asm', 'サンプルタブのダウンロード名がbasenameではありません');
+  assert.ok(sampleDownload.text.length > 0, 'サンプルタブのダウンロード内容が空です');
+  assert.ok(sampleDownload.text.includes('Hello, PC-98!'), 'サンプルタブのダウンロード内容がソースと一致しません');
+
+  await page.evaluate(async () => {
+    await window.pc98workbench.createFile('download-check.asm');
+    window.pc98workbench.setValue('CPU 8086\nBITS 16\nORG 100h\n; download check\nret\n');
+  });
+  const workDownload = await page.evaluate(() => window.pc98workbench.downloadActiveFile());
+  assert.equal(workDownload.name, 'download-check.asm', '作業ファイルのダウンロード名がbasenameではありません');
+  assert.ok(workDownload.text.includes('; download check'), '作業ファイルのダウンロード内容がエディタと一致しません');
+
+  // ダウンロードボタンのDOM経由クリックは例外を出さない（実ファイルダウンロード自体は検証しない）。
+  let downloadClickThrew = null;
+  page.once('pageerror', (error) => { downloadClickThrew = error.message; });
+  await page.click('#download-file');
+  await new Promise((resolveWait) => setTimeout(resolveWait, 200));
+  assert.equal(downloadClickThrew, null, `#download-fileのクリックで例外が発生しました: ${downloadClickThrew}`);
+  console.log(`[PASS] download: downloadActiveFile() returns {name, text} for both sample and working tabs (${sampleDownload.name}, ${workDownload.name}), #download-file click throws nothing`);
+
+  // --- 新規作成ポップアップ: 不正拡張子はポップアップ内にエラーを出し閉じない。正しい名前は作成して閉じる ---
+  await page.click('#new-file');
+  await page.waitForFunction(() => document.querySelector('#new-file-popup').hidden === false);
+  // hidden属性だけを見ると「開いてはいるが画面外」を見逃す。実際に配置文脈と
+  // 描画位置を測る（ポップアップを.sidebar-actionsの兄弟に置くと offsetParent が
+  // body へ落ち、top:calc(100%+4px)がビューポート下端の外を指した実績がある）。
+  const popupBox = await page.evaluate(() => {
+    const popup = document.querySelector('#new-file-popup');
+    const actions = document.querySelector('.sidebar-actions');
+    const rect = popup.getBoundingClientRect();
+    const anchor = actions.getBoundingClientRect();
+    return {
+      offsetParentIsActions: popup.offsetParent === actions,
+      insideViewport: rect.top >= 0 && rect.bottom <= window.innerHeight
+        && rect.left >= 0 && rect.right <= window.innerWidth,
+      belowActions: rect.top >= anchor.bottom,
+      width: rect.width, height: rect.height,
+      inputVisible: document.querySelector('#new-path').getBoundingClientRect().height > 0,
+    };
+  });
+  assert.ok(popupBox.offsetParentIsActions,
+    '新規作成ポップアップの配置文脈が.sidebar-actionsではありません（兄弟に置くとbodyへ落ちます）');
+  assert.ok(popupBox.insideViewport, '新規作成ポップアップがビューポートの外に出ています');
+  assert.ok(popupBox.belowActions, '新規作成ポップアップがボタン列の下に出ていません');
+  assert.ok(popupBox.width > 0 && popupBox.height > 0, '新規作成ポップアップの描画サイズが0です');
+  assert.ok(popupBox.inputVisible, '新規作成ポップアップの入力欄が描画されていません');
+  await page.$eval('#new-path', (node) => { node.value = 'badext.txt'; });
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => document.querySelector('#new-file-error').textContent !== '');
+  const invalidExtState = await page.evaluate(() => ({
+    hidden: document.querySelector('#new-file-popup').hidden,
+    error: document.querySelector('#new-file-error').textContent,
+  }));
+  assert.equal(invalidExtState.hidden, false, '不正拡張子で新規作成ポップアップが閉じてしまいました');
+  assert.ok(invalidExtState.error.includes('.asm'), `不正拡張子のエラーがポップアップ内に出ていません: ${invalidExtState.error}`);
+
+  await page.$eval('#new-path', (node) => { node.value = ''; });
+  await page.keyboard.type('popup-created.asm');
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => document.querySelector('#new-file-popup').hidden === true);
+  const afterPopupCreate = await page.evaluate(() => ({
+    hidden: document.querySelector('#new-file-popup').hidden,
+    error: document.querySelector('#new-file-error').textContent,
+    currentPath: window.pc98workbench.getState().currentPath,
+    currentOrigin: window.pc98workbench.getState().currentOrigin,
+  }));
+  assert.equal(afterPopupCreate.hidden, true, '正しい名前で作成してもポップアップが閉じません');
+  assert.equal(afterPopupCreate.error, '', '作成成功後にエラー表示が残っています');
+  assert.equal(afterPopupCreate.currentPath, 'popup-created.asm', '作成したファイルが開かれていません');
+  assert.equal(afterPopupCreate.currentOrigin, 'project', '作成したファイルの保存先がこのブラウザではありません');
+  console.log('[PASS] new file popup: invalid extension keeps popup open with inline error, valid name creates/opens and closes');
 
   console.log(`[PASS] file/edit/このブラウザ(project origin)/build/run: ${output}`);
   console.log('[PASS] machine status/prewarm: one status line, asynchronous boot completed, build/debug transitions');
@@ -1699,7 +1789,7 @@ try {
   console.log('[PASS] .c auto build: HELLO-C.EXE');
   console.log('[PASS] structured error: line=4, list=true, gutter=true, wrong-line fault detected');
   console.log(`[PASS] ASM debug in editor: entry=8 next=9 bp=11 cs=${asmDebug.control.cs.toString(16).toUpperCase()} dots=1, non-mapped line rejected`);
-  console.log('[PASS] editor toolbar: 9 inline-SVG controls, accessible labels, build/debug mode swap and restore');
+  console.log('[PASS] editor toolbar: 8 inline-SVG controls, accessible labels, build/debug mode swap and restore');
   console.log('[PASS] editor tabs: reuse, text/dirty/BP isolation, guarded close, debug-target lock/highlight');
   console.log('[PASS] pane maximize: editor/machine exclusive maximize, sidebar hidden, aria state and restore');
   console.log(`[PASS] splitter: 640px at x${splitEqual.screenScale.toFixed(2)}, editor ${splitEqual.editorWidth}px / machine ${splitEqual.machineWidth}px`);

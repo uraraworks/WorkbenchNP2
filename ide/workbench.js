@@ -15,16 +15,14 @@ import { LOADER_NAME, buildSource, makeLoaderOnlyFd } from './browser-toolchain.
 import { debugMapForBuild } from './debug-map.mjs';
 import { createDebugSession } from './debug-session.mjs';
 import { CONTROL, parseLoaderControl } from './loader-control.mjs';
-import {
-  DirectoryProjectFS, clearDirectoryHandle, isDirectoryPickerAvailable, loadDirectoryHandle,
-  pickDirectory, saveDirectoryHandle,
-} from './directory-fs.mjs';
 import { IndexedDbProjectFS } from './project-fs.mjs';
 import { SAMPLE_FILES, loadSample } from './sample-manifest.mjs';
 
 const nodes = {
   fileTree: document.querySelector('#file-tree'), newPath: document.querySelector('#new-path'),
   newFile: document.querySelector('#new-file'), save: document.querySelector('#save-file'),
+  download: document.querySelector('#download-file'),
+  newFilePopup: document.querySelector('#new-file-popup'), newFileError: document.querySelector('#new-file-error'),
   saveState: document.querySelector('#save-state'), currentPath: document.querySelector('#current-path'),
   editLock: document.querySelector('#edit-lock'),
   tabStrip: document.querySelector('#tab-strip'),
@@ -33,12 +31,11 @@ const nodes = {
   activityExplorer: document.querySelector('#activity-explorer'), activityDebug: document.querySelector('#activity-debug'),
   viewExplorer: document.querySelector('#view-explorer'), viewDebug: document.querySelector('#view-debug'),
   debugEmpty: document.querySelector('#debug-empty'),
-  folderOpen: document.querySelector('#folder-open'), folderDisconnect: document.querySelector('#folder-disconnect'),
-  swapPanes: document.querySelector('#swap-panes'), folderState: document.querySelector('#folder-state'),
+  swapPanes: document.querySelector('#swap-panes'),
   editorCard: document.querySelector('.editor-card'), machineCard: document.querySelector('.machine-card'),
   workspace: document.querySelector('.workspace-grid'), splitter: document.querySelector('#splitter'),
   maximizeEditor: document.querySelector('#maximize-editor'), maximizeMachine: document.querySelector('#maximize-machine'),
-  editor: document.querySelector('#editor'), build: document.querySelector('#build'), run: document.querySelector('#run'),
+  editor: document.querySelector('#editor'), run: document.querySelector('#run'),
   editorToolbar: document.querySelector('#editor-toolbar'),
   buildActions: document.querySelector('#build-actions'), debugActions: document.querySelector('#debug-actions'),
   debugToolbarGrip: document.querySelector('#debug-toolbar-grip'),
@@ -98,8 +95,6 @@ const prewarm = new Promise((resolve, reject) => {
 prewarm.catch(() => {});
 let session;
 let disassemblyView;
-let directoryFS;
-let directoryListing;
 let panesSwapped = false;
 let maximizedPane = null;
 let sidebarVisible = false;
@@ -1050,16 +1045,12 @@ function showErrors(errors) {
   applyDiagnostics(errors);
 }
 
-const ORIGIN_LABELS = { sample: 'サンプル', project: 'このブラウザ', directory: 'フォルダ' };
+const ORIGIN_LABELS = { sample: 'サンプル', project: 'このブラウザ' };
 const FILE_TREE_EMPTY_HINT = 'まだありません。＋ で作成するとここに入ります';
 
-/** 書き込み先は「フォルダを繋いでいればフォルダ、でなければこのブラウザ」。両者を同期はしない。 */
-function writableOrigin() { return directoryFS ? 'directory' : 'project'; }
-function backendFor(origin) { return origin === 'directory' ? directoryFS : projectFS; }
-
 /**
- * 保存先グループは常に1つだけ（フォルダ接続中はフォルダ、していなければ作業ファイル）を出す。
- * 0件でも見出しは消さず、プレースホルダで「＋で作成するとここに入る」ことを示す。
+ * 保存先は「作業ファイル」ひとつだけ。0件でも見出しは消さず、
+ * プレースホルダで「＋で作成するとここに入る」ことを示す。
  * サンプルは読み取り専用の別枠として最下段に残す。
  */
 function makeGroup(label, files, origin, { deletable = false } = {}) {
@@ -1115,19 +1106,7 @@ function makeGroup(label, files, origin, { deletable = false } = {}) {
 
 async function refreshFileTree() {
   const groups = [];
-  if (directoryFS) {
-    const listing = await directoryFS.listDetailed();
-    directoryListing = listing;
-    const notes = [`${listing.files.length}件`];
-    if (listing.skipped > 0) notes.push(`対象外${listing.skipped}件`);
-    if (listing.truncated) notes.push('上限で打切り');
-    groups.push(makeGroup(
-      `${directoryFS.name} — PCのフォルダに保存（${notes.join(' / ')}）`, listing.files, 'directory',
-      { deletable: true },
-    ));
-  } else {
-    groups.push(makeGroup('作業ファイル — このブラウザに保存', await projectFS.list(), 'project', { deletable: true }));
-  }
+  groups.push(makeGroup('作業ファイル — このブラウザに保存', await projectFS.list(), 'project', { deletable: true }));
   groups.push(makeGroup('サンプル — 読み取り専用', SAMPLE_FILES, 'sample'));
   nodes.fileTree.replaceChildren(...groups);
   syncFileTreeState();
@@ -1136,7 +1115,7 @@ async function refreshFileTree() {
 /**
  * 削除確定後のタブ後始末は closeTab() を流用しない。closeTab() は「未保存の破棄確認」と
  * 「最後の1枚は閉じない」制約を持つが、削除はここまでの確認で既に確定しており、
- * 0枚になる経路も disconnectDirectory() と同じ考え方で同梱サンプルへ戻すのが自然なため。
+ * 0枚になる経路も同梱サンプルへ戻すのが自然なため。
  */
 async function forceCloseTab(id) {
   const index = tabs.findIndex((tab) => tab.id === Number(id));
@@ -1159,10 +1138,9 @@ async function forceCloseTab(id) {
 }
 
 async function deleteFile(origin, path) {
-  const backend = backendFor(origin);
-  if (!backend) throw new Error('フォルダが接続されていません');
+  if (origin !== 'project') throw new Error(`${ORIGIN_LABELS[origin] ?? origin}のファイルは削除できません`);
   if (!confirmTabClose(`${basename(path)} を削除しますか？`)) return false;
-  await backend.delete(path);
+  await projectFS.delete(path);
   for (const tab of tabs.filter((candidate) => candidate.origin === origin && candidate.path === path)) {
     await forceCloseTab(tab.id);
   }
@@ -1182,13 +1160,13 @@ async function openFile(origin, path) {
     const sample = SAMPLE_FILES.find((entry) => entry.path === path);
     if (!sample) throw new Error(`${path}は同梱サンプルではありません`);
     content = await loadSample(sample);
-  } else {
-    const backend = backendFor(origin);
-    if (!backend) throw new Error('フォルダが接続されていません');
-    const record = await backend.read(path);
+  } else if (origin === 'project') {
+    const record = await projectFS.read(path);
     if (!record) throw new Error(`${path}が${ORIGIN_LABELS[origin]}にありません`);
     content = record.content;
     encoding = record.encoding ?? 'utf-8';
+  } else {
+    throw new Error(`${origin}は不明な保存先です`);
   }
   const tab = {
     id: nextTabId++, origin, path, encoding, text: content, savedText: content,
@@ -1214,9 +1192,9 @@ async function saveFile() {
   // 元のpath(例: samples/hello.asm)のまま複製すると保存先グループに同名が2箇所並ぶので、
   // basename(hello.asm)へ変えて保存する。同名が既にあれば上書きでよい。
   const wasSample = tab.origin === 'sample';
-  const target = wasSample ? writableOrigin() : tab.origin;
+  const target = wasSample ? 'project' : tab.origin;
   const targetPath = wasSample ? basename(tab.path) : tab.path;
-  await backendFor(target).write(targetPath, tab.text);
+  await projectFS.write(targetPath, tab.text);
   tab.origin = target;
   tab.path = targetPath;
   tab.encoding = 'utf-8';
@@ -1235,15 +1213,14 @@ async function createFile(path) {
   const ext = extensionFor(path);
   if (ext !== 'asm' && ext !== 'c') throw new Error('新規ファイルは .asm または .c にしてください');
   const template = ext === 'asm' ? 'CPU 8086\nBITS 16\nORG 100h\n\n' : 'int main(void)\n{\n  return 0;\n}\n';
-  const target = writableOrigin();
-  await backendFor(target).write(path, template);
-  await openFile(target, path);
+  await projectFS.write(path, template);
+  await openFile('project', path);
 }
 
 async function buildCurrent() {
   const tab = activeTab();
   if (!tab) throw new Error('ビルド対象がありません');
-  nodes.build.disabled = true; nodes.run.disabled = true; nodes.debug.disabled = true;
+  nodes.run.disabled = true; nodes.debug.disabled = true;
   nodes.buildStatus.textContent = `${tab.path} をビルド中…`; nodes.buildStatus.classList.remove('error');
   setMachineStatus(`${tab.path} をビルド中です`);
   clearDiagnostics();
@@ -1273,7 +1250,7 @@ async function buildCurrent() {
     setMachineStatus('ビルド完了。実行できます');
     return result;
   } finally {
-    nodes.build.disabled = false; nodes.run.disabled = false; nodes.debug.disabled = false;
+    nodes.run.disabled = false; nodes.debug.disabled = false;
   }
 }
 
@@ -1673,59 +1650,53 @@ async function stopDebug() {
   return screen;
 }
 
-function setDirectoryLabel(message) {
-  nodes.folderState.textContent = message;
-  nodes.folderDisconnect.hidden = !directoryFS;
-}
-
 /**
- * ローカルフォルダをそのまま作業場所にする。IndexedDBとは同期せず、
- * 接続中は保存も新規作成もフォルダ側だけへ行う（1プロジェクト=1バックエンド）。
+ * 書いたコードを外へ持ち出す唯一の手段。アクティブなタブの内容をbasenameのまま
+ * UTF-8でBlobダウンロードする。サンプルタブも読み取り専用のまま落とせる。
+ * タブが無ければ何もしない（無害に戻る）。
  */
-async function connectDirectory(handle, { persist = true } = {}) {
-  const candidate = new DirectoryProjectFS(handle);
-  const permission = await candidate.ensurePermission('readwrite', { request: true });
-  if (permission !== 'granted') throw new Error(`フォルダの読み書き許可がありません: ${permission}`);
-  directoryFS = candidate;
-  if (persist) await saveDirectoryHandle(handle).catch(() => {});
-  const listing = await directoryFS.listDetailed();
-  directoryListing = listing;
-  const notes = [`${listing.files.length}件`];
-  if (listing.skipped > 0) notes.push(`対象外${listing.skipped}件`);
-  if (listing.truncated) notes.push('上限で打切り');
-  setDirectoryLabel(`${directoryFS.name}（${notes.join(' / ')}）`);
-  await refreshFileTree();
-  return { name: directoryFS.name, permission, ...listing };
+function downloadActiveFile() {
+  const tab = activeTab();
+  if (!tab) return null;
+  const name = tabName(tab);
+  const text = tab.id === activeTabId ? currentText() : tab.text;
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = name;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  return { name, text };
 }
 
-async function disconnectDirectory() {
-  directoryFS = undefined;
-  directoryListing = undefined;
-  await clearDirectoryHandle().catch(() => {});
-  setDirectoryLabel('フォルダ未接続');
-  // 開いていたのがフォルダのファイルなら、参照先を失うので同梱サンプルへ戻す。
-  if (activeTab()?.origin === 'directory') await openFile('sample', 'samples/hello.asm');
-  else await refreshFileTree();
+let newFilePopupOpen = false;
+
+function openNewFilePopup() {
+  newFilePopupOpen = true;
+  nodes.newFilePopup.hidden = false;
+  nodes.newPath.value = '';
+  nodes.newFileError.textContent = '';
+  nodes.newPath.focus();
 }
 
-/** 再読込後のハンドルは許可が prompt へ落ちることがあり、再許可には利用者ジェスチャが要る。 */
-async function restoreDirectory() {
-  if (!isDirectoryPickerAvailable()) { setDirectoryLabel('このブラウザはフォルダを開けません'); return; }
-  const handle = await loadDirectoryHandle().catch(() => null);
-  if (!handle) { setDirectoryLabel('フォルダ未接続'); return; }
-  const stored = new DirectoryProjectFS(handle);
-  if (await stored.ensurePermission('readwrite') === 'granted') {
-    await connectDirectory(handle, { persist: false });
-    return;
+function closeNewFilePopup() {
+  newFilePopupOpen = false;
+  nodes.newFilePopup.hidden = true;
+  nodes.newFileError.textContent = '';
+}
+
+/** バリデーションエラーはポップアップ内に出し、閉じない。成功時だけ閉じて開く。 */
+async function confirmNewFile() {
+  const path = nodes.newPath.value.trim();
+  try {
+    await createFile(path);
+    closeNewFilePopup();
+  } catch (error) {
+    nodes.newFileError.textContent = error.message;
   }
-  setDirectoryLabel(`${handle.name}（再接続には許可が必要）`);
-  nodes.folderOpen.dataset.restoreHandle = 'true';
-}
-
-async function openFolder() {
-  const stored = nodes.folderOpen.dataset.restoreHandle === 'true' ? await loadDirectoryHandle() : null;
-  delete nodes.folderOpen.dataset.restoreHandle;
-  return connectDirectory(stored ?? await pickDirectory());
 }
 
 async function initialize() {
@@ -1741,23 +1712,33 @@ async function initialize() {
   freeDos = new Uint8Array(await response.arrayBuffer());
   // ローダだけのB:を入れて起動を始めるが、エディタ初期化は完了を待たずに進める。
   startPrewarm();
-  // フォルダ復元に失敗しても、同梱サンプルだけで動く状態までは必ず立ち上げる。
-  await restoreDirectory().catch((error) => setDirectoryLabel(`フォルダ復元に失敗: ${error.message}`));
   await refreshFileTree();
   await openFile('sample', 'samples/hello.asm');
   nodes.buildStatus.textContent = '準備完了';
 }
 
-nodes.newFile.addEventListener('click', () => createFile(nodes.newPath.value).catch((error) => showErrors([{ stage: 'input', line: 0, message: error.message }])));
+nodes.newFile.addEventListener('click', () => openNewFilePopup());
+nodes.newPath.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    confirmNewFile();
+  } else if (event.key === 'Escape') {
+    event.preventDefault();
+    closeNewFilePopup();
+  }
+});
+document.addEventListener('click', (event) => {
+  if (!newFilePopupOpen) return;
+  if (nodes.newFilePopup.contains(event.target) || nodes.newFile.contains(event.target)) return;
+  closeNewFilePopup();
+});
 nodes.save.addEventListener('click', () => saveFile().catch((error) => showErrors([{ stage: 'save', line: 0, message: error.message }])));
-nodes.folderOpen.addEventListener('click', () => openFolder().catch((error) => setDirectoryLabel(error.message)));
-nodes.folderDisconnect.addEventListener('click', () => disconnectDirectory().catch((error) => setDirectoryLabel(error.message)));
+nodes.download.addEventListener('click', () => downloadActiveFile());
 nodes.activityExplorer.addEventListener('click', () => handleActivityClick('explorer'));
 nodes.activityDebug.addEventListener('click', () => handleActivityClick('debug'));
 nodes.swapPanes.addEventListener('click', () => setPanesSwapped(!panesSwapped));
 nodes.maximizeEditor.addEventListener('click', () => setMaximizedPane(maximizedPane === 'editor' ? null : 'editor'));
 nodes.maximizeMachine.addEventListener('click', () => setMaximizedPane(maximizedPane === 'machine' ? null : 'machine'));
-nodes.build.addEventListener('click', () => buildCurrent());
 nodes.run.addEventListener('click', () => runCurrent());
 nodes.debug.addEventListener('click', () => startDebug().catch((error) => setDebugStatus(error.message, true)));
 nodes.continue.addEventListener('click', () => continueOrRun().catch((error) => setDebugStatus(error.message, true)));
@@ -1863,12 +1844,7 @@ window.pc98workbench = {
     };
   },
   listProjectFiles: () => projectFS.list(),
-  connectDirectory, disconnectDirectory,
-  getDirectoryState: () => ({
-    available: isDirectoryPickerAvailable(), connected: Boolean(directoryFS),
-    name: directoryFS?.name ?? null, fileCount: directoryListing?.files.length ?? 0,
-    truncated: directoryListing?.truncated ?? false, skipped: directoryListing?.skipped ?? 0,
-  }),
+  downloadActiveFile,
   getScreenText: () => engine.getScreenText(),
   getLayout: () => ({
     editor: nodes.editor.getBoundingClientRect().toJSON(),

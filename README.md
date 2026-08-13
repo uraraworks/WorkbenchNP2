@@ -6,7 +6,8 @@
 
 ## 現状（2026-08-06）
 
-**ASM/Cのビルド・実行・ソース行デバッグに加え、IDE UI第2段（エディタ上でのBP・停止行・行送り）と、ローカルフォルダを直接開く編集・ビルド・実行まで到達。**
+**ASM/Cのビルド・実行・ソース行デバッグに加え、IDE UI第2段（エディタ上でのBP・停止行・行送り）まで到達。
+「1ファイル＝1プログラム」の実験的プロジェクトとして公開する方針のため、フォルダ階層は作らない。**
 
 ```
 .asm ──[wasm NASM]──> .COM ──[FAT12 書き込み]──> .xdf ──[WebNP2]──> PC-98 で実行
@@ -42,8 +43,7 @@ docs/
 ide/                CodeMirrorエディタ＋WebNP2実行画面
   index.html          実用workbench（編集・IndexedDB保存・ビルド・実行・デバッグ）
   verify-loader.mjs   workbenchのローダ状態・再実行・終了コード検証
-  project-fs.mjs      保存先を差し替え可能にするProjectFS抽象
-  directory-fs.mjs    File System AccessのディレクトリハンドルをProjectFSとして扱う
+  project-fs.mjs      IndexedDbProjectFS(このブラウザに保存)を実装するProjectFS抽象
   debug-map.mjs       ASM listing / C source mapを1つの行マップ契約へ寄せる層
   debug-session.mjs   4B01hローダ経由の起動・行BP・行送りを保持するセッション
   vendor/codemirror/  固定版bundle・17パッケージのLICENSE・再現build.sh
@@ -73,12 +73,20 @@ addressは近傍行へ寄せず`null`を返す。誤った行を示さないこ�
 ## IDE UI
 
 `ide/index.html`はCodeMirror 6の行番号・gutter付きエディタで、同梱サンプルまたは
-IndexedDBプロジェクト、ローカルフォルダを開き、新規作成・編集・保存できる。保存APIは
-`ProjectFS`として切り離し、`IndexedDbProjectFS`と`DirectoryProjectFS`を実装する。
+IndexedDBプロジェクトのファイルを開き、新規作成・編集・保存できる。保存APIは
+`ProjectFS`として切り離し、`IndexedDbProjectFS`を実装する。「1ファイル＝1プログラム」の
+実験的プロジェクトとして公開する方針のため、フォルダ階層やローカルフォルダ接続機能は持たない。
+書いたコードを外へ持ち出す手段は、サイドバーのダウンロードボタン（アクティブなタブの内容を
+basenameのファイル名でUTF-8のまま保存する）である。
 
-操作ボタンはエディタ直下の1本のツールバーへまとめ、通常時のビルド／実行／デバッグ操作と、
-デバッグ開始後の続行／ステップ／再実行／停止操作をモードに応じて入れ替える。9個のアイコンは
-環境依存の記号文字を使わないinline SVGで、意味は同一文言の`title`と`aria-label`で示す。
+新規作成は`#new-file`ボタンを押すとポップアップが開き、ファイル名（拡張子のみ、パスなし）を
+入力してEnterで確定する。Escまたはポップアップの外側クリックで閉じる。`.asm`/`.c`以外の
+拡張子はポップアップ内にエラーを表示し、ポップアップを閉じない。
+
+操作ボタンはエディタ直下の1本のツールバーへまとめ、通常時の実行／デバッグ操作と、
+デバッグ開始後の続行／ステップ／再実行／停止操作をモードに応じて入れ替える。ビルドは
+実行・デバッグが自動で行うため専用ボタンは無く、ビルド状況表示（`#build-status`）だけが残る。
+8個のアイコンは環境依存の記号文字を使わないinline SVGで、意味は同一文言の`title`と`aria-label`で示す。
 
 ページ・作業領域・タブ・ステータスバーはVS CodeのDark Modernに統一し、ヘッダだけはWebNP2の
 実CSSから採取した黒基調を維持する。テーマ色は`ide/workbench.css`の`:root`へ
@@ -89,29 +97,6 @@ IndexedDBプロジェクト、ローカルフォルダを開き、新規作成�
 ステータスバーへ表示する。エディタとPC-98画面は各見出しのボタンで一時的に片方だけを最大化できる。
 両ペイン間のスプリットバーでも幅を調整でき、PC-98画面を等倍（640px）まで広げられる。
 デバッグ中はエディタと逆アセンブルの間にもスプリットバーが現れ、逆アセンブルの高さを調整できる。
-
-### ローカルフォルダ（File System Access）
-
-`ide/index.html`の「フォルダを開く」は`showDirectoryPicker({mode:'readwrite'})`を呼び、選んだフォルダを
-そのまま作業場所にする。IndexedDBとフォルダは同期しない。1プロジェクトは1バックエンドであり、
-接続中の保存と新規作成はフォルダ側だけへ行う。
-
-ディレクトリハンドルはlocalStorageへ保存できないため、IndexedDBの`PC98DevDirectoryHandle`へ
-構造化クローンで保存する。再読込時は`queryPermission`が`granted`ならそのまま繋ぎ直す。
-`prompt`へ落ちていれば「フォルダを再接続」ボタンを表示し、利用者ジェスチャの中で
-`requestPermission`を呼ぶ。
-
-走査は深さ8・2000ファイルを上限とし、`.`で始まるエントリ（`.git`等）は辿らない。
-拡張子が`asm/inc/mac/c/h/txt/md`以外のファイルは対象外として除外する。除外件数と打切りの有無は
-呼び出し側へ返し、黙って減らさない。ファイル一覧のoptgroupにも件数を表示する。
-
-読み込みはUTF-8で復号し、失敗したらShift_JISで復号して`encoding`を返す。当時のSJIS資産を
-そのまま開ける。書き込みは常にUTF-8である。既存ファイルがUTF-8として復号できない場合は
-Shift_JISと判定し、明示指定`{overwriteEncoding:true}`が無ければ保存を中止する。当時資産を
-黙って不可逆変換しないためである。
-
-`showDirectoryPicker`の無いブラウザではボタンに「このブラウザはフォルダを開けません」と表示し、
-IndexedDBバックエンドだけで従来どおり動く。
 
 拡張子から`.asm`／`.c`を判別し、Node CLIと共有する`assemble-core.mjs`／`compile-core.mjs`へ渡す。
 成功時はFAT12 FDを生成してWebNP2上のFreeDOSで実行する。失敗時は構造化エラーのstage・行・本文を
@@ -185,20 +170,11 @@ WebNP2から埋め込み成果物とコアを同期してから、実ブラウ�
 ../WebNP2/scripts/export-embed.sh
 node ide/verify-workbench.mjs
 node ide/verify-loader.mjs
-node ide/verify-directory-fs.mjs
 node ide/verify-debug-map.mjs
 ```
 
 `ide/verify-loader.mjs`はworkbenchで、ロード済み対象のビルド出力一致、ローダ終了直前の内部状態、
 同一DOSセッションで2本目の終了コード37がCOMMAND.COMへ伝播することを確認する。
-
-`ide/verify-directory-fs.mjs`は、ネイティブダイアログのため自動化できない`showDirectoryPicker()`の代わりに、
-OPFSの`navigator.storage.getDirectory()`が返す本物の`FileSystemDirectoryHandle`を使い、モックなしで13項目を
-検証する。一覧の並び、拡張子絞り込み、ドットディレクトリ除外、除外件数、深さ上限、件数上限の打切り報告、
-Shift_JIS復号とUTF-8判定、存在しないパスの`null`、Shift_JIS上書きガードと明示上書き、中間ディレクトリ生成と
-往復一致、deleteの冪等性、`..`を含むパスの拒否、OPFSハンドルの権限を確認する。workbench統合では接続、
-フォルダのファイルを開く、ビルド、実行画面の出力、`saveFile()`後のハンドルからの直接読取り、切断までを確認する。
-出力を1文字変えるとFAILすることも確認する。
 
 workbench検証はASM/Cのエントリ停止、行BP、行送り、レジスタ・逆アセンブル表示とTVRAM出力を確認する。
 ローダ検証は無改変helloのロードバイト、EXEC復帰2回、子終了コードと同一セッションでの再実行、
