@@ -258,7 +258,7 @@
       </div>
       <div class="help-header-actions">
         <button id="langToggleBtn" type="button">EN</button>
-        <a href="./index.html"><span class="lang-ja">アプリへ戻る</span><span class="lang-en">Back to app</span></a>
+        <a class="open-app" href="./index.html"><span class="lang-ja">アプリを開く</span><span class="lang-en">Open the app</span></a>
       </div>
     </header>
 
@@ -520,7 +520,7 @@
     </main>
 
     <footer class="help-footer">
-      <a href="./index.html"><span class="lang-ja">アプリへ戻る</span><span class="lang-en">Back to app</span></a>
+      <a class="open-app" href="./index.html"><span class="lang-ja">アプリを開く</span><span class="lang-en">Open the app</span></a>
     </footer>
 
     <script>
@@ -528,6 +528,16 @@
         // 言語の決め方は WebPaint98 / WebNP2 の help.html と同じ:
         // URL ?lang= ＞ localStorage ＞ navigator.language(ja判定) ＞ 既定 'en'。
         var STORAGE_KEY = 'workbenchnp2.lang';
+
+        // アプリからは別タブで開かれるので、そこで「アプリを開く」を押すと
+        // アプリのタブが2枚になる。来訪経路が分かれば導線を消せるが、
+        // アプリ側のリンクに rel="noopener noreferrer" を付けている以上
+        // window.opener も document.referrer も空になり判別できない。
+        // そのためアプリ側が ?from=app を明示的に渡し、ここではそれだけを見る。
+        if (new URLSearchParams(location.search).get('from') === 'app') {
+          var links = document.querySelectorAll('.open-app');
+          for (var i = 0; i < links.length; i++) links[i].hidden = true;
+        }
 
         function readStoredLang() {
           try {

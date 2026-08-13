@@ -149,7 +149,12 @@ try {
   for (const [label, link] of [['フッタの「使い方」リンク', shell.footerHelpLink], ['ヘッダの「?」ボタン', shell.headerHelpBtn]]) {
     assert.ok(link, `${label}が見つかりません`);
     assert.equal(new URL(link.href).pathname.endsWith('/help.html'), true, `${label}のhrefがhelp.htmlを指していません: ${link.href}`);
-    assert.equal(new URL(link.href).search, '?lang=ja', `${label}のhrefが?lang=jaを指していません: ${link.href}`);
+    const params = new URL(link.href).searchParams;
+    assert.equal(params.get('lang'), 'ja', `${label}のhrefがlang=jaを指していません: ${link.href}`);
+    // help.html側は「アプリから開かれたか」を自力で判別できない(rel="noopener noreferrer"を
+    // 付けているのでopenerもreferrerも空)。アプリ側がfrom=appを明示的に渡すことで、
+    // ヘルプの「アプリを開く」導線を消し、アプリのタブが2枚になるのを防いでいる。
+    assert.equal(params.get('from'), 'app', `${label}のhrefにfrom=appがありません: ${link.href}`);
     assert.equal(link.target, '_blank', `${label}がtarget="_blank"ではありません`);
     const relTokens = link.rel.split(/\s+/).filter(Boolean);
     assert.ok(relTokens.includes('noopener'), `${label}のrelにnoopenerがありません`);
@@ -1903,6 +1908,29 @@ try {
       const response = await fetch(src);
       assert.equal(response.status, 200, `help.htmlの画像がHTTP 200ではありません: ${src}`);
     }
+
+    // アプリから開いたとき(from=app)は「アプリを開く」導線を出さない。出すと
+    // 押した人のアプリのタブが2枚になる。直接来たときは唯一の入口なので必ず出す。
+    // hidden属性ではなく実際の描画で測る(offsetParentがnull=描画されていない)。
+    const readOpenAppLinks = () => helpPage.evaluate(() => {
+      const links = [...document.querySelectorAll('.open-app')];
+      return {
+        count: links.length,
+        rendered: links.filter((link) => link.offsetParent !== null).length,
+      };
+    });
+    await helpPage.goto(`${helpUrl}?lang=ja&from=app`, { waitUntil: 'domcontentloaded' });
+    const fromApp = await readOpenAppLinks();
+    assert.ok(fromApp.count > 0, '.open-app導線がhelp.htmlにありません');
+    assert.equal(fromApp.rendered, 0,
+      `from=appで開いたのに「アプリを開く」が${fromApp.rendered}件描画されています（アプリのタブが2枚になります）`);
+
+    await helpPage.goto(`${helpUrl}?lang=ja`, { waitUntil: 'domcontentloaded' });
+    const direct = await readOpenAppLinks();
+    assert.equal(direct.rendered, direct.count,
+      '直接開いたのに「アプリを開く」が描画されていません（アプリへの入口が無くなります）');
+    // 規律: 陽性対照。判定が常に真になっていないことを、逆の期待値で実測してから戻す。
+    assert.throws(() => assert.equal(direct.rendered, 0));
   } finally {
     await helpPage.close();
   }
