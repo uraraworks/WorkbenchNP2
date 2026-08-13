@@ -801,7 +801,8 @@ const editor = new EditorView({
   parent: nodes.editor,
 });
 
-function tabName(tab) { return tab.path.split(/[\\/]/).pop() ?? tab.path; }
+function basename(path) { return path.split(/[\\/]/).pop() ?? path; }
+function tabName(tab) { return basename(tab.path); }
 
 function makeCloseIcon() {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -1049,38 +1050,70 @@ function showErrors(errors) {
   applyDiagnostics(errors);
 }
 
-const ORIGIN_LABELS = { sample: 'サンプル', project: 'IndexedDB', directory: 'フォルダ' };
+const ORIGIN_LABELS = { sample: 'サンプル', project: 'このブラウザ', directory: 'フォルダ' };
+const FILE_TREE_EMPTY_HINT = 'まだありません。＋ で作成するとここに入ります';
 
-/** 書き込み先は「フォルダを繋いでいればフォルダ、でなければIndexedDB」。両者を同期はしない。 */
+/** 書き込み先は「フォルダを繋いでいればフォルダ、でなければこのブラウザ」。両者を同期はしない。 */
 function writableOrigin() { return directoryFS ? 'directory' : 'project'; }
 function backendFor(origin) { return origin === 'directory' ? directoryFS : projectFS; }
 
-async function refreshFileTree() {
-  const makeGroup = (label, files, origin) => {
-    if (files.length === 0) return null;
-    const group = document.createElement('div');
-    group.className = 'file-group';
-    group.setAttribute('role', 'group');
-    const heading = document.createElement('div');
-    heading.className = 'file-group-heading';
-    heading.textContent = label;
-    group.append(heading);
-    for (const file of files) {
-      const entry = document.createElement('button');
-      entry.type = 'button';
-      entry.className = 'file-entry';
-      entry.setAttribute('role', 'treeitem');
-      entry.dataset.origin = origin;
-      entry.dataset.path = file.path;
-      entry.title = `${ORIGIN_LABELS[origin]} / ${file.path}`;
-      entry.textContent = file.path;
-      entry.addEventListener('click', () => {
-        openFile(origin, file.path).catch((error) => setMachineStatus(error.message, true));
-      });
-      group.append(entry);
-    }
+/**
+ * 保存先グループは常に1つだけ（フォルダ接続中はフォルダ、していなければ作業ファイル）を出す。
+ * 0件でも見出しは消さず、プレースホルダで「＋で作成するとここに入る」ことを示す。
+ * サンプルは読み取り専用の別枠として最下段に残す。
+ */
+function makeGroup(label, files, origin, { deletable = false } = {}) {
+  const group = document.createElement('div');
+  group.className = 'file-group';
+  group.setAttribute('role', 'group');
+  const heading = document.createElement('div');
+  heading.className = 'file-group-heading';
+  heading.textContent = label;
+  group.append(heading);
+  if (files.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'file-group-empty';
+    empty.textContent = FILE_TREE_EMPTY_HINT;
+    group.append(empty);
     return group;
-  };
+  }
+  for (const file of files) {
+    const row = document.createElement('div');
+    row.className = 'file-row';
+    const entry = document.createElement('button');
+    entry.type = 'button';
+    entry.className = 'file-entry';
+    entry.setAttribute('role', 'treeitem');
+    entry.dataset.origin = origin;
+    entry.dataset.path = file.path;
+    entry.title = `${ORIGIN_LABELS[origin]} / ${file.path}`;
+    // サンプルはbasenameだけ表示する（フルパスはtitleに残す）。保存先グループは
+    // 常にフラットな1ファイル=1プログラム構成なのでpathがそのままbasenameになる。
+    entry.textContent = origin === 'sample' ? basename(file.path) : file.path;
+    entry.addEventListener('click', () => {
+      openFile(origin, file.path).catch((error) => setMachineStatus(error.message, true));
+    });
+    row.append(entry);
+    if (deletable) {
+      const name = basename(file.path);
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'file-delete';
+      remove.title = `${name} を削除`;
+      remove.setAttribute('aria-label', `${name} を削除`);
+      remove.textContent = '×';
+      remove.addEventListener('click', (event) => {
+        event.stopPropagation();
+        deleteFile(origin, file.path).catch((error) => setMachineStatus(error.message, true));
+      });
+      row.append(remove);
+    }
+    group.append(row);
+  }
+  return group;
+}
+
+async function refreshFileTree() {
   const groups = [];
   if (directoryFS) {
     const listing = await directoryFS.listDetailed();
@@ -1088,12 +1121,53 @@ async function refreshFileTree() {
     const notes = [`${listing.files.length}件`];
     if (listing.skipped > 0) notes.push(`対象外${listing.skipped}件`);
     if (listing.truncated) notes.push('上限で打切り');
-    groups.push(makeGroup(`フォルダ ${directoryFS.name}（${notes.join(' / ')}）`, listing.files, 'directory'));
+    groups.push(makeGroup(
+      `${directoryFS.name} — PCのフォルダに保存（${notes.join(' / ')}）`, listing.files, 'directory',
+      { deletable: true },
+    ));
+  } else {
+    groups.push(makeGroup('作業ファイル — このブラウザに保存', await projectFS.list(), 'project', { deletable: true }));
   }
-  groups.push(makeGroup('IndexedDB プロジェクト', await projectFS.list(), 'project'));
-  groups.push(makeGroup('同梱サンプル', SAMPLE_FILES, 'sample'));
-  nodes.fileTree.replaceChildren(...groups.filter(Boolean));
+  groups.push(makeGroup('サンプル — 読み取り専用', SAMPLE_FILES, 'sample'));
+  nodes.fileTree.replaceChildren(...groups);
   syncFileTreeState();
+}
+
+/**
+ * 削除確定後のタブ後始末は closeTab() を流用しない。closeTab() は「未保存の破棄確認」と
+ * 「最後の1枚は閉じない」制約を持つが、削除はここまでの確認で既に確定しており、
+ * 0枚になる経路も disconnectDirectory() と同じ考え方で同梱サンプルへ戻すのが自然なため。
+ */
+async function forceCloseTab(id) {
+  const index = tabs.findIndex((tab) => tab.id === Number(id));
+  if (index < 0) return false;
+  const tab = tabs[index];
+  if (tab.id === debugTabId && session?.isStarted()) await stopDebug();
+  tabs.splice(index, 1);
+  if (tabs.length === 0) {
+    activeTabId = undefined;
+    await openFile('sample', 'samples/hello.asm');
+    return true;
+  }
+  if (tab.id === activeTabId) {
+    activeTabId = undefined;
+    activateTab(tabs[Math.min(index, tabs.length - 1)].id);
+  } else {
+    renderTabs();
+  }
+  return true;
+}
+
+async function deleteFile(origin, path) {
+  const backend = backendFor(origin);
+  if (!backend) throw new Error('フォルダが接続されていません');
+  if (!confirmTabClose(`${basename(path)} を削除しますか？`)) return false;
+  await backend.delete(path);
+  for (const tab of tabs.filter((candidate) => candidate.origin === origin && candidate.path === path)) {
+    await forceCloseTab(tab.id);
+  }
+  await refreshFileTree();
+  return true;
 }
 
 async function openFile(origin, path) {
@@ -1137,9 +1211,14 @@ async function saveFile() {
   if (!tab) throw new Error('保存対象がありません');
   tab.text = currentText();
   // サンプルは読み取り専用なので、保存すると書き込み可能なバックエンドへ複製される。
-  const target = tab.origin === 'sample' ? writableOrigin() : tab.origin;
-  await backendFor(target).write(tab.path, tab.text);
+  // 元のpath(例: samples/hello.asm)のまま複製すると保存先グループに同名が2箇所並ぶので、
+  // basename(hello.asm)へ変えて保存する。同名が既にあれば上書きでよい。
+  const wasSample = tab.origin === 'sample';
+  const target = wasSample ? writableOrigin() : tab.origin;
+  const targetPath = wasSample ? basename(tab.path) : tab.path;
+  await backendFor(target).write(targetPath, tab.text);
   tab.origin = target;
+  tab.path = targetPath;
   tab.encoding = 'utf-8';
   tab.savedText = tab.text;
   renderTabs();

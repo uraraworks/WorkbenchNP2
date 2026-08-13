@@ -276,9 +276,15 @@ try {
   const initialTree = await page.evaluate(() => ({
     groups: [...document.querySelectorAll('#file-tree .file-group-heading')].map((node) => node.textContent),
     samples: document.querySelectorAll('#file-tree .file-entry[data-origin="sample"]').length,
+    workEmptyPlaceholder: document.querySelector('#file-tree .file-group')?.querySelector('.file-group-empty')?.textContent,
+    sampleEntryText: document.querySelector('#file-tree .file-entry[data-origin="sample"][data-path="samples/hello.asm"]')?.textContent,
   }));
-  assert.deepEqual(initialTree.groups, ['同梱サンプル'], '空のファイルグループが表示されています');
+  assert.deepEqual(initialTree.groups, ['作業ファイル — このブラウザに保存', 'サンプル — 読み取り専用'],
+    '起動直後の保存先グループ(0件でも表示)とサンプルグループの構成が不一致です');
+  assert.equal(initialTree.workEmptyPlaceholder, 'まだありません。＋ で作成するとここに入ります',
+    '0件の作業ファイルグループにプレースホルダ行がありません');
   assert.ok(initialTree.samples > 1, '同梱サンプルがファイルツリーへ出ていません');
+  assert.equal(initialTree.sampleEntryText, 'hello.asm', 'サンプルのエントリ表示がbasenameになっていません');
   await page.click('#file-tree .file-entry[data-origin="sample"][data-path="samples/second-run.asm"]');
   await page.waitForFunction(() => window.pc98workbench.getState().currentPath === 'samples/second-run.asm');
   const selectedTreeEntry = await page.evaluate(() => ({
@@ -342,11 +348,15 @@ try {
   })), { inFooter: true, dirty: true }, 'ステータスバーへ未保存状態が反映されません');
   await page.evaluate(() => window.pc98workbench.saveFile());
   const files = await page.evaluate(() => window.pc98workbench.listProjectFiles());
+  // サンプルの保存は複製元のsamples/hello.asmではなくbasenameのhello.asmへ入る
+  // (エクスプローラーに同名が2箇所並ぶのを避けるため)。
   assert.equal(files.length, 1);
-  assert.equal(files[0].path, 'samples/hello.asm');
+  assert.equal(files[0].path, 'hello.asm', 'サンプル保存の保存先パスがbasenameになっていません');
   assert.ok(files[0].content.includes(output));
+  assert.equal((await page.evaluate(() => window.pc98workbench.getState())).currentPath, 'hello.asm',
+    'サンプル保存後、開いているタブのpathがbasenameへ揃っていません');
   assert.deepEqual(await page.$$eval('#file-tree .file-group-heading', (nodes) => nodes.map((node) => node.textContent)),
-    ['IndexedDB プロジェクト', '同梱サンプル'], 'フォルダ未接続時のファイルツリーが2グループではありません');
+    ['作業ファイル — このブラウザに保存', 'サンプル — 読み取り専用'], 'フォルダ未接続時のファイルツリーが2グループではありません');
   const connectedTreeGroups = await page.evaluate(async () => {
     const root = await navigator.storage.getDirectory();
     for await (const [name] of root.entries()) await root.removeEntry(name, { recursive: true });
@@ -355,17 +365,22 @@ try {
     await writable.write('CPU 8086\nBITS 16\nORG 100h\nret\n');
     await writable.close();
     await window.pc98workbench.connectDirectory(root, { persist: false });
+    const directoryName = window.pc98workbench.getDirectoryState().name;
     const connected = [...document.querySelectorAll('#file-tree .file-group-heading')]
       .map((node) => node.textContent);
     await window.pc98workbench.disconnectDirectory();
     const disconnected = [...document.querySelectorAll('#file-tree .file-group-heading')]
       .map((node) => node.textContent);
-    return { connected, disconnected };
+    return { connected, disconnected, directoryName };
   });
-  assert.equal(connectedTreeGroups.connected.length, 3, 'フォルダ接続時のファイルツリーが3グループではありません');
-  assert.ok(connectedTreeGroups.connected[0].startsWith('フォルダ '), 'フォルダグループが先頭にありません');
+  // フォルダ接続中は保存先グループがフォルダの1つだけになる。プロジェクト(このブラウザ)側に
+  // hello.asmが残っていても、書き込み先の判別を見た目で一意にするため出さない。
+  assert.equal(connectedTreeGroups.connected.length, 2, 'フォルダ接続時のファイルツリーが2グループ(フォルダ+サンプル)ではありません');
+  assert.equal(connectedTreeGroups.connected[0],
+    `${connectedTreeGroups.directoryName} — PCのフォルダに保存（1件）`, 'フォルダグループの見出しが期待形式ではありません');
+  assert.equal(connectedTreeGroups.connected[1], 'サンプル — 読み取り専用');
   assert.deepEqual(connectedTreeGroups.disconnected,
-    ['IndexedDB プロジェクト', '同梱サンプル'], 'フォルダ切断後のツリーが2グループへ戻りません');
+    ['作業ファイル — このブラウザに保存', 'サンプル — 読み取り専用'], 'フォルダ切断後のツリーが2グループへ戻りません');
 
   const beforeBuildStatus = await page.evaluate(() => window.pc98workbench.getMachineStatus());
   const firstBuild = await page.evaluate(() => window.pc98workbench.buildCurrent());
@@ -799,7 +814,7 @@ try {
   assert.ok(await page.$('.cm-lint-marker-error'), 'CodeMirror gutterにエラーマーカーがありません');
 
   // --- UI第2段: workbenchへのデバッガ統合 ---
-  await page.evaluate(() => window.pc98workbench.openFile('project', 'samples/hello.asm'));
+  await page.evaluate(() => window.pc98workbench.openFile('project', 'hello.asm'));
   const asmDebuggable = await page.evaluate(async () => {
     await window.pc98workbench.buildCurrent();
     return window.pc98workbench.getDebugState().debuggableLines;
@@ -1449,7 +1464,7 @@ try {
   const forcedRetryCount = forcedRecovery.retriesAfter - forcedRecovery.retriesBefore;
   const forcedRemountCount = forcedRecovery.remountsAfter - forcedRecovery.remountsBefore;
 
-  await page.evaluate(() => window.pc98workbench.openFile('project', 'samples/hello.asm'));
+  await page.evaluate(() => window.pc98workbench.openFile('project', 'hello.asm'));
   // 直前までのデバッグセッションでビューがdebugのままなので、フォルダ操作の検証前にエクスプローラーへ戻す。
   await page.evaluate(() => {
     window.pc98workbench.setSidebarView('explorer');
@@ -1594,7 +1609,87 @@ try {
   await page.evaluate(() => window.pc98workbench.stopDebug());
   console.log(`[PASS] fresh debug without #run: reached COM entry stop in ${freshDebugMs}ms (<60000ms)`);
 
-  console.log(`[PASS] file/edit/IndexedDB/build/run: ${output}`);
+  // --- 削除UI: 保存先グループ(作業ファイル/フォルダ)のエントリだけに削除ボタンがあり、
+  //     削除するとファイルと開いていたタブの両方が消えること。サンプルには付かない。 ---
+  const deleteUi = await page.evaluate(async () => {
+    const wb = window.pc98workbench;
+    wb.setConfirm(() => true);
+    await wb.createFile('scratch-delete-a.asm');
+    await wb.createFile('scratch-delete-b.asm');
+    const rowFor = (path) => [...document.querySelectorAll('#file-tree .file-row')]
+      .find((row) => row.querySelector('.file-entry')?.dataset.path === path);
+    const beforeTabs = wb.getTabs().map((tab) => tab.path);
+    const beforeFiles = (await wb.listProjectFiles()).map((file) => file.path);
+    const sampleHasDelete = Boolean(rowFor('samples/hello.asm')?.querySelector('.file-delete'));
+    const workAHasDelete = Boolean(rowFor('scratch-delete-a.asm')?.querySelector('.file-delete'));
+    const workBHasDelete = Boolean(rowFor('scratch-delete-b.asm')?.querySelector('.file-delete'));
+    // scratch-delete-bはアクティブタブのまま削除する。
+    rowFor('scratch-delete-b.asm').querySelector('.file-delete').click();
+    await new Promise((resolveWait) => setTimeout(resolveWait, 200));
+    const afterOneDelete = {
+      tabs: wb.getTabs().map((tab) => tab.path),
+      files: (await wb.listProjectFiles()).map((file) => file.path),
+      currentPath: wb.getState().currentPath,
+    };
+    return { beforeTabs, beforeFiles, sampleHasDelete, workAHasDelete, workBHasDelete, afterOneDelete };
+  });
+  assert.equal(deleteUi.sampleHasDelete, false, 'サンプルのエントリに削除ボタンが付いています');
+  assert.equal(deleteUi.workAHasDelete, true, '新規作成したファイルが作業ファイルグループの削除可能エントリに出ていません');
+  assert.equal(deleteUi.workBHasDelete, true, '作業ファイルのエントリに削除ボタンがありません');
+  assert.ok(deleteUi.beforeTabs.includes('scratch-delete-b.asm') && deleteUi.beforeFiles.includes('scratch-delete-b.asm'),
+    '削除前提: scratch-delete-b.asmが未作成です');
+  assert.ok(!deleteUi.afterOneDelete.tabs.includes('scratch-delete-b.asm'), '削除ボタンを押してもタブが残っています');
+  assert.ok(!deleteUi.afterOneDelete.files.includes('scratch-delete-b.asm'), '削除ボタンを押してもファイルが残っています');
+  assert.notEqual(deleteUi.afterOneDelete.currentPath, 'scratch-delete-b.asm',
+    '削除したファイルのタブが閉じずアクティブなままです');
+  console.log('[PASS] delete UI: save-target entries only (not samples), delete button removes file and its open tab');
+
+  // --- 削除UI: 最後の1枚のタブを削除してもタブ0枚経由の処理が例外にならず、
+  //     disconnectDirectory()と同じ考え方で同梱サンプルへ戻ること ---
+  const deleteToZero = await page.evaluate(async () => {
+    const wb = window.pc98workbench;
+    wb.setConfirm(() => true);
+    for (const tab of wb.getTabs()) {
+      if (wb.getTabs().length <= 1) break;
+      await wb.closeTab(tab.id);
+    }
+    await wb.createFile('scratch-delete-last.asm');
+    for (const tab of wb.getTabs()) {
+      if (tab.path === 'scratch-delete-last.asm') continue;
+      await wb.closeTab(tab.id);
+    }
+    const tabsBefore = wb.getTabs().map((tab) => tab.path);
+    let threw = null;
+    try {
+      const row = [...document.querySelectorAll('#file-tree .file-row')]
+        .find((entry) => entry.querySelector('.file-entry')?.dataset.path === 'scratch-delete-last.asm');
+      row.querySelector('.file-delete').click();
+      await new Promise((resolveWait) => setTimeout(resolveWait, 200));
+    } catch (error) {
+      threw = error.message;
+    }
+    return {
+      tabsBefore, threw,
+      tabsAfter: wb.getTabs().map((tab) => ({ origin: tab.origin, path: tab.path })),
+      currentPath: wb.getState().currentPath,
+      currentOrigin: wb.getState().currentOrigin,
+      saveStateText: document.querySelector('#save-state').textContent,
+      buildDisabled: document.querySelector('#build').disabled,
+    };
+  });
+  assert.deepEqual(deleteToZero.tabsBefore, ['scratch-delete-last.asm'], '削除前提: タブが1枚に絞れていません');
+  assert.equal(deleteToZero.threw, null, `タブ0枚になる削除で例外が発生しました: ${deleteToZero.threw}`);
+  assert.equal(deleteToZero.tabsAfter.length, 1, 'タブ0枚経由のあと同梱サンプルへ戻っていません');
+  assert.deepEqual(deleteToZero.tabsAfter[0], { origin: 'sample', path: 'samples/hello.asm' },
+    'タブ0枚経由のフォールバック先がsamples/hello.asmではありません');
+  assert.equal(deleteToZero.currentPath, 'samples/hello.asm');
+  assert.equal(deleteToZero.currentOrigin, 'sample');
+  assert.ok(deleteToZero.saveStateText, 'タブ0枚経由の復帰後にステータスバー表示が空です');
+  assert.equal(deleteToZero.buildDisabled, false, 'タブ0枚経由の復帰後にビルドボタンが無効のままです');
+  await page.evaluate(() => window.pc98workbench.setConfirm((message) => window.confirm(message)));
+  console.log('[PASS] delete UI: closing the last remaining tab falls back to the bundled sample without throwing');
+
+  console.log(`[PASS] file/edit/このブラウザ(project origin)/build/run: ${output}`);
   console.log('[PASS] machine status/prewarm: one status line, asynchronous boot completed, build/debug transitions');
   console.log('[PASS] header/status bar: WebNP2 header, VS Code status colors, 7 license links returned HTTP 200');
   console.log(`[PASS] run separator: ${separators} blank prompt lines before a consecutive run`);
