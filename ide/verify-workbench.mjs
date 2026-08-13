@@ -116,7 +116,7 @@ try {
       .some((link) => new URL(link.href).pathname.endsWith(`/debug${'.'}html`)),
     footerHrefs: [...document.querySelectorAll('footer.app-footer a')].map((link) => link.href),
     footerLinkAttrs: [...document.querySelectorAll('footer.app-footer a')].map((link) => ({
-      href: link.href, target: link.target, rel: link.rel,
+      href: link.href, target: link.target, rel: link.rel, text: link.textContent.trim(),
     })),
     footerHelpLink: (() => {
       const link = document.querySelector('.status-links a[href*="help.html"]');
@@ -160,6 +160,16 @@ try {
     assert.ok(relTokens.includes('noopener'), `フッタリンクのrelにnoopenerがありません: ${link.href}`);
     assert.ok(relTokens.includes('noreferrer'), `フッタリンクのrelにnoreferrerがありません: ${link.href}`);
   }
+  // NP2kaiは実際にはMIT Licenseで配布されており(ide/core/LICENSE.NP2kai、上流もMIT宣言)、
+  // フッタのラベルに誤ったGPLv2表記が再発しないことを確認する。
+  const np2kaiFooterLink = shell.footerLinkAttrs.find((link) => link.href.includes('LICENSE.NP2kai'));
+  assert.ok(np2kaiFooterLink, 'フッタにNP2kaiのライセンスリンクが見つかりません');
+  assert.ok(!np2kaiFooterLink.text.includes('GPLv2'),
+    `フッタのNP2kaiリンクのラベルに誤った"GPLv2"表記が含まれています: ${np2kaiFooterLink.text}`);
+  // リポジトリ直下のLICENSE(自作コード向けMIT License)の存在と内容を確認する。
+  const rootLicenseText = await readFile(resolve(ROOT, 'LICENSE'), 'utf8');
+  assert.ok(rootLicenseText.includes('MIT'), 'リポジトリ直下のLICENSEに"MIT"が含まれていません');
+  assert.ok(rootLicenseText.includes('URARA-works'), 'リポジトリ直下のLICENSEに"URARA-works"が含まれていません');
 
   // --- ヘルプへの導線: フッタ「使い方」リンクとヘッダ「?」ボタン ---
   // 両方とも help.html?lang=ja を指し、フッタの全リンク同様、別タブで開くこと

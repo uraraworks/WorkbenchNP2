@@ -440,3 +440,16 @@ node verify-saka-build.mjs  # SAKA変換版のwasm NASM・MZヘッダ・EXE行�
   NECによる承認・提携・協賛を受けたものでもありません
 - 本プロジェクトは実行基盤としてNP2kai（Neko Project II 系）をビルドし同梱しています。
   NP2kaiおよびNeko Project IIの作者とも関係がなく、公認を受けたものではありません
+
+## ライセンス
+
+WorkbenchNP2自身のコード（このリポジトリで書かれた部分）はリポジトリ直下の`LICENSE`のとおり
+MIT License（Copyright (c) 2026 URARA-works）。同梱している第三者ソフトウェアはそれぞれの
+配布元のライセンスに従い、WorkbenchNP2のMIT Licenseで上書きされるものではない：
+
+- `ide/core/LICENSE.NP2kai` — NP2kai（MIT License, Copyright (c) 2017 AZO）
+- `ide/vendor/webnp2/LICENSE.WebNP2` — WebNP2由来コード
+- `ide/freedos/README.txt` — FreeDOS(98)（GPLv2+、ソース入手先URL付き）
+- `ide/vendor/codemirror/LICENSE.CodeMirror` — CodeMirror（MIT、17パッケージ分）
+- `toolchain/nasm-src/LICENSE` — NASM（BSD 2-Clause）
+- `toolchain/smlrc-wasm/LICENSE.SmallerC` — SmallerC（BSD 2-Clause）
