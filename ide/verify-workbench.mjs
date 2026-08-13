@@ -100,6 +100,14 @@ try {
     footerLinkAttrs: [...document.querySelectorAll('footer.app-footer a')].map((link) => ({
       href: link.href, target: link.target, rel: link.rel,
     })),
+    footerHelpLink: (() => {
+      const link = document.querySelector('.status-links a[href*="help.html"]');
+      return link ? { href: link.href, target: link.target, rel: link.rel } : null;
+    })(),
+    headerHelpBtn: (() => {
+      const link = document.querySelector('.header-help-btn');
+      return link ? { href: link.href, target: link.target, rel: link.rel } : null;
+    })(),
   }));
   const theme = await page.evaluate(() => {
     const rootStyle = getComputedStyle(document.documentElement);
@@ -116,7 +124,7 @@ try {
   assert.equal(shell.runtimeStatusExists, false, '#runtime-statusが残っています');
   assert.equal(shell.debugStatusExists, false, '#debug-statusが残っています');
   assert.equal(shell.hasDebugPageLink, false, 'ヘッダに削除済みデバッガページへのリンクがあります');
-  assert.equal(shell.footerHrefs.length, 7, 'フッタのライセンスリンクが7件ではありません');
+  assert.equal(shell.footerHrefs.length, 8, 'フッタのリンク数（ライセンス7件+使い方1件）が8件ではありません');
   assert.ok(theme.editorBackground && theme.uiBackground && theme.debuggingBackground,
     ':rootのVS Codeテーマ変数が定義されていません');
   assert.equal(theme.normalHeaderBackground, 'rgb(12, 12, 12)', 'ヘッダ背景がWebNP2実測値ではありません');
@@ -134,6 +142,35 @@ try {
     assert.ok(relTokens.includes('noopener'), `フッタリンクのrelにnoopenerがありません: ${link.href}`);
     assert.ok(relTokens.includes('noreferrer'), `フッタリンクのrelにnoreferrerがありません: ${link.href}`);
   }
+
+  // --- ヘルプへの導線: フッタ「使い方」リンクとヘッダ「?」ボタン ---
+  // 両方とも help.html?lang=ja を指し、フッタの全リンク同様、別タブで開くこと
+  // (エミュレータの起動状態と未保存の編集を失わないため)。
+  for (const [label, link] of [['フッタの「使い方」リンク', shell.footerHelpLink], ['ヘッダの「?」ボタン', shell.headerHelpBtn]]) {
+    assert.ok(link, `${label}が見つかりません`);
+    assert.equal(new URL(link.href).pathname.endsWith('/help.html'), true, `${label}のhrefがhelp.htmlを指していません: ${link.href}`);
+    assert.equal(new URL(link.href).search, '?lang=ja', `${label}のhrefが?lang=jaを指していません: ${link.href}`);
+    assert.equal(link.target, '_blank', `${label}がtarget="_blank"ではありません`);
+    const relTokens = link.rel.split(/\s+/).filter(Boolean);
+    assert.ok(relTokens.includes('noopener'), `${label}のrelにnoopenerがありません`);
+    assert.ok(relTokens.includes('noreferrer'), `${label}のrelにnoreferrerがありません`);
+  }
+  // 「?」ボタンはヘッダ内で絶対配置なので、タイトル/タグラインと実際に重なっていないかを
+  // getBoundingClientRectで実測する（属性だけの存在チェックは画面外配置を見逃す実績があるため）。
+  const headerOverlap = await page.evaluate(() => {
+    const rectsIntersect = (a, b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+    const btn = document.querySelector('.header-help-btn').getBoundingClientRect();
+    const title = document.querySelector('.app-header h1').getBoundingClientRect();
+    const tagline = document.querySelector('.app-tagline').getBoundingClientRect();
+    return {
+      btnVisible: btn.width > 0 && btn.height > 0,
+      overlapsTitle: rectsIntersect(btn, title),
+      overlapsTagline: rectsIntersect(btn, tagline),
+    };
+  });
+  assert.equal(headerOverlap.btnVisible, true, 'ヘッダの「?」ボタンが画面上に表示されていません（0x0またはoffscreen）');
+  assert.equal(headerOverlap.overlapsTitle, false, `ヘッダの「?」ボタンがタイトルと重なっています: ${JSON.stringify(headerOverlap)}`);
+  assert.equal(headerOverlap.overlapsTagline, false, `ヘッダの「?」ボタンがタグラインと重なっています: ${JSON.stringify(headerOverlap)}`);
 
   // --- タブ名/アイコン/タグラインの英語化（WebNP2と書式を揃える） ---
   const EXPECTED_TITLE = 'WorkbenchNP2 - PC-98 Development Environment';
@@ -1508,10 +1545,15 @@ try {
     wb.setSidebarVisible(true);
     const actions = document.querySelector('.sidebar-actions');
     const footer = document.querySelector('footer.app-footer');
+    const rectsIntersect = (a, b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+    const helpBtn = document.querySelector('.header-help-btn').getBoundingClientRect();
+    const title = document.querySelector('.app-header h1').getBoundingClientRect();
     const measured = {
       actions: actions.scrollWidth - actions.clientWidth,
       footer: footer.scrollWidth - footer.clientWidth,
       downloadButton: document.querySelector('#download-file').getBoundingClientRect().width > 0,
+      helpBtnVisible: helpBtn.width > 0 && helpBtn.height > 0,
+      helpBtnOverlapsTitle: rectsIntersect(helpBtn, title),
     };
     wb.setSidebarVisible(false);
     return measured;
@@ -1529,6 +1571,8 @@ try {
   assert.ok(mobileChrome.actions <= 1, `モバイルのサイドバー操作列がはみ出しています: ${mobileChrome.actions}px`);
   assert.ok(mobileChrome.footer <= 1, `モバイルのステータスバーがはみ出しています: ${mobileChrome.footer}px`);
   assert.equal(mobileChrome.downloadButton, true, 'モバイルでダウンロードボタンが表示されていません');
+  assert.equal(mobileChrome.helpBtnVisible, true, 'モバイルでヘッダの「?」ボタンが表示されていません');
+  assert.equal(mobileChrome.helpBtnOverlapsTitle, false, 'モバイルでヘッダの「?」ボタンがタイトルと重なっています');
   assert.equal(mobileSplitterHidden, true, '375px幅でスプリッタが非表示ではありません');
   // 375px幅ではアクティビティバーは横並びの帯になる（幅=viewport相当、高さ<幅）。
   const mobileActivity = await page.$eval('#activity-bar', (node) => node.getBoundingClientRect().toJSON());
@@ -1792,7 +1836,8 @@ try {
 
   console.log(`[PASS] file/edit/このブラウザ(project origin)/build/run: ${output}`);
   console.log('[PASS] machine status/prewarm: one status line, asynchronous boot completed, build/debug transitions');
-  console.log('[PASS] header/status bar: WebNP2 header, VS Code status colors, 7 license links returned HTTP 200, all footer links open in a new tab');
+  console.log('[PASS] header/status bar: WebNP2 header, VS Code status colors, 8 footer links (7 license + help) returned HTTP 200, all footer links open in a new tab');
+  console.log('[PASS] help entry points: footer "使い方" link and header "?" button both target help.html?lang=ja in a new tab, no overlap with title/tagline (desktop+mobile)');
   console.log(`[PASS] run separator: ${separators} blank prompt lines before a consecutive run`);
   console.log('[PASS] 実キー入力 guard: editor/sidebar stay local, canvas reaches guest DOS');
   console.log(`[PASS] Tab/caret: real tab at cursor (tab-size ${tabbed.tabSize}), caret drawn in ${tabbed.cursor.color}`);

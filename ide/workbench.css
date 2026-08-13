@@ -71,6 +71,25 @@ input, select { border: 1px solid var(--vsc-input-border); color: var(--vsc-fg);
 .app-title-row { display: flex; justify-content: center; align-items: center; width: 100%; gap: 10px; }
 .app-header h1 { margin: 0; color: var(--np2-header-text); font-size: 15px; font-weight: 600; letter-spacing: .03em; }
 .app-tagline { margin: 2px 0 0; color: var(--np2-header-tagline); font-size: 11px; }
+/* タイトル/タグラインは中央寄せなので、ヘルプへの導線は絶対配置でヘッダ右上へ独立させる。 */
+.header-help-btn {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid rgba(255, 255, 255, .28);
+  border-radius: 50%;
+  color: var(--np2-header-text);
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+  line-height: 1;
+}
+.header-help-btn:hover { background: rgba(255, 255, 255, .14); }
+.header-help-btn:focus-visible { outline: 1px solid var(--vsc-focus); outline-offset: 1px; }
 .workspace-grid { display: grid; flex: 1; grid-template-columns: var(--activity-col) var(--sidebar-col) var(--editor-col) var(--splitter-col) minmax(0, 1fr); gap: 8px; padding: 8px; }
 body.sidebar-hidden .workspace-grid { grid-template-columns: var(--activity-col) var(--editor-col) var(--splitter-col) minmax(0, 1fr); }
 .activity-bar { order: -1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 0; border-right: 1px solid var(--vsc-border); background: var(--vsc-ui-bg); }
@@ -266,7 +285,7 @@ body.splitting .disassembly-splitter { background: var(--vsc-accent); }
 /* 等倍未満へ縮小されるとドットが潰れて文字が読めないので、そのときだけ補間を効かせる。 */
 #screen.smoothed { image-rendering: auto; }
 #screen-text { margin: 0 12px 12px; height: 112px; overflow: auto; color: var(--vsc-muted); background: var(--vsc-widget-bg); font: 10px/1.25 ui-monospace, monospace; white-space: pre-wrap; }
-.app-footer { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 12px; min-height: 24px; padding: 3px 8px; overflow: hidden; border-top: 1px solid var(--vsc-border); color: var(--vsc-fg-dim); background: var(--vsc-chrome-bg); font-size: 10px; }
+.app-footer { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 12px; min-height: 28px; padding: 6px 16px; overflow: hidden; border-top: 1px solid var(--vsc-border); color: var(--vsc-fg-dim); background: var(--vsc-chrome-bg); font-size: 11px; }
 .status-left { display: flex; min-width: 0; align-items: center; gap: 10px; white-space: nowrap; }
 #save-state { color: var(--vsc-fg-dim); }
 #save-state.dirty { color: var(--vsc-warning); }
@@ -320,6 +339,6 @@ body.maximized-editor #editor { height: min(78vh, 900px); }
   .debug-panel { margin: 0 7px 7px; padding: 6px 7px; }
   .ide-registers { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   #screen-text { display: none; }
-  .app-footer { gap: 6px; }
+  .app-footer { gap: 6px; padding: 6px 10px; }
   .status-links { max-width: 48%; }
 }

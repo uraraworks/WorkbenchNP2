@@ -75,9 +75,20 @@ try {
   }
   await page.evaluate(() => window.pc98workbench.continueOrRun());
   await page.waitForFunction(() => window.pc98workbench.getDebugState().currentLine === 11);
-  // サイドバーを「実行とデバッグ」ビューへ切り替えてレジスタ/BP一覧を見せる。
-  await page.click('#activity-debug');
+  // サイドバーを「実行とデバッグ」ビューへ開いた状態で切り替え、レジスタ/BP一覧を見せる
+  // (クリックだけだとサイドバーが畳まれたままのことがあるため、APIで直接両方指定する)。
+  await page.evaluate(() => {
+    window.pc98workbench.setSidebarView('debug');
+    window.pc98workbench.setSidebarVisible(true);
+  });
   await page.waitForSelector('#debug-panel:not([hidden])');
+  // フローティングのデバッグツールバーが既定位置(#editor上端8px下)だとソース1〜2行目に
+  // 被るため、エディタ右下寄りへ退避させてから撮る。値は可動域を超えるとクランプされる
+  // (debugToolbarBounds())ので、大きめの値を渡して「行ける端まで」寄せれば十分。
+  await page.evaluate(() => {
+    window.pc98workbench.setDebugToolbarOffset(99999);
+    window.pc98workbench.setDebugToolbarOffsetY(99999);
+  });
   await page.mouse.move(0, 0);
   await page.screenshot({ path: path.join(OUT_DIR, 'debug.png') });
   console.log('captured: debug.png');
