@@ -97,6 +97,9 @@ try {
     hasDebugPageLink: [...document.querySelectorAll('header a')]
       .some((link) => new URL(link.href).pathname.endsWith(`/debug${'.'}html`)),
     footerHrefs: [...document.querySelectorAll('footer.app-footer a')].map((link) => link.href),
+    footerLinkAttrs: [...document.querySelectorAll('footer.app-footer a')].map((link) => ({
+      href: link.href, target: link.target, rel: link.rel,
+    })),
   }));
   const theme = await page.evaluate(() => {
     const rootStyle = getComputedStyle(document.documentElement);
@@ -123,10 +126,18 @@ try {
     const response = await fetch(href);
     assert.equal(response.status, 200, `フッタリンクがHTTP 200ではありません: ${href}`);
   }
+  // フッタの全リンクは別タブで開く。同じタブで開くとエミュレータの起動状態と
+  // 未保存の編集が失われるため（ライセンスリンク6本がこの不具合を持っていた実績あり）。
+  for (const link of shell.footerLinkAttrs) {
+    assert.equal(link.target, '_blank', `フッタリンクがtarget="_blank"ではありません: ${link.href}`);
+    const relTokens = link.rel.split(/\s+/).filter(Boolean);
+    assert.ok(relTokens.includes('noopener'), `フッタリンクのrelにnoopenerがありません: ${link.href}`);
+    assert.ok(relTokens.includes('noreferrer'), `フッタリンクのrelにnoreferrerがありません: ${link.href}`);
+  }
 
   // --- タブ名/アイコン/タグラインの英語化（WebNP2と書式を揃える） ---
-  const EXPECTED_TITLE = 'PC98Dev - PC-98 Development Environment';
-  const EXPECTED_TAGLINE = 'The online PC-98 development environment powered by NASM, SmallerC and WebNP2';
+  const EXPECTED_TITLE = 'WorkbenchNP2 - PC-98 Development Environment';
+  const EXPECTED_TAGLINE = 'An online workbench for PC-9801/PC-9821 — write, run and debug in the browser';
   const branding = await page.evaluate(() => ({
     title: document.title,
     tagline: document.querySelector('.app-tagline')?.textContent ?? '',
@@ -1781,7 +1792,7 @@ try {
 
   console.log(`[PASS] file/edit/このブラウザ(project origin)/build/run: ${output}`);
   console.log('[PASS] machine status/prewarm: one status line, asynchronous boot completed, build/debug transitions');
-  console.log('[PASS] header/status bar: WebNP2 header, VS Code status colors, 7 license links returned HTTP 200');
+  console.log('[PASS] header/status bar: WebNP2 header, VS Code status colors, 7 license links returned HTTP 200, all footer links open in a new tab');
   console.log(`[PASS] run separator: ${separators} blank prompt lines before a consecutive run`);
   console.log('[PASS] 実キー入力 guard: editor/sidebar stay local, canvas reaches guest DOS');
   console.log(`[PASS] Tab/caret: real tab at cursor (tab-size ${tabbed.tabSize}), caret drawn in ${tabbed.cursor.color}`);

@@ -16,6 +16,10 @@ export class ProjectFS {
 }
 
 export class IndexedDbProjectFS extends ProjectFS {
+  // databaseName は WorkbenchNP2 への改名後も 'PC98DevProjectFS' のまま据え置く。
+  // ブラウザのIndexedDBは既存利用者ごとのローカルストレージであり、名前を変えると
+  // 別データベース扱いになって保存済みファイルが見えなくなる（移行コードを書かない限り）。
+  // 表示名・識別子の改名対象から意図的に除外している。
   constructor({ indexedDB = globalThis.indexedDB, databaseName = 'PC98DevProjectFS' } = {}) {
     super();
     if (!indexedDB) throw new Error('IndexedDB is not available');

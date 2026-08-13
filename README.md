@@ -1,4 +1,4 @@
-# PC98Dev
+# WorkbenchNP2
 
 ブラウザ完結の PC-98 開発環境（構築中）。
 [WebNP2](../WebNP2) を実行基盤に、C / アセンブラで書いたコードを
@@ -428,3 +428,10 @@ node verify-saka-build.mjs  # SAKA変換版のwasm NASM・MZヘッダ・EXE行�
   BIOS キーバッファへ直接注入すること
 - `WebNP2/public/freedos/fd98_2hd.xdf` はベースイメージ。**書き換えないこと**
   （`fdadd.mjs` はコピーを作って出力する）
+
+## 商標・非提携について
+
+- PC-9801、PC-9821は日本電気株式会社（NEC）の商標です。本プロジェクトはNECとは関係がなく、
+  NECによる承認・提携・協賛を受けたものでもありません
+- 本プロジェクトは実行基盤としてNP2kai（Neko Project II 系）をビルドし同梱しています。
+  NP2kaiおよびNeko Project IIの作者とも関係がなく、公認を受けたものではありません
