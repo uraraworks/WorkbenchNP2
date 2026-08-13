@@ -49,3 +49,28 @@ libc の `fflush` を export し、JS 側が `callMain` 後に `_fflush(0)` を�
 
 DOS標準ライブラリはupstream `v0100/srclib/lcds.txt`から再生成する。ビルド時に
 pin済みNASM 2.16.03のホスト版も一時ツリーで作り、ホストに別版NASMがあっても使わない。
+
+## csrc/ (ブラウザ実行時にfetchするヘッダの同梱コピー)
+
+`ide/browser-toolchain.mjs`はCのビルド時に29本のヘッダ(`include/`20本 + `srclib/`9本)を
+実行時fetchする。fetch元は`toolchain/smallerc-src/`ではなく`toolchain/smlrc-wasm/csrc/`にした。
+`smallerc-src/`は`.gitignore`対象(`build.sh`がcloneする十数MBのupstreamツリー)なので、
+そこを直接指すとリポジトリに実体が無いまま参照する形になり、GitHub Pages配信では
+静的ファイルが存在せずHTTP 404になる(ローカル検証はディスクから配信するため気づけなかった)。
+
+`csrc/`はupstream `v0100/{include,srclib}/`から該当29ファイルをバイト単位でそのまま
+コピーしたものをgit追跡する。再生成手順:
+
+```bash
+cd toolchain/smlrc-wasm
+INCLUDE='assert.h ctype.h errno.h fcntl.h float.h inttypes.h iso646.h limits.h locale.h math.h setjmp.h signal.h stdarg.h stddef.h stdint.h stdio.h stdlib.h string.h time.h unistd.h'
+SRCLIB='dimports.h ictype.h idos.h idpmi.h ifp.h istdio.h itime.h iwin32.h mm.h'
+for f in $INCLUDE; do cp "../smallerc-src/v0100/include/$f" "csrc/include/$f"; done
+for f in $SRCLIB;  do cp "../smallerc-src/v0100/srclib/$f"  "csrc/srclib/$f";  done
+```
+
+コピーが再生成後にupstreamからずれていないかは`node verify-csrc-bundle.mjs`で検査する
+(upstreamツリーがローカルに無い環境ではINFOでスキップする。CIやcloneしただけの環境が
+これに該当し、byte比較は「upstreamをcloneして再ビルドする開発者」向けのセーフティネット
+という位置付けである)。29本という本数自体は`ide/verify-workbench.mjs`側が
+`browser-toolchain.mjs`の`HEADER_NAMES`/`INCLUDE_HEADERS`と突き合わせて検査する。

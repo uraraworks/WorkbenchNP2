@@ -47,6 +47,8 @@ toolchain/
   compile.mjs        CLI/API: C → small-model MZ EXE → 新規 FD
   c-source-map.mjs   C行→生成ASM行→実行offsetマップ
   smlrc-wasm/        SmallerC wasm成果物・再現パッチ（upstreamパッチ1件）
+    csrc/              browser-toolchain.mjsが実行時fetchするヘッダ29本の同梱コピー
+    verify-csrc-bundle.mjs  上記コピーがupstreamと1バイト一致することの検証
   build-boot-fd.mjs  CLI: .asm → .COM → 起動可能 FD（FreeDOS ベース）
   verify*.mjs        各種検証スクリプト
 samples/             テスト用 .asm
@@ -425,6 +427,7 @@ node verify-listing.mjs     # listingマップと.COM実バイト、行/offset�
 node verify-dos-text.mjs    # 末尾DOS EOF許容、途中0x1A保持、無改変STRLEN.C
 node verify-c-source-map.mjs # STRLEN.CのC行/実行offset合成、対応なし、故障注入
 node verify-saka-build.mjs  # SAKA変換版のwasm NASM・MZヘッダ・EXE行マップ
+node smlrc-wasm/verify-csrc-bundle.mjs # 同梱ヘッダ29本とupstreamのバイト一致（upstream不在時はスキップ）
 ```
 
 ## 技術選定
@@ -468,5 +471,5 @@ MIT License（Copyright (c) 2026 URARA-works）。同梱している第三者ソ
 - `ide/vendor/webnp2/LICENSE.WebNP2` — WebNP2由来コード
 - `ide/freedos/README.txt` — FreeDOS(98)（GPLv2+、ソース入手先URL付き）
 - `ide/vendor/codemirror/LICENSE.CodeMirror` — CodeMirror（MIT、17パッケージ分）
-- `toolchain/nasm-src/LICENSE` — NASM（BSD 2-Clause）
+- `toolchain/nasm-wasm/LICENSE.NASM` — NASM（BSD 2-Clause）。upstreamソース `toolchain/nasm-src/` は13MBあり配布しないため、ライセンス文だけ複製して同梱している
 - `toolchain/smlrc-wasm/LICENSE.SmallerC` — SmallerC（BSD 2-Clause）

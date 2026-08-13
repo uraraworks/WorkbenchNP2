@@ -56,7 +56,7 @@ async function loadCResources() {
   if (!cResourcesPromise) cResourcesPromise = (async () => {
     const entries = await Promise.all(HEADER_NAMES.map(async (name) => {
       const area = INCLUDE_HEADERS.has(name) ? 'include' : 'srclib';
-      return [name, await fetchBytes(`../toolchain/smallerc-src/v0100/${area}/${name}`)];
+      return [name, await fetchBytes(`../toolchain/smlrc-wasm/csrc/${area}/${name}`)];
     }));
     return {
       includeFiles: Object.fromEntries(entries),

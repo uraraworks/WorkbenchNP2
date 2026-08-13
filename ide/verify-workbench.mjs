@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, extname, resolve, sep } from 'node:path';
+import { dirname, extname, posix as pathPosix, resolve, sep } from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
@@ -92,8 +94,112 @@ async function gutterClickPoint(targetPage, gutterSelector, lineNumber) {
   }, { gutterSelector, lineNumber });
 }
 
+/**
+ * 「公開される集合」= `git ls-files` の結果を基準に測る。ローカルの静的サーバは
+ * ディスクから配信するため、.gitignore対象(=GitHub Pagesには存在しない)ファイルを
+ * 指していても検査が素通りしてしまう(hello-c.cビルドが本番でのみ404した実例)。
+ * ディスク存在ではなく「git追跡されているか」だけを見る。
+ */
+function verifyTrackedAssets() {
+  const tracked = new Set(
+    execFileSync('git', ['-C', ROOT, 'ls-files'], { encoding: 'utf8' }).split('\n').filter(Boolean),
+  );
+  assert.ok(tracked.size > 100, `git ls-filesの結果が少なすぎます: ${tracked.size}`);
+
+  const toRepoPath = (fromRel, raw) => pathPosix.normalize(pathPosix.join(dirname(fromRel), raw));
+  const assertTracked = (fromRel, raw) => {
+    const repoPath = toRepoPath(fromRel, raw);
+    assert.ok(tracked.has(repoPath), `${fromRel}が参照する"${raw}"(=${repoPath})はgit追跡されていません`);
+    return repoPath;
+  };
+
+  // --- 陽性対照: 判定が常に真になっていないことを、実際に踏んだ不具合そのもの
+  //     (追跡されていないsmallerc-src配下を指す参照)で先に確かめる。 ---
+  assert.throws(
+    () => assertTracked('ide/index.html', '../toolchain/smallerc-src/v0100/include/ctype.h'),
+    /git追跡されていません/,
+  );
+
+  // --- ide/index.html・ide/help.html: href/srcのうちリポジトリ内相対パスは全て追跡対象であること ---
+  let htmlRefCount = 0;
+  for (const htmlRel of ['ide/index.html', 'ide/help.html']) {
+    const html = readFileSync(resolve(ROOT, htmlRel), 'utf8');
+    for (const match of html.matchAll(/\s(?:href|src)="([^"]+)"/g)) {
+      const raw = match[1];
+      if (/^(?:https?:|mailto:|data:|#)/.test(raw)) continue;
+      const withoutQueryOrHash = raw.split(/[?#]/)[0];
+      assertTracked(htmlRel, withoutQueryOrHash);
+      htmlRefCount += 1;
+    }
+  }
+  assert.ok(htmlRefCount >= 10, `index.html/help.htmlのリポジトリ内参照が少なすぎます: ${htmlRefCount}`);
+
+  // --- ide/browser-toolchain.mjs: 実行時fetch対象。ファイル解析の代わりに、
+  //     ここへ明示リストを持ち、実体(HEADER_NAMES/INCLUDE_HEADERS配列と
+  //     fetch元テンプレート)と食い違ったら落とす。 ---
+  const toolchainSrc = readFileSync(resolve(IDE_DIR, 'browser-toolchain.mjs'), 'utf8');
+  const extractArray = (label, re) => {
+    const m = toolchainSrc.match(re);
+    assert.ok(m, `browser-toolchain.mjsから${label}を抽出できません(実体が変わった可能性)`);
+    return [...m[1].matchAll(/'([^']+)'/g)].map((mm) => mm[1]);
+  };
+  const actualHeaderNames = extractArray('HEADER_NAMES', /const HEADER_NAMES = \[([\s\S]*?)\];/);
+  const actualIncludeHeaders = extractArray('INCLUDE_HEADERS', /INCLUDE_HEADERS = new Set\(\[([\s\S]*?)\]\)/);
+  const expectedHeaderNames = [
+    'assert.h', 'ctype.h', 'errno.h', 'fcntl.h', 'float.h', 'inttypes.h', 'iso646.h',
+    'limits.h', 'locale.h', 'math.h', 'setjmp.h', 'signal.h', 'stdarg.h', 'stddef.h',
+    'stdint.h', 'stdio.h', 'stdlib.h', 'string.h', 'time.h', 'unistd.h', 'dimports.h',
+    'ictype.h', 'idos.h', 'idpmi.h', 'ifp.h', 'istdio.h', 'itime.h', 'iwin32.h', 'mm.h',
+  ];
+  const expectedIncludeHeaders = [
+    'assert.h', 'ctype.h', 'errno.h', 'fcntl.h', 'float.h', 'inttypes.h', 'iso646.h',
+    'limits.h', 'locale.h', 'math.h', 'setjmp.h', 'signal.h', 'stdarg.h', 'stddef.h',
+    'stdint.h', 'stdio.h', 'stdlib.h', 'string.h', 'time.h', 'unistd.h',
+  ];
+  assert.deepEqual(actualHeaderNames, expectedHeaderNames,
+    'browser-toolchain.mjsのHEADER_NAMESが検査側の明示リストとずれています');
+  assert.deepEqual(actualIncludeHeaders, expectedIncludeHeaders,
+    'browser-toolchain.mjsのINCLUDE_HEADERSが検査側の明示リストとずれています');
+  assert.ok(toolchainSrc.includes('../toolchain/smlrc-wasm/csrc/${area}/${name}'),
+    'browser-toolchain.mjsのヘッダfetch元テンプレートが想定と違います(csrc/を指していない)');
+  assert.ok(toolchainSrc.includes("'../toolchain/smlrc-wasm/lcds.a'"),
+    'browser-toolchain.mjsのlcds.a fetch元が想定と違います');
+
+  let toolchainRefCount = 0;
+  for (const name of expectedHeaderNames) {
+    const area = expectedIncludeHeaders.includes(name) ? 'include' : 'srclib';
+    assertTracked('toolchain/smlrc-wasm/dummy', `./csrc/${area}/${name}`);
+    toolchainRefCount += 1;
+  }
+  assert.equal(toolchainRefCount, 29, `同梱ヘッダの検査本数が29本ではありません: ${toolchainRefCount}`);
+  assertTracked('toolchain/smlrc-wasm/dummy', './lcds.a');
+
+  // --- ide/toolchain.js: デバッガローダのアセンブル元 ---
+  const bootToolchainSrc = readFileSync(resolve(IDE_DIR, 'toolchain.js'), 'utf8');
+  assert.ok(bootToolchainSrc.includes("'./debug-loader.asm'"),
+    'toolchain.jsのデバッガローダfetch元が想定と違います');
+  assertTracked('ide/toolchain.js', './debug-loader.asm');
+
+  // --- nasm-wasm/smlrc-wasm: locateFileで参照するwasmバイナリ(.jsは<script src>側で検査済み) ---
+  assert.ok(toolchainSrc.includes('../toolchain/nasm-wasm/${name}'),
+    'browser-toolchain.mjsのNASM locateFileテンプレートが想定と違います');
+  assert.ok(toolchainSrc.includes('../toolchain/smlrc-wasm/${name}'),
+    'browser-toolchain.mjsのSmallerC locateFileテンプレートが想定と違います');
+  for (const wasmRel of [
+    'toolchain/nasm-wasm/nasm.wasm',
+    'toolchain/smlrc-wasm/smlrpp.wasm', 'toolchain/smlrc-wasm/smlrc.wasm', 'toolchain/smlrc-wasm/smlrl.wasm',
+  ]) {
+    assert.ok(tracked.has(wasmRel), `locateFileが参照するはずの${wasmRel}がgit追跡されていません`);
+  }
+
+  console.log(`[PASS] 公開集合の検査: git ls-files ${tracked.size}件を基準にindex.html/help.htmlの`
+    + `${htmlRefCount}参照とbrowser-toolchain.mjsの同梱ヘッダ29本・lcds.a・デバッガローダ・`
+    + `wasmバイナリ4本を追跡確認、陽性対照(未追跡パス)は不合格として検出`);
+}
+
 let server; let browser; let profile; let page;
 try {
+  verifyTrackedAssets();
   if (!process.env.PC98DEV_URL) server = await startServer();
   const puppeteer = await loadPuppeteer();
   profile = await mkdtemp(`${tmpdir()}/pc98dev-workbench-`);
