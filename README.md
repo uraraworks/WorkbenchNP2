@@ -72,8 +72,8 @@ NASMの`%line`も生成バイト自体はコメントと同一だったが、lis
 `toolchain/c-source-map.mjs`は`C行 → 物理ASM行 → NASM listing → .text実行offset`を合成する。
 1行に複数の非連続区間があれば全て保持し、prologue/epilogueやライブラリなど対応区間外の
 addressは近傍行へ寄せず`null`を返す。誤った行を示さないことを優先する。
-再現・ホスト版一致検証は [docs/smallerc-wasm.md](docs/smallerc-wasm.md)、
-実在コードの詳細は [docs/kensyuu-smallerc.md](docs/kensyuu-smallerc.md) を参照する。
+再現・ホスト版一致検証は [docs/smallerc-wasm.md](docs/smallerc-wasm.md) を参照する。
+題材にした1997年の実在コードそのものと、それを扱った文書は、完成までリポジトリへ含めていない。
 
 ## IDE UI
 
@@ -398,6 +398,16 @@ cd toolchain/nasm-wasm && ./build.sh
 ```
 
 ## 検証
+
+> **`samples/legacy/` を必要とする検証について**
+>
+> `samples/legacy/` には1996〜1997年に書かれた当時のソース（`saka/` の MASM、`kensyuu/` の C）が入っており、
+> デバッガ実証の題材として使っている。**このディレクトリは完成までリポジトリへ含めていない。**
+> そのため、クローンした環境では以下がソース不在で失敗する:
+> `verify-dos-text.mjs` / `verify-c-source-map.mjs` / `verify-saka-build.mjs` /
+> `convert-saka.mjs` / `ide/verify-saka-start.mjs` / `ide/verify-debug-map.mjs`。
+>
+> IDE本体の検証（`ide/verify-workbench.mjs`）はこれらに依存しないため、単独で完走する。
 
 ```bash
 cd toolchain

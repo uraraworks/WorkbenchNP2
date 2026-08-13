@@ -18,3 +18,13 @@ toolchain/smlrc-wasm/host/
 # OS / エディタ
 .DS_Store
 node_modules/
+
+# 1996〜1997年の当時のソース。デバッガ実証の題材として使っており
+# verify-saka-*.mjs / verify-dos-text.mjs 等はこれを必要とするが、
+# 完成までは配布しない（README「検証」節を参照）
+samples/legacy/
+
+# 当時のソースを直接扱った文書。samples/legacy/ と同じ扱いで完成まで配布しない
+docs/kensyuu-smallerc.md
+docs/saka-masm-inventory.md
+docs/saka-nasm.md
