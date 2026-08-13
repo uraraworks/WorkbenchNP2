@@ -56,6 +56,9 @@ async function loadCResources() {
   if (!cResourcesPromise) cResourcesPromise = (async () => {
     const entries = await Promise.all(HEADER_NAMES.map(async (name) => {
       const area = INCLUDE_HEADERS.has(name) ? 'include' : 'srclib';
+      // upstreamツリー(toolchain/smallerc-src/)は十数MBあり .gitignore しているため、
+      // 実行時に要る29本だけを csrc/ へ複製して配布対象に含めている。
+      // ここを smallerc-src/ へ戻すと手元では動くが公開サイトで404になる（実際に踏んだ）。
       return [name, await fetchBytes(`../toolchain/smlrc-wasm/csrc/${area}/${name}`)];
     }));
     return {
