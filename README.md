@@ -1,8 +1,15 @@
 # WorkbenchNP2
 
 ブラウザ完結の PC-98 開発環境（構築中）。
-[WebNP2](../WebNP2) を実行基盤に、C / アセンブラで書いたコードを
+[WebNP2](https://github.com/uraraworks/WebNP2) を実行基盤に、C / アセンブラで書いたコードを
 その場でビルド・実行・デバッグできるようにするのが目標。
+
+## Try it now
+
+- **Live site**: <https://uraraworks.github.io/WorkbenchNP2/>
+- **Help page (with screenshots)**: <https://uraraworks.github.io/WorkbenchNP2/ide/help.html?lang=en>
+
+> このREADMEは開発記録です。利用者向けの説明は上のヘルプページにあります。
 
 ## 現状（2026-08-13）
 

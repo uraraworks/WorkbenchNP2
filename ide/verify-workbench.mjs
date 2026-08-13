@@ -2000,6 +2000,42 @@ int StrLen (char *Str)
   }
   console.log('[PASS] help.html: HTTP 200, ?lang=en/ja切替(表示/title), 参照画像3枚すべてHTTP 200');
 
+  // --- ルートの転送: GitHub Pagesはリポジトリ直下を配信するが、アプリの実体は ide/ にある。
+  //     転送タグが書いてあることではなく、実際に ide/ へ着地することを測る。 ---
+  const rootUrl = new URL('../', BASE_URL).href;
+  const rootPage = await browser.newPage();
+  try {
+    const rootResponse = await rootPage.goto(rootUrl, { waitUntil: 'domcontentloaded' });
+    assert.equal(rootResponse.status(), 200, `ルートがHTTP 200ではありません: ${rootUrl}`);
+    // JS有効時は location.replace が走るので、ide/ に着くまで待つ。
+    await rootPage.waitForFunction(() => location.pathname.endsWith('/ide/'), { timeout: 10_000 });
+    const landed = await rootPage.evaluate(() => ({
+      pathname: location.pathname,
+      title: document.title,
+      // history に積まれていなければ戻るボタンでループしない(replace を使っている証拠)。
+      historyLength: history.length,
+    }));
+    assert.ok(landed.pathname.endsWith('/ide/'), `ルートからide/へ着地しません: ${landed.pathname}`);
+    assert.ok(landed.title.startsWith('WorkbenchNP2'), `着地先のtitleが想定と違います: ${landed.title}`);
+
+    // JSを切っても meta refresh で届くこと。転送手段が1本だけだと無効環境で行き止まりになる。
+    const noScriptPage = await browser.newPage();
+    try {
+      await noScriptPage.setJavaScriptEnabled(false);
+      await noScriptPage.goto(rootUrl, { waitUntil: 'domcontentloaded' });
+      const html = await noScriptPage.content();
+      assert.ok(/http-equiv=["']refresh["']/i.test(html), 'JS無効時のフォールバック(meta refresh)がありません');
+      assert.ok(/href=["']\.\/ide\/["']/.test(html), 'JS無効時に辿れる ide/ へのリンクがありません');
+    } finally {
+      await noScriptPage.close();
+    }
+    // 規律: 陽性対照。判定が常に真になっていないことを逆の期待値で実測してから戻す。
+    assert.throws(() => assert.ok(landed.pathname.endsWith('/nowhere/')));
+  } finally {
+    await rootPage.close();
+  }
+  console.log('[PASS] root redirect: / → /ide/ に実着地(title確認)、JS無効でもmeta refreshとリンクで辿れる');
+
   console.log(`[SHOT] ${DESKTOP_SHOT}`);
   console.log(`[SHOT] ${MOBILE_SHOT}`);
 } catch (error) {

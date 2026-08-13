@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WorkbenchNP2</title>
+  <link rel="icon" type="image/svg+xml" href="./ide/pc98dev-icon.svg">
+  <!--
+    GitHub Pages はリポジトリ直下を配信するが、アプリの実体は ide/index.html にある。
+    このページはそこへ送るためだけのもの。
+
+    3経路とも用意する: canonical(検索エンジン向け) / meta refresh(JSが無くても動く) /
+    location.replace(即座に飛ぶ。history に残さないので戻るボタンがループしない)。
+    meta refresh の 0 秒指定だけに頼らないのは、JSが有効なら replace の方が速く、
+    無効なら refresh が拾う、という二重化のため。
+  -->
+  <link rel="canonical" href="https://uraraworks.github.io/WorkbenchNP2/ide/">
+  <meta http-equiv="refresh" content="0; url=./ide/">
+  <style>
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #1f1f1f;
+      color: #cccccc;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Yu Gothic', sans-serif;
+      font-size: 14px;
+    }
+    a { color: #4daafc; }
+  </style>
+</head>
+<body>
+  <p>
+    <span lang="ja">読み込んでいます… 切り替わらない場合は</span>
+    <a href="./ide/">こちら</a>
+    <span lang="ja">から開いてください。</span>
+  </p>
+  <script>
+    // クエリとハッシュは捨てずに引き継ぐ（将来アプリ側が受け取るようになっても壊れないように）。
+    location.replace('./ide/' + location.search + location.hash);
+  </script>
+</body>
+</html>
