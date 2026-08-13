@@ -174,7 +174,7 @@ try {
 
   // --- タブ名/アイコン/タグラインの英語化（WebNP2と書式を揃える） ---
   const EXPECTED_TITLE = 'WorkbenchNP2 - PC-98 Development Environment';
-  const EXPECTED_TAGLINE = 'An online workbench for PC-9801/PC-9821 — write, run and debug in the browser';
+  const EXPECTED_TAGLINE = 'An online workbench for PC-98 — write, run and debug in the browser';
   const branding = await page.evaluate(() => ({
     title: document.title,
     tagline: document.querySelector('.app-tagline')?.textContent ?? '',
