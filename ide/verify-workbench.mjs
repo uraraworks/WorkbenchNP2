@@ -16,6 +16,24 @@ const CHROME = process.env.CHROME_PATH ?? '/Applications/Google Chrome.app/Conte
 const SHOT_DIR = process.env.PC98DEV_SHOT_DIR ?? `${tmpdir()}/pc98dev-shots`;
 const DESKTOP_SHOT = `${SHOT_DIR}/pc98dev-workbench-desktop.png`;
 const MOBILE_SHOT = `${SHOT_DIR}/pc98dev-workbench-mobile.png`;
+// 同梱サンプルをhello.asm/hello-c.cの2本へ絞ったため、同一DOSセッションでの
+// 再実行・終了コード伝播テストの題材(旧samples/second-run.asm)は同梱サンプルとして
+// 引けなくなった。回帰シナリオ自体には価値があるので、原文をここへ直接持たせ、
+// 作業ファイル(project origin)としてcreateFile()+setValue()で書いてから開く。
+const SECOND_RUN_ASM_SOURCE = `; 同一DOSセッションでのデバッガローダ再実行・終了コード伝播テスト
+\tCPU\t8086
+\tBITS\t16
+\tORG\t100h
+
+start:
+\tmov\tah,09h
+\tmov\tdx,msg
+\tint\t21h
+\tmov\tax,4C25h
+\tint\t21h
+
+msg\tdb\t'Second debug run!', 0Dh, 0Ah, '$'
+`;
 
 async function loadPuppeteer() {
   try { return (await import('puppeteer-core')).default; }
@@ -338,21 +356,21 @@ try {
     '0件の作業ファイルグループにプレースホルダ行がありません');
   assert.ok(initialTree.samples > 1, '同梱サンプルがファイルツリーへ出ていません');
   assert.equal(initialTree.sampleEntryText, 'hello.asm', 'サンプルのエントリ表示がbasenameになっていません');
-  await page.click('#file-tree .file-entry[data-origin="sample"][data-path="samples/second-run.asm"]');
-  await page.waitForFunction(() => window.pc98workbench.getState().currentPath === 'samples/second-run.asm');
+  await page.click('#file-tree .file-entry[data-origin="sample"][data-path="samples/hello-c.c"]');
+  await page.waitForFunction(() => window.pc98workbench.getState().currentPath === 'samples/hello-c.c');
   const selectedTreeEntry = await page.evaluate(() => ({
     tabs: window.pc98workbench.getTabs(),
     selectedPath: document.querySelector('#file-tree .file-entry[aria-selected="true"]')?.dataset.path,
   }));
   assert.equal(selectedTreeEntry.tabs.length, 2, 'ファイルツリーのクリックでタブが開きません');
-  assert.equal(selectedTreeEntry.selectedPath, 'samples/second-run.asm', '開いたファイルがツリーで選択されません');
+  assert.equal(selectedTreeEntry.selectedPath, 'samples/hello-c.c', '開いたファイルがツリーで選択されません');
   const switchedTreeEntry = await page.evaluate((id) => {
     window.pc98workbench.activateTab(id);
     return document.querySelector('#file-tree .file-entry[aria-selected="true"]')?.dataset.path;
   }, initialTabId);
   assert.equal(switchedTreeEntry, 'samples/hello.asm', 'タブ切替へファイルツリーの選択が追従しません');
   await page.evaluate(async () => {
-    const extra = window.pc98workbench.getTabs().find((tab) => tab.path === 'samples/second-run.asm');
+    const extra = window.pc98workbench.getTabs().find((tab) => tab.path === 'samples/hello-c.c');
     await window.pc98workbench.closeTab(extra.id);
   });
   const toolButtonIds = [
@@ -487,14 +505,16 @@ try {
     `連続実行の区切り行が2本未満です: ${separators}本 / ${JSON.stringify(secondRun.screen.lines.slice(-8))}`);
 
   // --- 複数ファイルタブ: 本文・dirty・BPをファイル単位で保持する ---
-  const tabFixture = await page.evaluate(async () => {
+  const tabFixture = await page.evaluate(async (secondSource) => {
     const wb = window.pc98workbench;
     const source = wb.getValue();
     const first = wb.getTabs().find((tab) => tab.active);
-    await wb.openFile('sample', 'samples/second-run.asm');
+    await wb.createFile('second-run.asm');
+    wb.setValue(secondSource);
+    await wb.saveFile(); // 未編集状態から始めたいので、テンプレ→本文書き込みぶんはここで保存して消す。
     const second = wb.getTabs().find((tab) => tab.active);
     const countBeforeDuplicate = wb.getTabs().length;
-    await wb.openFile('sample', 'samples/second-run.asm');
+    await wb.openFile('project', 'second-run.asm');
     const countAfterDuplicate = wb.getTabs().length;
 
     wb.activateTab(first.id);
@@ -532,7 +552,7 @@ try {
       renderedAfterClose: document.querySelectorAll('#tab-strip .tab-item').length,
       lastCloseDisabled: document.querySelector('#tab-strip .tab-close').disabled,
     };
-  });
+  }, SECOND_RUN_ASM_SOURCE);
   assert.equal(tabFixture.countBeforeDuplicate, 2, '別ファイルを開いてもタブが2枚になりません');
   assert.equal(tabFixture.countAfterDuplicate, 2, '同じファイルを再度開いてタブが増えました');
   assert.equal(tabFixture.whileSecond.find((tab) => tab.id === tabFixture.first.id).dirty, true,
@@ -1414,7 +1434,39 @@ try {
   await page.evaluate((source) => window.pc98workbench.setValue(source), unlocked.source);
 
   // C側は1997年のSTRLEN.Cを、原文の行番号のままエディタ上でBP停止させる。
-  await page.evaluate(() => window.pc98workbench.openFile('sample', 'samples/legacy/kensyuu/STRLEN.C'));
+  // 同梱サンプルを2本へ絞ったため同梱サンプルとしては引けない。原文(CP932→UTF-8変換済み、
+  // 行番号は完全に同一)を作業ファイル(project origin)としてcreateFile()+setValue()で書いてから開く。
+  const STRLEN_C_SOURCE = `//文字列の長さ関数
+//ｂｙ 春うらら 1997.6.30
+#include <stdio.h>
+
+int StrLen(char *Str);
+
+void main (void)
+{
+\tint Len;
+\t
+\tLen=StrLen("ABC");
+\tprintf ("%d\\n",Len);
+}
+
+int StrLen (char *Str)
+{
+\tint Len;
+\t
+\tLen=0;
+\twhile (*Str!=0)
+\t{
+\t\tLen++;
+\t\tStr++;
+\t}
+\treturn (Len);
+}
+`;
+  await page.evaluate(async (source) => {
+    await window.pc98workbench.createFile('strlen.c');
+    window.pc98workbench.setValue(source);
+  }, STRLEN_C_SOURCE);
   // BP行は行番号そのものなので、別ファイルを開いたら持ち越さない。
   assert.equal((await page.evaluate(() => window.pc98workbench.getEditorMarks())).breakpointDots, 0,
     'ファイルを切り替えてもBP印が残っています');
@@ -1491,7 +1543,9 @@ try {
     const wb = window.pc98workbench;
     const retriesBefore = wb.getDriveErrorRetries();
     const remountsBefore = wb.getDriveRemounts();
-    await wb.openFile('sample', 'samples/second-run.asm');
+    // second-run.asmは同梱サンプルから外れたため、tabFixtureで作成済みの
+    // 作業ファイル(project origin)を開き直す。
+    await wb.openFile('project', 'second-run.asm');
     await wb.buildCurrent();
     const run = await wb.runCurrent();
     const debug = await wb.startDebug();
@@ -1648,7 +1702,7 @@ try {
   const freshDebugStart = Date.now();
   await page.evaluate(async () => {
     const wb = window.pc98workbench;
-    await wb.openFile('sample', 'samples/second-run.asm');
+    await wb.openFile('project', 'second-run.asm');
     await wb.buildCurrent();
   });
   const freshDebug = await page.evaluate(() => window.pc98workbench.startDebug());

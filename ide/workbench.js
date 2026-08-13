@@ -1155,7 +1155,6 @@ async function openFile(origin, path) {
     return;
   }
   let content;
-  let encoding = 'utf-8';
   if (origin === 'sample') {
     const sample = SAMPLE_FILES.find((entry) => entry.path === path);
     if (!sample) throw new Error(`${path}は同梱サンプルではありません`);
@@ -1164,12 +1163,11 @@ async function openFile(origin, path) {
     const record = await projectFS.read(path);
     if (!record) throw new Error(`${path}が${ORIGIN_LABELS[origin]}にありません`);
     content = record.content;
-    encoding = record.encoding ?? 'utf-8';
   } else {
     throw new Error(`${origin}は不明な保存先です`);
   }
   const tab = {
-    id: nextTabId++, origin, path, encoding, text: content, savedText: content,
+    id: nextTabId++, origin, path, text: content, savedText: content,
     breakpoints: new Set(), build: undefined, debugMap: undefined, cursor: 0, errors: [],
   };
   tabs.push(tab);
@@ -1180,8 +1178,7 @@ async function openFile(origin, path) {
 function setCurrentPathLabel() {
   const tab = activeTab();
   if (!tab) { nodes.currentPath.textContent = ''; return; }
-  const encoding = tab.encoding === 'utf-8' ? '' : `（${tab.encoding}）`;
-  nodes.currentPath.textContent = `${ORIGIN_LABELS[tab.origin]} / ${tab.path}${encoding}`;
+  nodes.currentPath.textContent = `${ORIGIN_LABELS[tab.origin]} / ${tab.path}`;
 }
 
 async function saveFile() {
@@ -1197,7 +1194,6 @@ async function saveFile() {
   await projectFS.write(targetPath, tab.text);
   tab.origin = target;
   tab.path = targetPath;
-  tab.encoding = 'utf-8';
   tab.savedText = tab.text;
   renderTabs();
   if (activeTabId === tab.id) {
