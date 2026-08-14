@@ -1,0 +1,36 @@
+diff --git a/v0100/smlrc.c b/v0100/smlrc.c
+index 04681be..3138783 100644
+--- a/v0100/smlrc.c
++++ b/v0100/smlrc.c
+@@ -188,11 +188,29 @@ int fsetpos(FILE*, fpos_t*);
+ #endif
+ 
+ #ifndef MAX_IDENT_TABLE_LEN
+-#define MAX_IDENT_TABLE_LEN  (4096+1024+512) // must be greater than MAX_IDENT_LEN
++// pc98dev-c: upstream default (4096+1024+512=5632) exhausts on a single large
++// translation unit (98fmplayer's fmdriver_pmd.c, 6114 lines) with
++// "Identifier table exhausted". Measured (binary search, host smlrc,
++// -huge, that same source) the minimum passing value is between 11648
++// (fails) and 11776 (passes); this raises it to 16384 (~1.4x the measured
++// minimum, ~2.9x upstream default) for headroom. Also raises
++// MAX_GLOBALS_TABLE_LEN in cgx86.c, which is #define'd as this same
++// constant, by the same amount (GlobalsTable is a second char[] of this
++// size). Memory delta: two char[] arrays growing by (16384-5632)=10752
++// bytes each => +21504 bytes total, negligible for the wasm build (heap
++// growth is enabled) and for the DOS host tool.
++#define MAX_IDENT_TABLE_LEN  16384 // must be greater than MAX_IDENT_LEN
+ #endif
+ 
+ #ifndef SYNTAX_STACK_MAX
+-#define SYNTAX_STACK_MAX (2048+1024)
++// pc98dev-c: same measurement as MAX_IDENT_TABLE_LEN above; after raising
++// the identifier table, the next wall on the same source was "Symbol table
++// exhausted". Measured minimum passing value is between 4896 (fails) and
++// 4912 (passes); this raises it to 6144 (~1.25x the measured minimum, 2x
++// upstream default (2048+1024=3072)) for headroom. Memory delta:
++// SyntaxStack0[] (+3072 bytes, 1 byte/entry) and SyntaxStack1[] (+12288
++// bytes, 4 bytes/entry in this int32 build) => +15360 bytes total.
++#define SYNTAX_STACK_MAX 6144
+ #endif
+ 
+ #ifndef MAX_FILE_NAME_LEN

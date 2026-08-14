@@ -13,7 +13,7 @@
 
 ## upstream パッチ
 
-SmallerC は1件、NASMは0件。
+SmallerC は2件、NASMは0件。
 
 - `patches/0001-pc98dev-c-line-comments.patch`
   - `v0100/smlrc.c`の`GetToken()`で行・ファイルを保存し、`ParseStatement()`から
@@ -22,6 +22,32 @@ SmallerC は1件、NASMは0件。
     prologue/epilogueや制御文後の補助ジャンプを直前のC行へ誤帰属させないためである。
   - NASMの`%line`は生成バイトを変えない一方、listingの物理ASM行と構造化エラー行を
     変更することを実測したため使わない。通常コメントは両方を維持する。
+
+- `patches/0002-raise-ident-and-syntax-table-limits.patch`
+  - `v0100/smlrc.c`の`MAX_IDENT_TABLE_LEN`（識別子名の内部テーブル総バイト数）と
+    `SYNTAX_STACK_MAX`（型・宣言のシンボルスタック段数）を、upstreamデフォルトの
+    5632バイト／3072段から16384バイト／6144段へ引き上げる。
+  - 背景（`FMSound/docs/pmd-driver-port-feasibility.md`参照）: 98fmplayerの
+    PMDドライバ再実装`fmdriver_pmd.c`（6114行）を`-huge`で単体コンパイルすると、
+    upstreamデフォルトでは`Identifier table exhausted`（識別子テーブル枯渇）で
+    停止する。ヘッダのみでは枯渇せず本体が原因であることは切り分け済み。
+  - 値は闇雲に大きくせず、ホスト版`smlrc`を`-DMAX_IDENT_TABLE_LEN=N`
+    `-DSYNTAX_STACK_MAX=N`で再ビルドしながら同じ`fmdriver_pmd.c`を二分探索して
+    決めた。識別子テーブルは11648（失敗）〜11776（成功）が境界、シンボルスタックは
+    （識別子テーブルを先に十分な値にした状態で）4896（失敗）〜4912（成功）が境界。
+    採用値はそれぞれ実測下限の約1.4倍・約1.25倍（識別子テーブルはupstream比約2.9倍、
+    シンボルスタックは同2倍）。
+  - `MAX_GLOBALS_TABLE_LEN`（`cgx86.c:43`、`MAX_IDENT_TABLE_LEN`と同値で定義）も
+    連動して同じ値まで上がる。追加のパッチは不要（同じマクロを再利用しているため）。
+  - メモリ増分: `IdentTable[]`と`GlobalsTable[]`（各char[]、+10752バイト）、
+    `SyntaxStack0[]`（unsigned char[]、+3072バイト）、`SyntaxStack1[]`（int[]、
+    +12288バイト）の合計で約26KB。wasm版はヒープ自動拡張が有効なため無視できる
+    増分。ホスト版（DOSツールとしては使わない開発用バイナリ）でも同様に無視できる。
+  - この2定数を引き上げても、6114行の`fmdriver_pmd.c`が`-huge`で最後まで
+    コンパイルできることをホスト版`smlrc`とwasm版`smlrc.js`の両方で確認済み
+    （詳細は`FMSound/docs/pmd-driver-port-feasibility.md`）。ただし実測したのは
+    「単体コンパイルが通り、コード/データサイズが実測できる」ことまでで、
+    リンク・実機動作は本パッチの検証対象外。
 
 `build.sh` は完全なgit cloneだけを受理し、HEADが上記revisionと一致すること、
 tracked・staged・untrackedを含めworktreeがcleanであることをパッチ適用前に検証する。
