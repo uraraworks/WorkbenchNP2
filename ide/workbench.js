@@ -84,10 +84,21 @@ let nextTabId = 1;
 let debugTabId;
 let confirmTabClose = (message) => window.confirm(message);
 let freeDos;
-// hostdrv経路(併走の実験的経路)を使うかどうかは、コアがページごとに1回しか起動できない
-// ため起動前(プリウォーム前)に一度だけURLパラメータ ?hostdrv=1 で決める。既定はFD経路
-// (従来どおりFAT12を組み立ててB:を差し替える方式)のまま: 実績があり、まず壊れない。
-const HOSTDRV_MODE = new URLSearchParams(location.search).get('hostdrv') === '1';
+// hostdrv経路を使うかどうかは、コアがページごとに1回しか起動できないため起動前
+// (プリウォーム前)に一度だけURLパラメータで決める。既定はhostdrv経路。?hostdrv=0を
+// 明示したときだけ従来のFD経路(FAT12を組み立ててB:を差し替える方式)を使う。
+// HOSTDRV_MODEはletで、常駐失敗を検出した場合checkHostdrvBootResult()がfalseへ
+// 落とし込む(フォールバック)。以降のコードはすべてこの実効値を見る。
+const HOSTDRV_URL_PARAMS = new URLSearchParams(location.search);
+const HOSTDRV_REQUESTED = HOSTDRV_URL_PARAMS.get('hostdrv') !== '0';
+// テスト専用の故障注入。HOSTDRV.COMを足さないプレーンな起動イメージのまま
+// hostdrv経路の常駐を試みさせ、必ず失敗させる。フォールバック経路の実測にのみ使い、
+// 通常のhostdrv/FD経路には一切影響しない。
+const HOSTDRV_FAIL_TEST = HOSTDRV_URL_PARAMS.get('hostdrvFailTest') === '1';
+let HOSTDRV_MODE = HOSTDRV_REQUESTED;
+// 常駐成功時にHOSTDRV.COMが表示する行(実測済み)。「エラーが出ていない」ことではなく、
+// この合図が実際に出ていることをもって成功と判定する。
+const HOSTDRV_SUCCESS_PATTERN = new RegExp(`assigned host-drive to ${HOSTDRV_DRIVE}:`, 'i');
 let runSequence = 0;
 let driveErrorRetries = 0;
 let driveRemounts = 0;
@@ -1296,11 +1307,32 @@ function startBoot(programFd, programName, programKey) {
   return tracked;
 }
 
+/**
+ * 起動直後の画面からhostdrv常駐の成否を判定する。成功の合図
+ * (HOSTDRV_SUCCESS_PATTERN)が実際に出ているかだけを見る。「cannot assign」等の
+ * 明示的なエラーが出ていない場合でも、合図が無ければ失敗として扱う
+ * (「エラーが出ていない」を成功と読まない)。
+ * 失敗と判定したら黙って落とさず、実効値HOSTDRV_MODEをfalseへ落として以降を
+ * FD経路へ切り替え、利用者にも見える形で知らせる。
+ */
+function checkHostdrvBootResult(screen) {
+  if (!HOSTDRV_MODE) return;
+  const text = screen?.text ?? '';
+  if (HOSTDRV_SUCCESS_PATTERN.test(text)) return;
+  const reason = HOSTDRV_FAIL_TEST ? 'hostdrvFailTest=1による故障注入' : '常駐成功の合図が画面に見つからない';
+  console.warn(`hostdrv経路: ホストドライブの常駐に失敗しました(${reason})。FD経路へフォールバックします。起動画面:\n${text}`);
+  HOSTDRV_MODE = false;
+  setMachineStatus('ホストドライブを準備できませんでした。ディスク経由の実行に切り替えます');
+}
+
 function startPrewarm() {
   setMachineStatus('エミュレータを起動しています…');
   const attempt = makeLoaderOnlyFd().then((fd) => (
     startBoot(fd, 'loader-only.xdf', 'workbench:loader-only')
-  )).catch((error) => {
+  )).then((screen) => {
+    checkHostdrvBootResult(screen);
+    return screen;
+  }).catch((error) => {
     setMachineStatus(`エミュレータの起動に失敗しました: ${error.message}`, true);
     throw error;
   });
@@ -1786,7 +1818,9 @@ async function initialize() {
   freeDos = new Uint8Array(await response.arrayBuffer());
   // hostdrv経路: 起動イメージのコピーへHOSTDRV.COMを足し、AUTOEXEC.BATでHOSTDRV_DRIVEへ
   // 自動常駐させる。原本のfreeDos(FD経路が使う変数)は書き換えず、別変数へ入れ替える。
-  if (HOSTDRV_MODE) freeDos = await buildHostdrvBootImage(freeDos);
+  // HOSTDRV_FAIL_TEST時はHOSTDRV.COMを足さないプレーンな原本のまま起動し、常駐を
+  // 意図的に失敗させる(checkHostdrvBootResult()のフォールバックを実測するための故障注入)。
+  if (HOSTDRV_MODE && !HOSTDRV_FAIL_TEST) freeDos = await buildHostdrvBootImage(freeDos);
   // ローダだけのB:を入れて起動を始めるが、エディタ初期化は完了を待たずに進める。
   startPrewarm();
   await refreshFileTree();
@@ -1867,10 +1901,13 @@ ready.catch((error) => {
 });
 window.pc98workbench = {
   prewarm,
-  hostdrvMode: HOSTDRV_MODE,
+  // getterにして常に実効値を返す。checkHostdrvBootResult()がフォールバック後に
+  // HOSTDRV_MODEをfalseへ落とすため、代入した値をそのまま公開すると要求値のまま
+  // 固まってしまい、検証側のドライブ文字選択(hostdrvDrive)が壊れる。
+  get hostdrvMode() { return HOSTDRV_MODE; },
   // 実行/デバッグでプログラムを置くドライブ。経路によって変わるので、検証側が
   // 'B' を直書きせずに済むよう実効値を公開する。
-  hostdrvDrive: HOSTDRV_MODE ? HOSTDRV_DRIVE : 'B',
+  get hostdrvDrive() { return HOSTDRV_MODE ? HOSTDRV_DRIVE : 'B'; },
   ready, openFile, createFile, saveFile, buildCurrent, runCurrent,
   getTabs, activateTab, closeTab, setConfirm,
   startDebug, stopDebug, toggleBreakpoint, stepInstruction, stepOverLine, stepInto,
