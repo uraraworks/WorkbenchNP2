@@ -211,7 +211,12 @@ try {
   const pageErrors = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
   await page.setViewport({ width: 1400, height: 900, deviceScaleFactor: 1 });
-  await page.goto(BASE_URL, { waitUntil: 'networkidle2' });
+  // networkidle2に達するまでの実測(2026-08-28、load average 9前後):
+  // hostdrv経路が20〜30秒、FD経路は52〜56秒。FD経路はプログラムFDの組み立てと
+  // メディア交換があるぶん倍近くかかる。puppeteerの既定30秒だと、負荷が高いときに
+  // FD経路(?hostdrv=0)だけが中身と無関係にタイムアウトして「退行」に見えるため、
+  // 起動待ちの上限を明示する。これは環境待ちの猶予であって、検査の緩和ではない。
+  await page.goto(BASE_URL, { waitUntil: 'networkidle2', timeout: 120_000 });
   await page.evaluate(() => window.pc98workbench.ready);
   assert.deepEqual(pageErrors, []);
   const shell = await page.evaluate(() => ({
@@ -2129,16 +2134,18 @@ int StrLen (char *Str)
     assert.ok(landed.title.startsWith('WorkbenchNP2'), `着地先のtitleが想定と違います: ${landed.title}`);
 
     // JSを切っても meta refresh で届くこと。転送手段が1本だけだと無効環境で行き止まりになる。
-    const noScriptPage = await browser.newPage();
-    try {
-      await noScriptPage.setJavaScriptEnabled(false);
-      await noScriptPage.goto(rootUrl, { waitUntil: 'domcontentloaded' });
-      const html = await noScriptPage.content();
-      assert.ok(/http-equiv=["']refresh["']/i.test(html), 'JS無効時のフォールバック(meta refresh)がありません');
-      assert.ok(/href=["']\.\/ide\/["']/.test(html), 'JS無効時に辿れる ide/ へのリンクがありません');
-    } finally {
-      await noScriptPage.close();
-    }
+    // ここで見たいのは「配信されるHTMLに転送手段が2本入っているか」だけなので、
+    // ブラウザを介さず素のfetchで本文を取る。
+    //
+    // 以前はJSを切ったページを開いて page.content() を読んでいたが、JS無効でも
+    // meta refresh は効くため ide/ への遷移と競合する。高負荷時に
+    // 「Execution context was destroyed」で落ちた(実測: load average 11)。
+    // これを goto の応答本体から読む形に変えたところ、遷移でコンテキストが消えた後は
+    // 本文を取得できず、例外にもならずに待ち続けた(実測: 2時間以上ハングして手で止めた)。
+    // 遷移が起こりうる限りブラウザ経由では競合が残るので、経路ごと外してある。
+    const noScriptHtml = await (await fetch(rootUrl)).text();
+    assert.ok(/http-equiv=["']refresh["']/i.test(noScriptHtml), 'JS無効時のフォールバック(meta refresh)がありません');
+    assert.ok(/href=["']\.\/ide\/["']/.test(noScriptHtml), 'JS無効時に辿れる ide/ へのリンクがありません');
     // 規律: 陽性対照。判定が常に真になっていないことを逆の期待値で実測してから戻す。
     assert.throws(() => assert.ok(landed.pathname.endsWith('/nowhere/')));
   } finally {
