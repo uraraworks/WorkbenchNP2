@@ -11,7 +11,9 @@ import { bootFreeDos, waitForCurrentDosPrompt } from './freedos-session.mjs';
 import {
   answerDriveErrorAbort, currentDosPrompt, DOS_DRIVE_ERROR_PATTERN,
 } from './dos-prompt.mjs';
-import { LOADER_NAME, buildSource, makeLoaderOnlyFd } from './browser-toolchain.mjs';
+import {
+  HOSTDRV_DRIVE, LOADER_NAME, buildHostdrvBootImage, buildSource, makeLoaderOnlyFd,
+} from './browser-toolchain.mjs';
 import { debugMapForBuild } from './debug-map.mjs';
 import { createDebugSession } from './debug-session.mjs';
 import { CONTROL, parseLoaderControl } from './loader-control.mjs';
@@ -81,6 +83,10 @@ let nextTabId = 1;
 let debugTabId;
 let confirmTabClose = (message) => window.confirm(message);
 let freeDos;
+// hostdrv経路(併走の実験的経路)を使うかどうかは、コアがページごとに1回しか起動できない
+// ため起動前(プリウォーム前)に一度だけURLパラメータ ?hostdrv=1 で決める。既定はFD経路
+// (従来どおりFAT12を組み立ててB:を差し替える方式)のまま: 実績があり、まず壊れない。
+const HOSTDRV_MODE = new URLSearchParams(location.search).get('hostdrv') === '1';
 let runSequence = 0;
 let driveErrorRetries = 0;
 let driveRemounts = 0;
@@ -1272,7 +1278,8 @@ function startBoot(programFd, programName, programKey) {
   setMachineStatus('エミュレータを起動しています…');
   let tracked;
   tracked = bootFreeDos(engine, {
-    freeDos, freeDosKey: 'workbench:freedos', programFd, programName, programKey,
+    freeDos, freeDosKey: HOSTDRV_MODE ? 'workbench:freedos-hostdrv' : 'workbench:freedos',
+    programFd, programName, programKey, hostdrv: HOSTDRV_MODE,
     onScreen: (screen) => { setScreenText(screen.text); },
   }).then((screen) => {
     if (!recordDriveErrorRetries(screen.driveErrorRetries)) {
@@ -1298,6 +1305,25 @@ function startPrewarm() {
   });
   attempt.then(resolvePrewarm, rejectPrewarm);
   return attempt;
+}
+
+/**
+ * hostdrv経路: FD組み立て・差し替えを一切経由せず、ビルド成果物をwriteHostFile()で
+ * ホスト側(HOSTDRV_DRIVE、既定D:)へ直接置く。媒体交換のダンスも排出も要らない。
+ * ローダ(E0LOAD.COM)は同梱しない — 現状このIDEでは「実行」自体がローダを経由しない
+ * (built.fdへは同梱されるが、runCurrent()はB:\<dosName>を直接起動する)ため、
+ * hostdrv経路でも同じ最小構成(プログラム本体のみ)に揃える。デバッグ(4B01hローダ)は
+ * hostdrv化しておらず、常に従来のFD経路を使う(スコープ外、下記参照)。
+ */
+async function mountProgramHostdrv(built) {
+  // 通常はページ初期化時のstartPrewarm()で既にbootedが立っている。万一まだなら
+  // ローダなしで起動だけやり直す(hostdrv経路はB:のプログラムFDを使わない)。
+  if (!booted) startBoot(undefined, 'loader-only.xdf', 'workbench:loader-only');
+  try { await booted; } catch {}
+  const baseline = engine.getScreenText();
+  setMachineStatus('ビルド成果物をホストドライブへ書き込んでいます…');
+  engine.writeHostFile(built.dosName, built.output);
+  return { baseline, name: built.dosName, key: `hostdrv:${built.dosName}:${runSequence++}` };
 }
 
 async function mountProgramFd(built) {
@@ -1390,6 +1416,19 @@ async function runCurrent() {
   const built = activeTab()?.build ?? await buildCurrent();
   if (!built?.ok) return built;
   if (session?.isStarted()) await stopDebug();
+  if (HOSTDRV_MODE) {
+    // hostdrv経路: 媒体交換もドライブエラー再試行も要らない(ホスト側ファイルの
+    // 書き込みは即時反映され、FDのように「未準備」状態を経由しないため)。
+    const mounted = await mountProgramHostdrv(built);
+    setMachineStatus(`${built.dosName}を実行中…`);
+    await engine.pasteText(`${HOSTDRV_DRIVE}:\\${built.dosName}\r`);
+    const screen = await waitForCurrentDosPrompt(engine, { baseline: mounted.baseline.text, timeout: 60_000 });
+    setScreenText(screen.text);
+    if (!recordDriveErrorRetries(screen.driveErrorRetries)) {
+      setMachineStatus(`${built.dosName} 終了・DOSプロンプト復帰`);
+    }
+    return { ...built, screen };
+  }
   const mounted = await mountProgramFd(built);
   const screen = await withDriveRecovery(async () => {
     const baseline = engine.getScreenText();
@@ -1706,6 +1745,9 @@ async function initialize() {
   const response = await fetch('./freedos/fd98_2hd.xdf');
   if (!response.ok) throw new Error(`FreeDOS: HTTP ${response.status}`);
   freeDos = new Uint8Array(await response.arrayBuffer());
+  // hostdrv経路: 起動イメージのコピーへHOSTDRV.COMを足し、AUTOEXEC.BATでHOSTDRV_DRIVEへ
+  // 自動常駐させる。原本のfreeDos(FD経路が使う変数)は書き換えず、別変数へ入れ替える。
+  if (HOSTDRV_MODE) freeDos = await buildHostdrvBootImage(freeDos);
   // ローダだけのB:を入れて起動を始めるが、エディタ初期化は完了を待たずに進める。
   startPrewarm();
   await refreshFileTree();
@@ -1786,6 +1828,7 @@ ready.catch((error) => {
 });
 window.pc98workbench = {
   prewarm,
+  hostdrvMode: HOSTDRV_MODE,
   ready, openFile, createFile, saveFile, buildCurrent, runCurrent,
   getTabs, activateTab, closeTab, setConfirm,
   startDebug, stopDebug, toggleBreakpoint, stepInstruction, stepOverLine, stepInto,

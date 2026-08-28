@@ -122,6 +122,44 @@ function equalName(image, offset, bytes) {
 }
 
 /**
+ * Read a single file's bytes from the root directory of a FAT12 disk image.
+ * Returns null if no matching entry exists. Read-only; never modifies image.
+ * @param {Uint8Array} image
+ * @param {string} name
+ * @param {string} ext
+ * @returns {Uint8Array | null}
+ */
+export function readRootFile(image, name, ext) {
+  const bpb = parseBpb(image);
+  const shortName = shortNameBytes(
+    validateComponent(name, 'name', 8),
+    validateComponent(ext, 'ext', 3, true),
+  );
+  for (let index = 0; index < bpb.rootEntries; index++) {
+    const offset = bpb.rootOffset + index * 32;
+    const first = image[offset];
+    if (first === 0x00) break;
+    if (first === 0xe5) continue;
+    if (image[offset + 11] === 0x0f || !equalName(image, offset, shortName)) continue;
+    const view = new DataView(image.buffer, image.byteOffset, image.byteLength);
+    const firstCluster = view.getUint16(offset + 26, true);
+    const size = view.getUint32(offset + 28, true);
+    const chain = chainFor(image, bpb, firstCluster, `${name}.${ext}`);
+    const output = new Uint8Array(size);
+    let written = 0;
+    for (const cluster of chain) {
+      if (written >= size) break;
+      const source = bpb.dataOffset + (cluster - 2) * bpb.clusterBytes;
+      const count = Math.min(bpb.clusterBytes, size - written);
+      output.set(image.subarray(source, source + count), written);
+      written += count;
+    }
+    return output;
+  }
+  return null;
+}
+
+/**
  * Add or replace files in the root directory of a FAT12 disk image.
  * The input image is never modified; a changed copy is returned.
  * @param {Uint8Array} image

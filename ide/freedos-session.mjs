@@ -64,6 +64,11 @@ export async function bootFreeDos(engine, options) {
       file: { name: options.programName, bytes: options.programFd }, sourceKey: options.programKey,
     };
   }
+  // hostdrv経路: options.freeDosがAUTOEXEC.BATでHOSTDRV.COMを常駐する開発用イメージの
+  // ときだけ渡す。コアはページごとに1回しか起動できないため、この経路の選択は
+  // 起動前(プリウォーム時点)に一度だけ決まる。access='rwd'はビルドのたびに古い出力を
+  // 削除できないと詰まるため(1=読み/2=書き/4=削除のビットフラグ)。
+  if (options.hostdrv) boot.hostdrv = { access: 'rwd' };
   await engine.boot(boot);
   return waitForCurrentDosPrompt(engine, { timeout: options.timeout, onScreen: options.onScreen });
 }

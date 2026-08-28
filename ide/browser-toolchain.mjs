@@ -2,7 +2,11 @@ import { assembleWithFactory } from '../toolchain/assemble-core.mjs';
 import { compileWithFactories } from '../toolchain/compile-core.mjs';
 import { parseListing } from '../toolchain/listing.mjs';
 import { makeFd } from '../toolchain/makefd.mjs';
+import { addHostdrv } from '../toolchain/hostdrv.mjs';
 import { assembleDebugLoader } from './toolchain.js';
+
+/** hostdrv経路でIDEがゲストへ渡す成果物をマウントするドライブ文字。AUTOEXEC.BATの常駐先と揃える。 */
+export const HOSTDRV_DRIVE = 'D';
 
 const HEADER_NAMES = [
   'assert.h', 'ctype.h', 'errno.h', 'fcntl.h', 'float.h', 'inttypes.h', 'iso646.h',
@@ -51,6 +55,16 @@ const fetchBytes = async (url) => {
   if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`);
   return new Uint8Array(await response.arrayBuffer());
 };
+
+/**
+ * hostdrv経路用: 同梱のFreeDOS(98)起動イメージ(freeDosBytes)のコピーへHOSTDRV.COMを
+ * 追加し、AUTOEXEC.BATが起動直後にHOSTDRV_DRIVE(既定D:)へ常駐するようにする。
+ * 既存のFD経由の経路(makeLoaderOnlyFd/buildSourceのfd)はここでは一切変更しない。
+ */
+export async function buildHostdrvBootImage(freeDosBytes) {
+  const hostdrvCom = await fetchBytes('./freedos/HOSTDRV.COM.bin');
+  return addHostdrv(freeDosBytes, hostdrvCom, { drive: HOSTDRV_DRIVE });
+}
 
 async function loadCResources() {
   if (!cResourcesPromise) cResourcesPromise = (async () => {
