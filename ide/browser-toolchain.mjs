@@ -37,6 +37,15 @@ function loadDebugLoader() {
   return debugLoaderPromise;
 }
 
+/**
+ * hostdrv経路用: デバッグローダ(E0LOAD.COM)のバイト列だけを取り出す。
+ * FD経路はbuildSource()のfdへ同梱済みだが、hostdrv経路はホスト側へ個別に
+ * writeHostFile()する必要があるため公開する。キャッシュはloadDebugLoader()と共有する。
+ */
+export function getDebugLoaderBytes() {
+  return loadDebugLoader();
+}
+
 /** FreeDOSのプリウォーム用に、ローダだけを収録したB:イメージを1度だけ生成する。 */
 export function makeLoaderOnlyFd() {
   if (!loaderOnlyFdPromise) {

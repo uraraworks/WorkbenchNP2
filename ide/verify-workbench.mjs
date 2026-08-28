@@ -605,11 +605,15 @@ try {
   assert.throws(() => assertRun(run.screen, 'Workbench typo!'));
 
   // 連続実行の区切り: 2回目のコマンド行の直前に、空のプロンプト行が2本以上あること。
+  // プログラムを置くドライブは経路で変わる(FD経路=B:、hostdrv経路=D:)ため、
+  // アプリが公開している実効値を使う。ここを直書きすると ?hostdrv=1 で回したときに
+  // 「コマンド行が見つからない」という、製品ではなくテストの都合の失敗になる。
+  const runDrive = await page.evaluate(() => window.pc98workbench.hostdrvDrive);
   const secondRun = await page.evaluate(() => window.pc98workbench.runCurrent());
   assertRun(secondRun.screen, output);
   const commandRows = secondRun.screen.lines
     .map((line, index) => [line.trim(), index])
-    .filter(([line]) => line.endsWith(`B:\\${run.dosName}`))
+    .filter(([line]) => line.endsWith(`${runDrive}:\\${run.dosName}`))
     .map(([, index]) => index);
   assert.ok(commandRows.length >= 2, `実行コマンド行が2本ありません: ${JSON.stringify(commandRows)}`);
   let separators = 0;

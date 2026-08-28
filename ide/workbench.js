@@ -12,7 +12,8 @@ import {
   answerDriveErrorAbort, currentDosPrompt, DOS_DRIVE_ERROR_PATTERN,
 } from './dos-prompt.mjs';
 import {
-  HOSTDRV_DRIVE, LOADER_NAME, buildHostdrvBootImage, buildSource, makeLoaderOnlyFd,
+  HOSTDRV_DRIVE, LOADER_NAME, buildHostdrvBootImage, buildSource, getDebugLoaderBytes,
+  makeLoaderOnlyFd,
 } from './browser-toolchain.mjs';
 import { debugMapForBuild } from './debug-map.mjs';
 import { createDebugSession } from './debug-session.mjs';
@@ -1310,20 +1311,49 @@ function startPrewarm() {
 /**
  * hostdrv経路: FD組み立て・差し替えを一切経由せず、ビルド成果物をwriteHostFile()で
  * ホスト側(HOSTDRV_DRIVE、既定D:)へ直接置く。媒体交換のダンスも排出も要らない。
- * ローダ(E0LOAD.COM)は同梱しない — 現状このIDEでは「実行」自体がローダを経由しない
- * (built.fdへは同梱されるが、runCurrent()はB:\<dosName>を直接起動する)ため、
- * hostdrv経路でも同じ最小構成(プログラム本体のみ)に揃える。デバッグ(4B01hローダ)は
- * hostdrv化しておらず、常に従来のFD経路を使う(スコープ外、下記参照)。
+ * ローダ(E0LOAD.COM)は同梱しない — 「実行」自体はローダを経由せず、runCurrent()は
+ * HOSTDRV_DRIVE:\<dosName>を直接起動するため、hostdrv経路でも同じ最小構成
+ * (プログラム本体のみ)に揃える。デバッグ(4B01hローダ)は別途mountDebugHostdrv()で
+ * ローダも書き込む。
  */
 async function mountProgramHostdrv(built) {
   // 通常はページ初期化時のstartPrewarm()で既にbootedが立っている。万一まだなら
   // ローダなしで起動だけやり直す(hostdrv経路はB:のプログラムFDを使わない)。
   if (!booted) startBoot(undefined, 'loader-only.xdf', 'workbench:loader-only');
   try { await booted; } catch {}
-  const baseline = engine.getScreenText();
+  // 連続実行の区切り。FD経路(mountProgramFd)と同じく見た目だけの処理で、前回の出力と
+  // 今回のコマンド行の間に空のプロンプト行を入れる。hostdrv経路はメディア交換をしないので
+  // 交換直後のドライブエラーを避ける配慮は要らず、素直に送るだけでよい。
+  // 失敗しても実行そのものは続けられるため、握りつぶして先へ進む。
+  const beforeSeparator = engine.getScreenText();
+  let baseline = beforeSeparator;
+  try {
+    await engine.pasteText('\r\r\r');
+    baseline = await waitForCurrentDosPrompt(engine, { baseline: beforeSeparator.text, timeout: 3_000 });
+    setScreenText(baseline.text);
+  } catch {
+    baseline = engine.getScreenText();
+  }
   setMachineStatus('ビルド成果物をホストドライブへ書き込んでいます…');
   engine.writeHostFile(built.dosName, built.output);
   return { baseline, name: built.dosName, key: `hostdrv:${built.dosName}:${runSequence++}` };
+}
+
+let hostdrvLoaderWritten = false;
+
+/**
+ * hostdrv経路のデバッグ用: プログラム本体に加え、デバッグローダ(E0LOAD.COM)も
+ * ホスト側(HOSTDRV_DRIVE)へ書き込む。ローダのバイト列は固定(ビルドごとに変わらない)
+ * ため、一度書けば以降のセッションでも使い回せる。
+ */
+async function mountDebugHostdrv(built) {
+  const mounted = await mountProgramHostdrv(built);
+  if (!hostdrvLoaderWritten) {
+    const loader = await getDebugLoaderBytes();
+    engine.writeHostFile(`${LOADER_NAME}.COM`, loader);
+    hostdrvLoaderWritten = true;
+  }
+  return mounted;
 }
 
 async function mountProgramFd(built) {
@@ -1572,11 +1602,20 @@ async function startDebug() {
   setSidebarView('debug');
   setSidebarVisible(true);
   setDebugStatus('FreeDOSとデバッガローダを準備中…');
-  const mounted = await mountProgramFd(built);
+  const drive = HOSTDRV_MODE ? HOSTDRV_DRIVE : 'B';
+  const command = `${drive}:\\${LOADER_NAME} ${drive}:\\${built.dosName}`;
   session = createDebugSession(debugController);
-  const started = await withDriveRecovery(() => session.start(
-    engine, `B:\\${LOADER_NAME} B:\\${built.dosName}`, tab.debugMap, built.kind,
-  ), built, mounted.name);
+  let started;
+  if (HOSTDRV_MODE) {
+    // hostdrv経路: 媒体交換もドライブエラー再試行も要らない(runCurrent()のhostdrv分岐と同じ理由)。
+    await mountDebugHostdrv(built);
+    started = await session.start(engine, command, tab.debugMap, built.kind);
+  } else {
+    const mounted = await mountProgramFd(built);
+    started = await withDriveRecovery(() => session.start(
+      engine, command, tab.debugMap, built.kind,
+    ), built, mounted.name);
+  }
   debugTabId = tab.id;
   const recoveredDriveError = recordDriveErrorRetries(started.driveErrorRetries);
   const unmapped = [...tab.breakpoints].filter((line) => !tab.debugMap.isDebuggable(line));
@@ -1829,6 +1868,9 @@ ready.catch((error) => {
 window.pc98workbench = {
   prewarm,
   hostdrvMode: HOSTDRV_MODE,
+  // 実行/デバッグでプログラムを置くドライブ。経路によって変わるので、検証側が
+  // 'B' を直書きせずに済むよう実効値を公開する。
+  hostdrvDrive: HOSTDRV_MODE ? HOSTDRV_DRIVE : 'B',
   ready, openFile, createFile, saveFile, buildCurrent, runCurrent,
   getTabs, activateTab, closeTab, setConfirm,
   startDebug, stopDebug, toggleBreakpoint, stepInstruction, stepOverLine, stepInto,
