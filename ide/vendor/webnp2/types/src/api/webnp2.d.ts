@@ -1,4 +1,4 @@
-import { type DiskFile, type EmscriptenFS } from '../core/module.ts';
+import { type DiskFile, type EmscriptenFS, type HostDrvConfig } from '../core/module.ts';
 import { type FatEntry } from './fat.ts';
 export type DiskSlot = 'hdd' | 'fd1' | 'fd2';
 /** ia32デバッガが公開するCPUレジスタ。セグメントレジスタもUINT32として返す。 */
@@ -135,6 +135,8 @@ export declare function pollUntilReady(opts: {
 export declare class WebNP2 extends TypedEmitter<WebNP2EventMap> {
     private canvas;
     private fs;
+    /** boot()時のhostdrv.root(既定'/hostdrv')。hostdrv未設定でbootした場合はnullのまま。 */
+    private hostdrvRoot;
     private mounted;
     private persistTimer;
     private boundOnVisibilityChange;
@@ -223,7 +225,19 @@ export declare class WebNP2 extends TypedEmitter<WebNP2EventMap> {
         clkMult?: number;
         /** 登録済みROM/素材ファイル。読み取り専用扱いで、mount管理・永続化ループの対象にはしない。 */
         roms?: DiskFile[];
+        /** HOSTDRV設定。省略時は無効(core/module.ts のBootConfigへそのまま渡すだけ)。 */
+        hostdrv?: HostDrvConfig;
     }): Promise<void>;
+    /** hostdrv未設定(boot時にhostdrvを渡していない)ならErrorを投げてFS/rootを返す。 */
+    private requireHostDrv;
+    /** hostdrvルート直下へファイルを書き込む(IDEがビルド成果物をゲストへ渡す用途)。 */
+    writeHostFile(name: string, bytes: Uint8Array): void;
+    /** hostdrvルート直下のファイルを読む。無ければnull。 */
+    readHostFile(name: string): Uint8Array | null;
+    /** hostdrvルート直下のファイル名一覧を返す。 */
+    listHostFiles(): string[];
+    /** hostdrvルート直下のファイルを削除する。存在しなければfalse。 */
+    deleteHostFile(name: string): boolean;
     private startPersistLoop;
     private stopPersistLoop;
     private onVisibilityChange;

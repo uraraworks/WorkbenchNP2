@@ -12,7 +12,25 @@ export interface BootConfig {
     clkMult?: number;
     /** ユーザー登録済みのROM/素材ファイル。preRunでMEMFSのルート直下(/名前)へ注入する。 */
     roms?: DiskFile[];
+    /** HOSTDRV(ホストディレクトリをゲストDOSドライブとして見せる機能)の設定。省略時は無効。 */
+    hostdrv?: HostDrvConfig;
 }
+/**
+ * HOSTDRVのアクセス権限。NP2kai/generic/hostdrv.h のビットフラグに対応する
+ * (1=読み / 2=書き / 4=削除)。'ro'=1(読みのみ)、'rw'=3(読み書き)、
+ * 'rwd'=7(削除まで許可)。
+ */
+export type HostDrvAccess = 'ro' | 'rw' | 'rwd';
+export interface HostDrvConfig {
+    /** ゲストから見えるMEMFS上のルートパス。省略時 '/hostdrv'。'/'始まり・'..'禁止。 */
+    root?: string;
+    /** アクセス権限。省略時 'rw'(読み書き)。 */
+    access?: HostDrvAccess;
+    /** 起動時にrootディレクトリ直下へ配置するファイル。 */
+    files?: DiskFile[];
+}
+/** HostDrvAccess を hdrv_acc= のビットフラグ数値に変換する。 */
+export declare function hostDrvAccessValue(access: HostDrvAccess): number;
 export interface EmscriptenFS {
     writeFile(path: string, data: Uint8Array | string): void;
     readFile(path: string, opts?: {
@@ -27,6 +45,8 @@ export interface EmscriptenFS {
         mtime: Date | number;
         size: number;
     };
+    readdir(path: string): string[];
+    unlink(path: string): void;
 }
 export type CCallType = 'number' | 'string' | 'array' | 'boolean' | null;
 export type CCallFn = (ident: string, returnType: CCallType, argTypes: CCallType[], args: unknown[]) => unknown;
@@ -65,8 +85,59 @@ declare global {
  * 出てこない。念のため window.SDL2 もフォールバックとして見ておく。
  */
 export declare function resolveAudioContext(): AudioContext | undefined;
+/**
+ * YM2608リズム波形6本の名前(小文字、コアのMEMFS上での基本表記)。
+ * roms.ts の同梱波形読み込み・登録名検証と共有するためここで定義する。
+ */
+export declare const RHYTHM_WAV_NAMES: readonly ["2608_bd.wav", "2608_sd.wav", "2608_top.wav", "2608_hh.wav", "2608_tom.wav", "2608_rim.wav"];
+/**
+ * rom.name (小文字化済み想定) がリズム波形6本のいずれかなら、MEMFSへ追加で
+ * 複製すべき大文字名(`2608_BD.WAV` 形式)を返す。それ以外は undefined。
+ * 単体テストしやすいよう preRun 本体から切り出した純関数。
+ */
+export declare function rhythmUpperCaseAliasFor(lowerName: string): string | undefined;
 /** 現在起動中かどうか。二重boot防止に使う。 */
 export declare function isBooted(): boolean;
+/**
+ * 単体テストしやすいよう preRun 本体から切り出した純関数。BootConfig から
+ * np21kai.cfg の中身([NekoProject21kai]セクション)を組み立てる。
+ */
+export declare function buildCfg(config: BootConfig): string;
+/** hostdrv.root 省略時のMEMFS上のルートパス。src/api/webnp2.ts のWebNP2クラスからも参照する。 */
+export declare const DEFAULT_HOSTDRV_ROOT = "/hostdrv";
+/**
+ * preRun本体から呼ばれるHOSTDRV設定の実処理。rootディレクトリを多段で作成し、
+ * filesをその直下へ書き込む。単体テストしやすいよう preRun 本体から切り出した
+ * (ヘルパ単体テストだけでは preRun への結線漏れを検出できないため、この関数自体を
+ * preRun からもテストからも同じものを呼ぶことで結線を保証する)。
+ */
+export declare function applyHostDrv(FS: EmscriptenFS, hostdrv: HostDrvConfig): void;
+/**
+ * hostdrv ルート直下のファイル名として妥当かを検証する。パス区切りや '..' を含む名前は
+ * ルート外へ逃げられるため拒否する(ルート直下のみを許可)。
+ */
+export declare function validateHostFileName(name: string): void;
+/**
+ * hostdrv ルート直下へファイルを書き込む(IDEがビルド成果物をゲストへ渡す用途)。
+ * boot()で結線するWebNP2クラスと単体テストの双方から同じ実装を呼ぶ
+ * (applyHostDrvと同じ理由: ヘルパ単体テストだけでは結線漏れを検出できないため)。
+ */
+export declare function writeHostFile(FS: EmscriptenFS, root: string, name: string, bytes: Uint8Array): void;
+/** hostdrv ルート直下のファイルを読む。存在しなければ null を返す(Errorにしない)。 */
+export declare function readHostFile(FS: EmscriptenFS, root: string, name: string): Uint8Array | null;
+/** hostdrv ルート直下のファイル名一覧を返す('.'/'..'は除外)。 */
+export declare function listHostFiles(FS: EmscriptenFS, root: string): string[];
+/** hostdrv ルート直下のファイルを削除する。存在しなければ何もせず false を返す。 */
+export declare function deleteHostFile(FS: EmscriptenFS, root: string, name: string): boolean;
+/**
+ * hostdrvのファイル操作(write/read/list/delete)を呼ぶ前のガード。
+ * WebNP2クラスのメソッドと単体テストの双方から同じ実装を呼ぶ(applyHostDrvと同じ理由)。
+ * boot()にhostdrvを渡していない(fs未起動 or hostdrvRoot未設定)ならErrorを投げる。
+ */
+export declare function requireHostDrv(fs: EmscriptenFS | null, hostdrvRoot: string | null): {
+    fs: EmscriptenFS;
+    root: string;
+};
 /**
  * NP2kai-wasm コアを起動する。
  * 二重起動はエラーにする（ページ全体をリロードして呼び直すこと）。
