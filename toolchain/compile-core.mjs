@@ -33,6 +33,24 @@ function hasPreprocessorError(stderr) {
   return stderr.some((line) => /^(?:.*[\\/])?in\.c:\s*line\s+\d+:/i.test(String(line).trim()));
 }
 
+const AR_GLOBAL_HEADER = '!<arch>\n';
+// ar(1)アーカイブの先頭メンバ名(グローバルヘッダ8バイト直後、16バイトのASCII名フィールド)は
+// lcds.a/lcdh.aそれぞれで実際に生成した結果、c0ds.o/ と c0dh.o/ で始まることを
+// `xxd toolchain/smlrc-wasm/lcds.a|lcdh.a`実測で確認済み。ファイル名や呼び出し側の
+// 申告ではなく、渡されたバイト列そのものからモデルを判別してmodelとの取り違えを検出する。
+const LIBRARY_FIRST_MEMBER_BY_MODEL = { small: 'c0ds.o', huge: 'c0dh.o' };
+
+function detectLibraryModel(library) {
+  const header = new TextDecoder('ascii').decode(library.subarray(0, 8));
+  if (header !== AR_GLOBAL_HEADER) return null;
+  const nameField = new TextDecoder('ascii').decode(library.subarray(8, 24));
+  const name = nameField.trimEnd().replace(/\/$/, '');
+  for (const [model, expected] of Object.entries(LIBRARY_FIRST_MEMBER_BY_MODEL)) {
+    if (name === expected) return model;
+  }
+  return null;
+}
+
 function validateOptions(opts) {
   if (opts.includeFiles !== undefined && (opts.includeFiles === null
       || Array.isArray(opts.includeFiles) || typeof opts.includeFiles !== 'object')) {
@@ -46,6 +64,15 @@ function validateOptions(opts) {
   if (!(opts.library instanceof Uint8Array)) throw new TypeError('opts.library must be the lcds.a/lcdh.a Uint8Array');
   if (opts.model !== undefined && opts.model !== 'small' && opts.model !== 'huge') {
     throw new TypeError('opts.model must be "small" or "huge" when given');
+  }
+  const model = opts.model ?? 'small';
+  const detected = detectLibraryModel(opts.library);
+  if (detected !== null && detected !== model) {
+    throw new TypeError(
+      `opts.library appears to be the '${detected}' model library (first archive member `
+      + `'${LIBRARY_FIRST_MEMBER_BY_MODEL[detected]}') but opts.model is '${model}'; `
+      + `pass lcds.a for model:'small' or lcdh.a for model:'huge'`,
+    );
   }
 }
 
