@@ -31,10 +31,23 @@ Cプリプロセッサへ渡すコピーだけCRLFをLFへ揃える。改行数�
 同じインスタンスで順にリンクすると2回目がfresh instanceの出力と一致しない。
 従って`smlrc`と`smlrl`は毎回新規インスタンス必須である。
 
-メモリモデルはsmall、出力はMZ EXEとする。tiny COMはコード・データ・スタックが
+メモリモデルは既定でsmall、出力はMZ EXEとする。tiny COMはコード・データ・スタックが
 同一64KiBに収まり標準ライブラリ利用時の拡張余地が小さい。smallは16bitのまま
 コードとデータ/スタックを分離でき、既存4B01hローダもMZ EXEに対応済みである。
-huge/DPMI経路は使わない。smallの浮動小数点非対応は固定小数点で回避する。
+smallの浮動小数点非対応は固定小数点で回避する。
+
+386前提のhuge model(`-dosh`)は`compile-core.mjs`の`opts.model:'huge'`として追加対応した
+(既定はsmallのまま、`compile.mjs`のCLIからは未公開でtoolchain内部/検証専用)。
+smlrcc.c/smlrcc.mdを実際に読み、`-dosh`がsmlrpp/smlrc/smlrlへ渡す引数
+(マクロ`__SMALLER_C_32__`/`__HUGE__`、smlrcへ`-huge`、smlrlへ`-huge`+`lcdh.a`)を特定し、
+pin済みNASM 2.16.03とホスト版smlrccでupstream `srclib/lcdh.txt`から`lcdh.a`を生成する
+手順を`build.sh`へ追加した(upstreamツリー自体は変更しない)。huge modelは64KB超データの
+配列アクセスをWebNP2+FreeDOS(98)実機で確認済み(`samples/huge-probe.c`、
+`ide/verify-huge-model.mjs`)。ソース行デバッグ(BP/ステップ)も対応済み: hugeモデルは
+`c0dh.asm`の`__start`が自己再配置後に`_main`へ実際にCSレジスタを変えてretfするため、
+`ide/debug-session.mjs`はMZヘッダ(e_cs)から導ける2候補(control.cs、および
+`(control.cs-e_cs)&0xffff`)へ同時にBPを張り、実際に発火した側を実セグメントとして
+採用する(モデルごとの分岐はしない)。DPMI経路は引き続き未対応。
 
 `build.sh`はSmallerCだけでなくNASMのpin/cleanも先に検証し、NASM 2.16.03の
 ホスト版を一時ツリーで生成する。upstream `srclib/lcds.txt`を入力一覧として、
