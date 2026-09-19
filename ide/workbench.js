@@ -1641,11 +1641,11 @@ async function startDebug() {
   if (HOSTDRV_MODE) {
     // hostdrv経路: 媒体交換もドライブエラー再試行も要らない(runCurrent()のhostdrv分岐と同じ理由)。
     await mountDebugHostdrv(built);
-    started = await session.start(engine, command, tab.debugMap, built.kind);
+    started = await session.start(engine, command, tab.debugMap, built.kind, built.header);
   } else {
     const mounted = await mountProgramFd(built);
     started = await withDriveRecovery(() => session.start(
-      engine, command, tab.debugMap, built.kind,
+      engine, command, tab.debugMap, built.kind, built.header,
     ), built, mounted.name);
   }
   debugTabId = tab.id;

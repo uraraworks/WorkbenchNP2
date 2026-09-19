@@ -79,14 +79,13 @@ const contentTypes = {
   '.wasm': 'application/wasm', '.xdf': 'application/octet-stream', '.bmp': 'image/bmp',
 };
 
-function startServer(programFd, okSourceMap, okSourceText) {
-  const config = { sourceMap: okSourceMap, sourceText: okSourceText };
+function startServer(programFd, okSourceMap, okSourceText, okHeader) {
+  const config = { sourceMap: okSourceMap, sourceText: okSourceText, header: okHeader };
   const harness = `<!doctype html>
 <html><body><canvas id="screen" width="640" height="400"></canvas>
 <script type="module">
 import { createDebugger, createWebNP2 } from './vendor/webnp2/webnp2-embed.js';
 import { createDebugSession } from './debug-session.mjs';
-import { createCDebugMap } from './debug-map.mjs';
 import { waitForCurrentDosPrompt } from './freedos-session.mjs';
 
 const engine = createWebNP2(document.querySelector('#screen'));
@@ -95,7 +94,6 @@ engine.persistNow = async () => {};
 const configResponse = await fetch('/huge-probe-config.json');
 if (!configResponse.ok) throw new Error('config fetch failed');
 const config = await configResponse.json();
-const debugMap = createCDebugMap(config.sourceMap);
 const sourceLines = config.sourceText.split('\\n');
 
 window.hugeModelProbe = {
@@ -190,7 +188,7 @@ try {
     { name: 'HPBAD', ext: 'EXE', data: broken.output },
   ]);
 
-  server = await startServer(programFd, ok.sourceMap, okSourceText);
+  server = await startServer(programFd, ok.sourceMap, okSourceText, ok.header);
   const puppeteer = await loadPuppeteer();
   profile = await mkdtemp(`${tmpdir()}/huge-model-probe-`);
   browser = await puppeteer.launch({
@@ -223,26 +221,30 @@ try {
   console.log(`[PASS] A-2: 故障注入版が想定通り差分を出すことを確認 "${badLastLine}"`);
 
   // --- B: 既存のCデバッグ経路(ide/debug-session.mjs)をhugeビルドへそのまま適用する ---
-  // 既知の制約(2026-09-19時点): huge modelはBPが機能しない(下のtry/catchでFAILとして
-  // 明示する。SKIP扱いにはしない)。根本原因はhuge-probe-report.mdの「第2回」に記録。
+  // huge-probe-report.md 第3回で修正済み: session.start()にMZヘッダを渡すと、
+  // control.cs候補とヘッダ由来の代替セグメント候補の両方へ「最初の生成行」BPを同時に張り、
+  // 実際に発火した側(=実行時に本当にCSへ現れるセグメント)をcodeSegmentとして採用する。
+  // 失敗時はtry/catchでFAILとして明示する(SKIP扱いにはしない)。
   await page.evaluate(() => window.hugeModelProbe.engine.pasteText('\r\r\r'));
   await waitForText(page, DOS_PROMPT_PATTERN, 20_000, 'デバッグ前のDOSプロンプト復帰待機タイムアウト');
 
   try {
-    const started = await page.evaluate(async () => {
+    const started = await page.evaluate(async (breakpointLine) => {
       const { session } = window.hugeModelProbe;
       const debugMapModule = await import('./debug-map.mjs');
       const config = await (await fetch('/huge-probe-config.json')).json();
       const map = debugMapModule.createCDebugMap(config.sourceMap);
-      const result = await session.start(window.hugeModelProbe.engine, 'B:\\E0LOAD B:\\HPOK.EXE', map, 'EXE');
+      const result = await session.start(window.hugeModelProbe.engine, 'B:\\E0LOAD B:\\HPOK.EXE', map, 'EXE', config.header);
       return {
         ...result,
         entryLine: session.currentLine(),
+        codeSegment: session.codeSegment,
         debuggableLines: map.debuggableLines(),
-        breakpointOffsets: { line12: map.breakpointOffsets(12), line22: map.breakpointOffsets(BREAKPOINT_LINE) },
+        breakpointOffsets: { line12: map.breakpointOffsets(12), line22: map.breakpointOffsets(breakpointLine) },
       };
-    });
+    }, BREAKPOINT_LINE);
     console.log(`[INFO] B: session.start()診断 control.cs=${started.control.cs} control.ip=${started.control.ip} `
+      + `codeSegment=${started.codeSegment}(control.cs${started.codeSegment === started.control.cs ? 'と一致' : 'とは別セグメント'}) `
       + `debuggableLines[0]=${started.debuggableLines[0]} line12offsets=${JSON.stringify(started.breakpointOffsets.line12)} `
       + `line22offsets=${JSON.stringify(started.breakpointOffsets.line22)}`);
     assert.equal(started.noDebuggableLines, false, 'huge-probe.cに生成行がありません(セッション開始の前提が崩れています)');
