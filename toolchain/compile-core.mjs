@@ -43,18 +43,32 @@ function validateOptions(opts) {
       throw new TypeError('includeFiles entries must have simple names and Uint8Array values');
     }
   }
-  if (!(opts.library instanceof Uint8Array)) throw new TypeError('opts.library must be the lcds.a Uint8Array');
+  if (!(opts.library instanceof Uint8Array)) throw new TypeError('opts.library must be the lcds.a/lcdh.a Uint8Array');
+  if (opts.model !== undefined && opts.model !== 'small' && opts.model !== 'huge') {
+    throw new TypeError('opts.model must be "small" or "huge" when given');
+  }
 }
 
-async function preprocess(source, includeFiles, createSmlrpp) {
+// smlrcc.c 1917-1959行相当: -doss/-dosh いずれも _DOS, __SMALLER_C__, char/wchar_tの
+// 既定(signed char・unsigned wchar_t・16bit wchar_t)は共通。モデル別に変わるのは
+// __SMALLER_C_16__/__SMALLER_C_32__+__HUGE__ の部分のみ(smlrcc.c 1915-1949行)。
+const MODEL_MACROS = {
+  small: ['__SMALLER_C_16__'],
+  huge: ['__SMALLER_C_32__', '__HUGE__'],
+};
+
+async function preprocess(source, includeFiles, createSmlrpp, model) {
   const stderr = [];
   const module = await createSmlrpp({ print: () => {}, printErr: (line) => stderr.push(String(line)) });
   module.FS.writeFile('/in.c', source);
   const args = [
     '-U', '__STDC_VERSION__', '-zI', '-D', '_DOS', '-D', '__SMALLER_C__',
-    '-D', '__SMALLER_C_16__', '-D', '__SMALLER_C_SCHAR__', '-D', '__SMALLER_C_UWCHAR__',
-    '-D', '__SMALLER_C_WCHAR16__', '-D', '__SMALLER_PP__',
   ];
+  for (const macro of MODEL_MACROS[model]) args.push('-D', macro);
+  args.push(
+    '-D', '__SMALLER_C_SCHAR__', '-D', '__SMALLER_C_UWCHAR__',
+    '-D', '__SMALLER_C_WCHAR16__', '-D', '__SMALLER_PP__',
+  );
   if (Object.keys(includeFiles).length > 0) {
     module.FS.mkdir('/include');
     for (const [name, bytes] of Object.entries(includeFiles)) module.FS.writeFile(`/include/${name}`, bytes);
@@ -69,22 +83,27 @@ async function preprocess(source, includeFiles, createSmlrpp) {
   return { ok: true, output: new Uint8Array(module.FS.readFile('/out.i')) };
 }
 
-async function compilePreprocessed(source, createSmlrc) {
+// smlrcc.c 1544-1590行相当: -doss は smlrc へ -seg16、-dosh は -huge を渡す。
+const COMPILER_MODEL_FLAG = { small: '-seg16', huge: '-huge' };
+// smlrcc.c 1572/1590行相当: -doss は smlrl へ -small、-dosh は -huge を渡す。
+const LINKER_MODEL_FLAG = { small: '-small', huge: '-huge' };
+
+async function compilePreprocessed(source, createSmlrc, model) {
   const stderr = [];
   const module = await createSmlrc({ print: (line) => stderr.push(String(line)), printErr: (line) => stderr.push(String(line)) });
   module.FS.writeFile('/out.i', source);
-  const exitCode = module.callMain(['-seg16', '/out.i', '/out.asm']);
+  const exitCode = module.callMain([COMPILER_MODEL_FLAG[model], '/out.i', '/out.asm']);
   if (exitCode !== 0) return { ok: false, errors: parseCompilerErrors(stderr, exitCode) };
   return { ok: true, output: new Uint8Array(module.FS.readFile('/out.asm')) };
 }
 
-async function linkSmall(object, library, createSmlrl) {
+async function link(object, library, createSmlrl, model) {
   const stderr = [];
   try {
     const module = await createSmlrl({ print: (line) => stderr.push(String(line)), printErr: (line) => stderr.push(String(line)) });
     module.FS.writeFile('/out.o', object);
-    module.FS.writeFile('/lcds.a', library);
-    const exitCode = module.callMain(['-small', '/out.o', '/lcds.a', '-map', '/out.map', '-o', '/out.exe']);
+    module.FS.writeFile('/lib.a', library);
+    const exitCode = module.callMain([LINKER_MODEL_FLAG[model], '/out.o', '/lib.a', '-map', '/out.map', '-o', '/out.exe']);
     if (exitCode !== 0) return { ok: false, errors: fallbackError('smlrl', stderr, exitCode) };
     return {
       ok: true, output: new Uint8Array(module.FS.readFile('/out.exe')),
@@ -108,16 +127,17 @@ export async function compileWithFactories(source, opts, tools) {
     dosEofBytesRemoved: normalized.dosEofBytesRemoved,
     crlfSequencesNormalized: lineEndings.crlfSequencesNormalized,
   };
+  const model = opts.model ?? 'small';
   try {
-    const preprocessed = await preprocess(lineEndings.source, opts.includeFiles ?? {}, tools.createSmlrpp);
+    const preprocessed = await preprocess(lineEndings.source, opts.includeFiles ?? {}, tools.createSmlrpp, model);
     if (!preprocessed.ok) return { ...preprocessed, sourceNormalization };
-    const compiled = await compilePreprocessed(preprocessed.output, tools.createSmlrc);
+    const compiled = await compilePreprocessed(preprocessed.output, tools.createSmlrc, model);
     if (!compiled.ok) return { ...compiled, sourceNormalization };
     const assembled = await tools.assemble(compiled.output, { format: 'elf', listing: true });
     if (!assembled.ok) {
       return { ok: false, errors: assembled.errors.map((error) => ({ ...error, stage: 'nasm' })), sourceNormalization };
     }
-    const linked = await linkSmall(assembled.output, opts.library, tools.createSmlrl);
+    const linked = await link(assembled.output, opts.library, tools.createSmlrl, model);
     if (!linked.ok) return { ...linked, sourceNormalization };
     const header = parseMzHeader(linked.output);
     const sourceMap = composeCSourceMap({ assembly: compiled.output, object: assembled.output, listing: assembled.listing, linkerMap: linked.map });

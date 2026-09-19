@@ -110,6 +110,15 @@ emcc -DSTAND_ALONE -DUCPP_CONFIG -I"$BUILD_DIR/v0100/ucpp" \
 )
 cp "$BUILD_DIR/v0100/srclib/lcds.a" "$SCRIPT_DIR/lcds.a"
 
+# huge モデル（386前提, -dosh）用のlcdh.aも同じpin済みNASM/host smlrccで組む。
+# small経路とは独立の試作なので、失敗してもsmall側のビルドは壊さない。
+(
+    cd "$BUILD_DIR/v0100/srclib"
+    PATH="$NASM_BUILD_DIR:$SCRIPT_DIR/host:$PATH" \
+        "$SCRIPT_DIR/host/smlrcc" -SI ../include -I . @lcdh.txt
+)
+cp "$BUILD_DIR/v0100/srclib/lcdh.a" "$SCRIPT_DIR/lcdh.a"
+
 cp "$BUILD_DIR/license.txt" "$SCRIPT_DIR/LICENSE.SmallerC"
 cp "$BUILD_DIR/v0100/ucpp/LICENSE" "$SCRIPT_DIR/LICENSE.ucpp"
 echo "Built wasm and host smlrpp/smlrc/smlrl plus lcds.a in $SCRIPT_DIR"
