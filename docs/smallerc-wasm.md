@@ -91,3 +91,15 @@ upstreamツリー自体は変更しない。`verify.mjs`はsmlrpp/smlrc/smlrlの
 - IDEのUI(ワークベンチ画面)は今回変更していない。`opts.extraLinkInputs`は
   `compile()`までそのまま貫通するため、将来IDEから「ライブラリをリンクして実行」を
   露出する際はこの入口をそのまま使える。
+
+さらに、Cソースをリンクまでせず**ELFオブジェクトだけ**作る`compileToObjectWithFactories`
+(`compile-core.mjs`)も追加した。preprocess→smlrc→NASMの経路を`compileWithFactories`と
+共有し(`compileAndAssemble`に抽出)、`opts.library`無しで呼べる。p98libのように
+「ライブラリのCソースを先にオブジェクト化し、ユーザーのCのビルド時に
+`extraLinkInputs`として渡す」形が可能になった。huge model(`-huge`)でも、
+別々にオブジェクト化したC(ライブラリ側)・ユーザーのC・手書きNASMの3つを
+`extraLinkInputs`で束ねてリンクし、WebNP2+FreeDOS(98)実機で実行して呼び出し結果が
+正しいことを実測確認済み(手書きasm関数は`push ebp`/`movzx ebp,sp`/`o32 leave`/`retf`
+という、smlrcがhuge modelで生成するのと同じプロローグ/エピローグ(far return)に
+合わせる必要がある。呼び出し側の`call`はsmlrcが`.relot`セクション経由の遠隔呼び出しを
+自動生成するため、呼ばれる側の手書きasmが特別な処理をする必要はない)。

@@ -51,7 +51,7 @@ function detectLibraryModel(library) {
   return null;
 }
 
-function validateOptions(opts) {
+function validateCommonOptions(opts) {
   if (opts.includeFiles !== undefined && (opts.includeFiles === null
       || Array.isArray(opts.includeFiles) || typeof opts.includeFiles !== 'object')) {
     throw new TypeError('opts.includeFiles must be an object');
@@ -61,10 +61,14 @@ function validateOptions(opts) {
       throw new TypeError('includeFiles entries must have simple names and Uint8Array values');
     }
   }
-  if (!(opts.library instanceof Uint8Array)) throw new TypeError('opts.library must be the lcds.a/lcdh.a Uint8Array');
   if (opts.model !== undefined && opts.model !== 'small' && opts.model !== 'huge') {
     throw new TypeError('opts.model must be "small" or "huge" when given');
   }
+}
+
+function validateOptions(opts) {
+  validateCommonOptions(opts);
+  if (!(opts.library instanceof Uint8Array)) throw new TypeError('opts.library must be the lcds.a/lcdh.a Uint8Array');
   if (opts.extraLinkInputs !== undefined) {
     if (!Array.isArray(opts.extraLinkInputs)) throw new TypeError('opts.extraLinkInputs must be an array');
     for (const entry of opts.extraLinkInputs) {
@@ -161,13 +165,14 @@ async function link(object, library, createSmlrl, model, extraLinkInputs = []) {
   }
 }
 
-/** Node/ブラウザで共有するC→MZ EXE実装。各wasm factoryとNASM APIだけを注入する。 */
-export async function compileWithFactories(source, opts, tools) {
-  if (!(source instanceof Uint8Array)) throw new TypeError('source must be a Uint8Array; strings are not accepted');
-  validateOptions(opts);
-  for (const name of ['createSmlrpp', 'createSmlrc', 'createSmlrl', 'assemble']) {
+function requireCompileTools(tools, names) {
+  for (const name of names) {
     if (typeof tools?.[name] !== 'function') throw new TypeError(`tools.${name} must be a function`);
   }
+}
+
+/** preprocess→smlrc→NASMの共通経路。compileWithFactories/compileToObjectWithFactoriesで共有する。 */
+async function compileAndAssemble(source, opts, tools) {
   const normalized = normalizeDosTextSource(source);
   const lineEndings = normalizeCrLfForPreprocessor(normalized.source);
   const sourceNormalization = {
@@ -175,24 +180,64 @@ export async function compileWithFactories(source, opts, tools) {
     crlfSequencesNormalized: lineEndings.crlfSequencesNormalized,
   };
   const model = opts.model ?? 'small';
+  const preprocessed = await preprocess(lineEndings.source, opts.includeFiles ?? {}, tools.createSmlrpp, model);
+  if (!preprocessed.ok) return { ...preprocessed, sourceNormalization };
+  const compiled = await compilePreprocessed(preprocessed.output, tools.createSmlrc, model);
+  if (!compiled.ok) return { ...compiled, sourceNormalization };
+  const assembled = await tools.assemble(compiled.output, { format: 'elf', listing: true });
+  if (!assembled.ok) {
+    return { ok: false, errors: assembled.errors.map((error) => ({ ...error, stage: 'nasm' })), sourceNormalization };
+  }
+  return {
+    ok: true, sourceNormalization, model,
+    preprocessed: preprocessed.output, assembly: compiled.output,
+    object: assembled.output, listing: assembled.listing,
+  };
+}
+
+/**
+ * Cソース1本をELFオブジェクト(.o)へ変換するだけで、リンクはしない。
+ * p98libのような「ライブラリを別ビルドしてユーザーのCとリンクする」形を実現するために
+ * 追加した経路。opts.libraryは不要(リンクしないため)。
+ * @returns {Promise<
+ *   {ok: true, object: Uint8Array, assembly: Uint8Array, listing: string, sourceNormalization: object} |
+ *   {ok: false, errors: object[], sourceNormalization: object}
+ * >}
+ */
+export async function compileToObjectWithFactories(source, opts, tools) {
+  if (!(source instanceof Uint8Array)) throw new TypeError('source must be a Uint8Array; strings are not accepted');
+  validateCommonOptions(opts);
+  requireCompileTools(tools, ['createSmlrpp', 'createSmlrc', 'assemble']);
   try {
-    const preprocessed = await preprocess(lineEndings.source, opts.includeFiles ?? {}, tools.createSmlrpp, model);
-    if (!preprocessed.ok) return { ...preprocessed, sourceNormalization };
-    const compiled = await compilePreprocessed(preprocessed.output, tools.createSmlrc, model);
-    if (!compiled.ok) return { ...compiled, sourceNormalization };
-    const assembled = await tools.assemble(compiled.output, { format: 'elf', listing: true });
-    if (!assembled.ok) {
-      return { ok: false, errors: assembled.errors.map((error) => ({ ...error, stage: 'nasm' })), sourceNormalization };
-    }
-    const linked = await link(assembled.output, opts.library, tools.createSmlrl, model, opts.extraLinkInputs ?? []);
+    return await compileAndAssemble(source, opts, tools);
+  } catch (error) {
+    return {
+      ok: false,
+      errors: [{ stage: 'wasm', line: 0, message: error instanceof Error ? error.message : String(error) }],
+      sourceNormalization: { dosEofBytesRemoved: 0, crlfSequencesNormalized: 0 },
+    };
+  }
+}
+
+/** Node/ブラウザで共有するC→MZ EXE実装。各wasm factoryとNASM APIだけを注入する。 */
+export async function compileWithFactories(source, opts, tools) {
+  if (!(source instanceof Uint8Array)) throw new TypeError('source must be a Uint8Array; strings are not accepted');
+  validateOptions(opts);
+  requireCompileTools(tools, ['createSmlrpp', 'createSmlrc', 'createSmlrl', 'assemble']);
+  const model = opts.model ?? 'small';
+  try {
+    const built = await compileAndAssemble(source, opts, tools);
+    if (!built.ok) return built;
+    const { sourceNormalization, assembly, object, listing } = built;
+    const linked = await link(object, opts.library, tools.createSmlrl, model, opts.extraLinkInputs ?? []);
     if (!linked.ok) return { ...linked, sourceNormalization };
     const header = parseMzHeader(linked.output);
-    const sourceMap = composeCSourceMap({ assembly: compiled.output, object: assembled.output, listing: assembled.listing, linkerMap: linked.map });
+    const sourceMap = composeCSourceMap({ assembly, object, listing, linkerMap: linked.map });
     return {
-      ok: true, output: linked.output, preprocessed: preprocessed.output, assembly: compiled.output,
-      object: assembled.output, linkerMap: linked.map, header, sourceMap, sourceNormalization,
+      ok: true, output: linked.output, preprocessed: built.preprocessed, assembly,
+      object, linkerMap: linked.map, header, sourceMap, sourceNormalization,
     };
   } catch (error) {
-    return { ok: false, errors: [{ stage: 'wasm', line: 0, message: error instanceof Error ? error.message : String(error) }], sourceNormalization };
+    return { ok: false, errors: [{ stage: 'wasm', line: 0, message: error instanceof Error ? error.message : String(error) }], sourceNormalization: { dosEofBytesRemoved: 0, crlfSequencesNormalized: 0 } };
   }
 }
