@@ -66,3 +66,28 @@ upstreamツリー自体は変更しない。`verify.mjs`はsmlrpp/smlrc/smlrlの
 
 実在コードでの最初の検証は1997年の研修コードを題材に行った。その記録は題材のソースごと、
 完成までリポジトリへ含めていない（`samples/legacy/` と同じ扱い）。
+
+## 複数オブジェクト/ライブラリのリンク(opts.extraLinkInputs)
+
+`compile-core.mjs`はもともとC1本→単一の`.o`→標準ライブラリ(`lcds.a`/`lcdh.a`)という
+1入力構成だった。p98libのように「ライブラリを別ビルドしてユーザーのCとリンクする」形を
+成立させるため、`compileWithFactories`/`compile`の`opts`へ`extraLinkInputs`
+(`{name: '*.o'|'*.a', bytes: Uint8Array}[]`)を追加した。`smlrl`は元々
+`smlrl <option(s)> <input file(s)>`で複数入力を受け付ける実装なので(`smlrl.md`)、
+リンク段で`out.o`の直後・標準ライブラリの前に追加入力を並べるだけでよい
+(ユーザー由来のシンボルを標準ライブラリより先に解決させるため)。
+
+- 既定(`extraLinkInputs`省略/空配列)の出力はバイト完全一致を維持する(`samples/hello-c.c`で
+  変更前後のMD5一致を確認済み)。`detectLibraryModel`によるモデル取り違え検出も変更していない。
+- NASMで書いた`.asm`は既存の`toolchain/assemble.mjs`(`{format: 'elf'}`)でELFオブジェクト化でき、
+  そのまま`extraLinkInputs`へ渡せる。呼び出し規約・シンボル名の付け方(既定でリーディング
+  アンダースコア付き)は`smallerc-src/v0100/tests/lnktst1.asm`/`lnktst1b.asm`と同じ。
+- 実行検証は`toolchain/verify-link-multi-object.mjs`。`samples/link-probe.c`
+  (未定義の`asm_marker()`を呼ぶだけのC)と`samples/link-probe-lib.asm`
+  (`_asm_marker`を定義するだけのasm)をリンクしてWebNP2+FreeDOS(98)実機で実行し、
+  TVRAM出力`LINKPROBE marker=1234`の完全一致を確認する。故障注入として
+  `link-probe-lib.o`を外してリンクすると`Symbol '_asm_marker' not found`で
+  リンク自体が失敗することも確認済み(検査がFAILを検出できることの陽性対照)。
+- IDEのUI(ワークベンチ画面)は今回変更していない。`opts.extraLinkInputs`は
+  `compile()`までそのまま貫通するため、将来IDEから「ライブラリをリンクして実行」を
+  露出する際はこの入口をそのまま使える。

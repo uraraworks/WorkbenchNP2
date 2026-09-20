@@ -65,6 +65,15 @@ function validateOptions(opts) {
   if (opts.model !== undefined && opts.model !== 'small' && opts.model !== 'huge') {
     throw new TypeError('opts.model must be "small" or "huge" when given');
   }
+  if (opts.extraLinkInputs !== undefined) {
+    if (!Array.isArray(opts.extraLinkInputs)) throw new TypeError('opts.extraLinkInputs must be an array');
+    for (const entry of opts.extraLinkInputs) {
+      if (!entry || typeof entry.name !== 'string' || !/^[A-Za-z0-9_.-]+\.(o|a)$/i.test(entry.name)
+          || !(entry.bytes instanceof Uint8Array)) {
+        throw new TypeError('opts.extraLinkInputs entries must be { name: "*.o"|"*.a", bytes: Uint8Array }');
+      }
+    }
+  }
   const model = opts.model ?? 'small';
   const detected = detectLibraryModel(opts.library);
   if (detected !== null && detected !== model) {
@@ -124,13 +133,24 @@ async function compilePreprocessed(source, createSmlrc, model) {
   return { ok: true, output: new Uint8Array(module.FS.readFile('/out.asm')) };
 }
 
-async function link(object, library, createSmlrl, model) {
+async function link(object, library, createSmlrl, model, extraLinkInputs = []) {
   const stderr = [];
   try {
     const module = await createSmlrl({ print: (line) => stderr.push(String(line)), printErr: (line) => stderr.push(String(line)) });
     module.FS.writeFile('/out.o', object);
     module.FS.writeFile('/lib.a', library);
-    const exitCode = module.callMain([LINKER_MODEL_FLAG[model], '/out.o', '/lib.a', '-map', '/out.map', '-o', '/out.exe']);
+    // 追加の .o/.a は out.o の直後・標準ライブラリの前に置く。smlrlはシンボルを
+    // 前の入力から順に解決するため、ユーザー由来のオブジェクトを標準ライブラリより
+    // 先に置くことで、標準ライブラリ内の同名シンボルより優先して解決される。
+    const extraNames = [];
+    for (const [index, entry] of extraLinkInputs.entries()) {
+      const name = `/extra${index}_${entry.name}`;
+      module.FS.writeFile(name, entry.bytes);
+      extraNames.push(name);
+    }
+    const exitCode = module.callMain([
+      LINKER_MODEL_FLAG[model], '/out.o', ...extraNames, '/lib.a', '-map', '/out.map', '-o', '/out.exe',
+    ]);
     if (exitCode !== 0) return { ok: false, errors: fallbackError('smlrl', stderr, exitCode) };
     return {
       ok: true, output: new Uint8Array(module.FS.readFile('/out.exe')),
@@ -164,7 +184,7 @@ export async function compileWithFactories(source, opts, tools) {
     if (!assembled.ok) {
       return { ok: false, errors: assembled.errors.map((error) => ({ ...error, stage: 'nasm' })), sourceNormalization };
     }
-    const linked = await link(assembled.output, opts.library, tools.createSmlrl, model);
+    const linked = await link(assembled.output, opts.library, tools.createSmlrl, model, opts.extraLinkInputs ?? []);
     if (!linked.ok) return { ...linked, sourceNormalization };
     const header = parseMzHeader(linked.output);
     const sourceMap = composeCSourceMap({ assembly: compiled.output, object: assembled.output, listing: assembled.listing, linkerMap: linked.map });
