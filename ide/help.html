@@ -320,6 +320,15 @@
             <li><strong>デバッグボタン</strong>を押すと、対象の1命令目の手前で止まった状態で
               デバッグを開始します。左のサイドバーにレジスタとブレークポイントの一覧が出ます。</li>
           </ol>
+          <p>
+            サンプル一覧の <code>p98lib/</code> で始まるもの（<code>hello.c</code> /
+            <code>walk.c</code> / <code>walk2.c</code>）は、PC-98のグラフィックライブラリ
+            <strong>p98lib</strong> を使ったサンプルです。他のサンプルと同じように選んで
+            実行ボタンを押すだけでそのまま動きます。自分のコードでp98libを使いたいときは、
+            先頭に <code>#include "p98.h"</code> と書くだけで構いません。なお
+            <code>walk2.c</code> が使う画像データのヘッダはビルド時に自動で読み込まれるため、
+            サンプル一覧には出てきません。
+          </p>
         </div>
         <div class="lang-en">
           <ol>
@@ -333,6 +342,15 @@
               the target's first instruction. The sidebar on the left shows registers and your
               breakpoint list.</li>
           </ol>
+          <p>
+            The samples whose name starts with <code>p98lib/</code> (<code>hello.c</code>,
+            <code>walk.c</code>, <code>walk2.c</code>) use the PC-98 graphics library
+            <strong>p98lib</strong>. Pick one and press Run just like any other sample and it
+            works right away. To use p98lib in your own code, just write
+            <code>#include "p98.h"</code> at the top. The image-data header that
+            <code>walk2.c</code> uses is loaded automatically at build time, so it does not
+            appear in the sample list.
+          </p>
         </div>
 
         <figure>
@@ -405,6 +423,10 @@
             <li><code>#include</code> できるのは<strong>同梱の標準ヘッダのみ</strong>です。
               利用者が作成した別ファイルをヘッダとして読み込むことはできません。</li>
             <li>扱えるファイルの拡張子は <code>.asm</code> と <code>.c</code> の 2 種類だけです。</li>
+            <li>p98libを使うサンプル（<code>#include "p98.h"</code>があるコード）は、通常のCサンプル
+              より内部的なビルド手順が1段多いため、<strong>ビルドに時間がかかります</strong>。</li>
+            <li>IDE上で編集できるのは自分が開いているファイル1つだけです。p98lib本体
+              （<code>p98.c</code> / <code>p98_asm.asm</code>）はIDEからは編集できません。</li>
           </ul>
         </div>
         <div class="lang-en">
@@ -414,6 +436,11 @@
             <li><code>#include</code> only works for the <strong>bundled standard headers</strong>.
               A header file you write yourself cannot be included.</li>
             <li>Only two file extensions are supported: <code>.asm</code> and <code>.c</code>.</li>
+            <li>Samples that use p98lib (code with <code>#include "p98.h"</code>) go through one
+              extra internal build step compared to a plain C sample, so <strong>building them
+              takes longer</strong>.</li>
+            <li>The IDE only lets you edit the one file you have open. p98lib itself
+              (<code>p98.c</code> / <code>p98_asm.asm</code>) cannot be edited from the IDE.</li>
           </ul>
         </div>
       </section>
@@ -482,7 +509,11 @@
             <li><strong>CodeMirror</strong> — エディタ（MIT）</li>
             <li><strong>NASM</strong> — アセンブラ（BSD 2-Clause）</li>
             <li><strong>SmallerC</strong> — C コンパイラ（BSD 2-Clause）</li>
+            <li><strong>p98lib</strong>（PC-98向けCゲームライブラリ）— MIT、Copyright (c) 2026 URARA-works</li>
           </ul>
+          <p>
+            <code>walk2.c</code>サンプルが使う画像データは、作者のオリジナル作品から変換したものです。
+          </p>
           <p>
             WorkbenchNP2 自身のコード（このリポジトリで書かれた部分）はリポジトリ直下の
             <strong>LICENSE</strong> ファイルのとおり <strong>MIT License</strong> です。
@@ -509,7 +540,12 @@
             <li><strong>CodeMirror</strong> — the editor (MIT)</li>
             <li><strong>NASM</strong> — the assembler (BSD 2-Clause)</li>
             <li><strong>SmallerC</strong> — the C compiler (BSD 2-Clause)</li>
+            <li><strong>p98lib</strong> (a PC-98 C game library) — MIT, Copyright (c) 2026 URARA-works</li>
           </ul>
+          <p>
+            The image data used by the <code>walk2.c</code> sample is converted from the
+            author's own original artwork.
+          </p>
           <p>
             WorkbenchNP2's own code (the parts written in this repository) is licensed under the
             <strong>MIT License</strong>, as stated in the <strong>LICENSE</strong> file at the

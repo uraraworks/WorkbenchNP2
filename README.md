@@ -54,6 +54,9 @@ toolchain/
 samples/             テスト用 .asm
 docs/
   masm-to-nasm.md    MASM→NASM 変換規則（自動変換ツールの仕様書を兼ねる）
+vendor/
+  p98lib/            別リポジトリp98lib(PC-98向けCゲームライブラリ)のバイト単位コピー。
+                     経緯・鮮度担保は vendor/p98lib/README.md 参照
 ide/                CodeMirrorエディタ＋WebNP2実行画面
   index.html          実用workbench（編集・IndexedDB保存・ビルド・実行・デバッグ）
   verify-loader.mjs   workbenchのローダ状態・再実行・終了コード検証
@@ -83,6 +86,33 @@ NASMの`%line`も生成バイト自体はコメントと同一だったが、lis
 addressは近傍行へ寄せず`null`を返す。誤った行を示さないことを優先する。
 再現・ホスト版一致検証は [docs/smallerc-wasm.md](docs/smallerc-wasm.md) を参照する。
 題材にした1997年の実在コードそのものと、それを扱った文書は、完成までリポジトリへ含めていない。
+
+## p98lib サンプル
+
+[p98lib](https://github.com/uraraworks/p98lib)（PC-98向けのCゲームライブラリ。MIT）の
+サンプル3本（`hello.c` / `walk.c` / `walk2.c`）を、IDEのサンプル一覧から開いてそのまま
+ビルド・実行できるようにしている。それぞれ、画面初期化・矩形塗り・flipだけの最小例、
+方向キーでキャラが背景の上を動く単純な毎フレーム全面描き直し版、VRAM常駐スプライト＋
+EGC転送＋背景ページ差分復帰によるスプライト本番デモ、という難易度の階段になっている。
+`walk2.c`が`#include`する`mag_assets.h`（作者のオリジナル作品から変換した画像データ）は
+ビルド時に自動でincludeされるため、サンプル一覧には出さない。
+
+ビルド経路は、ソースが`#include "p98.h"`を含むかどうかで自動的に分かれる。含まない
+通常のCサンプルは従来どおりsmall model・単一ファイルの経路のままだが、含む場合は
+huge model（ライブラリ`lcdh.a`）へ切り替わり、`vendor/p98lib/src/p98.c`をELFオブジェクト化、
+`vendor/p98lib/src/p98_asm.asm`をNASMでELFへアセンブルし、その2つをユーザーの.cと
+リンクする（手順はp98lib側の`tools/build.mjs`のNode版と同じ）。この判定は
+`#include "p98.h"`という文字列を見ているだけのヒューリスティックで、コメント中に
+書かれていても反応する（安全側＝huge経路に倒れるだけなので実害はない）。
+
+p98libは別リポジトリだが、ソースは`vendor/p98lib/`へバイト単位でコピー同梱している。
+WorkbenchNP2はGitHub Pagesで配信されるため、別リポジトリへの相対パス参照は公開後に
+404になる（`toolchain/verify-published-assets.mjs`冒頭のとおり過去に実際踏んでいる）。
+依存は双方向だが非対称で、WorkbenchNP2側は「配信のためのコピー」、p98lib側の
+`tools/build.mjs`は「ツールチェーン本家への参照」（`../WorkbenchNP2`を相対importする）。
+鮮度は`vendor/p98lib/MANIFEST.json`（元commitハッシュ＋各ファイルのsha256）と
+`tools/verify-p98lib-vendor.mjs`で担保する。技術的な詳細は
+[docs/p98lib-integration.md](docs/p98lib-integration.md)を参照。
 
 ## IDE UI
 
@@ -185,6 +215,9 @@ WebNP2から埋め込み成果物とコアを同期してから、実ブラウ�
 node ide/verify-workbench.mjs
 node ide/verify-loader.mjs
 node ide/verify-debug-map.mjs
+node tools/verify-p98lib-vendor.mjs     # vendor/p98lib/ の同梱コピーがMANIFEST.jsonと一致するか(隣に../p98libがあれば本家とも比較)
+node ide/verify-p98lib-build.mjs        # p98libサンプル3本がNode側のwasm経路でhuge modelビルドできるか
+node ide/verify-p98lib-browser.mjs      # 同ビルドをブラウザ経路(配信・#include判定・故障注入・small経路の非回帰)で確認
 ```
 
 `ide/verify-loader.mjs`はworkbenchで、ロード済み対象のビルド出力一致、ローダ終了直前の内部状態、

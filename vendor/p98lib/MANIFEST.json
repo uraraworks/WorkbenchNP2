@@ -1,0 +1,15 @@
+{
+  "source": "https://github.com/uraraworks/p98lib",
+  "commit": "62dcb46b3fc2445259123baac0a91c7382744d08",
+  "date": "2026-09-22",
+  "files": {
+    "include/p98.h": "a5d9760e0bdcf6485c8652cceb27e2d5714ce652f04f38910afa9ec378165e89",
+    "src/p98.c": "8fbe6eb4893251be34e80110ed1f5cc44d283f7c4002697b18107a63205359d9",
+    "src/p98_asm.asm": "59bbdb0f89c24d327f92768df8d9e67951c4fc94c9a7083e44a3100f4164ce4d",
+    "samples/hello.c": "691fb2a74ff6e4849563d5c6f5110507fc84273382a425e93111e436aad316d8",
+    "samples/walk.c": "75a882f0f9d710ea05d92e0144491ed08f469b00e437cd6fff62145be4682800",
+    "samples/walk2.c": "49f7d031c4e806b65f83b8d327275266bad9eb1afe44169dc0f03c0a56f6e79d",
+    "samples/mag_assets.h": "adf60889dafa2e152c079ccdbc2d8798d971d94d0789abc0c9b252ab5c764f19",
+    "LICENSE": "9bfa1e87767ceaa310390f799b0fd420a5b31a8e06fa303012ea8237b8439730"
+  }
+}

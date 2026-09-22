@@ -1,5 +1,5 @@
 import { assembleWithFactory } from '../toolchain/assemble-core.mjs';
-import { compileWithFactories } from '../toolchain/compile-core.mjs';
+import { compileWithFactories, compileToObjectWithFactories } from '../toolchain/compile-core.mjs';
 import { parseListing } from '../toolchain/listing.mjs';
 import { makeFd } from '../toolchain/makefd.mjs';
 import { addHostdrv } from '../toolchain/hostdrv.mjs';
@@ -92,6 +92,81 @@ async function loadCResources() {
   return cResourcesPromise;
 }
 
+let p98ResourcesPromise;
+
+/**
+ * p98lib(別リポジトリ。vendor/p98lib/ へ配信用にバイト単位コピーしている。
+ * 経緯は vendor/p98lib/README.md参照)のビルドに要る資材をまとめて取得する。
+ * C標準ヘッダ29本は loadCResources() のものをそのまま使い回し、p98.h/mag_assets.hを
+ * 追加する。ライブラリは small用のlcds.aではなくhuge用のlcdh.a(p98libはhuge固定)。
+ */
+async function loadP98Resources() {
+  if (!p98ResourcesPromise) p98ResourcesPromise = (async () => {
+    const [cResources, p98Header, p98Source, p98AsmSource, magAssetsHeader, library] = await Promise.all([
+      loadCResources(),
+      fetchBytes('../vendor/p98lib/include/p98.h'),
+      fetchBytes('../vendor/p98lib/src/p98.c'),
+      fetchBytes('../vendor/p98lib/src/p98_asm.asm'),
+      fetchBytes('../vendor/p98lib/samples/mag_assets.h'),
+      fetchBytes('../toolchain/smlrc-wasm/lcdh.a'),
+    ]);
+    return {
+      includeFiles: { ...cResources.includeFiles, 'p98.h': p98Header, 'mag_assets.h': magAssetsHeader },
+      p98Source, p98AsmSource, library,
+    };
+  })();
+  return p98ResourcesPromise;
+}
+
+// p98lib(huge model + p98.c/p98_asm.asmのリンクが要る別ライブラリ)を使っているかどうかの
+// ヒューリスティックな判定。IDEはユーザーの.cソースの中身しか見えないため、
+// #include "p98.h" があるかどうかで判断する。行頭に空白を許すが、コメント中の
+// #include もこの判定に引っかかる(誤検出はビルドが通る側に倒れるだけで安全)。
+const P98LIB_INCLUDE_PATTERN = /^\s*#\s*include\s*"p98\.h"/m;
+
+/**
+ * p98lib経路のビルド。p98lib/tools/build.mjs のNode版と同じ3段の手順を
+ * ブラウザのwasm factory経由で行う:
+ *   1. p98.c を単独でELFオブジェクト化(リンクしない)
+ *   2. p98_asm.asm を単独でELFオブジェクトへアセンブル
+ *   3. ユーザーの.cをコンパイルし、1.と2.をextraLinkInputsとしてリンク段で束ねる
+ * p98.c/p98_asm.asm側の失敗はユーザーのコードの行番号ではないため、stageを
+ * 'p98lib'/'nasm(p98lib)' として区別し、利用者が「自分のコードの行ではない」と
+ * 分かるようにする。
+ */
+async function buildWithP98lib(source) {
+  const resources = await loadP98Resources();
+
+  const libObject = await compileToObjectWithFactories(resources.p98Source, {
+    includeFiles: resources.includeFiles, model: 'huge',
+  }, {
+    createSmlrpp: smallerFactory('createSmlrpp'),
+    createSmlrc: smallerFactory('createSmlrc'),
+    assemble: browserAssemble,
+  });
+  if (!libObject.ok) {
+    return { ok: false, errors: libObject.errors.map((error) => ({ ...error, stage: error.stage === 'nasm' ? 'nasm(p98lib)' : 'p98lib' })) };
+  }
+
+  const asmObject = await browserAssemble(resources.p98AsmSource, { format: 'elf', listing: true });
+  if (!asmObject.ok) {
+    return { ok: false, errors: asmObject.errors.map((error) => ({ ...error, stage: 'nasm(p98lib)' })) };
+  }
+
+  return compileWithFactories(source, {
+    library: resources.library, includeFiles: resources.includeFiles, model: 'huge',
+    extraLinkInputs: [
+      { name: 'p98lib.o', bytes: libObject.object },
+      { name: 'p98asm.o', bytes: asmObject.output },
+    ],
+  }, {
+    createSmlrpp: smallerFactory('createSmlrpp'),
+    createSmlrc: smallerFactory('createSmlrc'),
+    createSmlrl: smallerFactory('createSmlrl'),
+    assemble: browserAssemble,
+  });
+}
+
 const nasmFactory = (options) => window.createNasm({
   ...options, locateFile: (name) => new URL(`../toolchain/nasm-wasm/${name}`, location.href).href,
 });
@@ -117,13 +192,17 @@ export async function buildSource(path, text) {
     if (result.ok) result = { ...result, map: parseListing(result.listing, result.output) };
     outputExtension = 'COM';
   } else if (extension === 'c') {
-    const resources = await loadCResources();
-    result = await compileWithFactories(source, resources, {
-      createSmlrpp: smallerFactory('createSmlrpp'),
-      createSmlrc: smallerFactory('createSmlrc'),
-      createSmlrl: smallerFactory('createSmlrl'),
-      assemble: browserAssemble,
-    });
+    if (P98LIB_INCLUDE_PATTERN.test(text)) {
+      result = await buildWithP98lib(source);
+    } else {
+      const resources = await loadCResources();
+      result = await compileWithFactories(source, resources, {
+        createSmlrpp: smallerFactory('createSmlrpp'),
+        createSmlrc: smallerFactory('createSmlrc'),
+        createSmlrl: smallerFactory('createSmlrl'),
+        assemble: browserAssemble,
+      });
+    }
     outputExtension = 'EXE';
   } else {
     return { ok: false, errors: [{ stage: 'input', line: 0, message: '対応拡張子は .asm / .c です' }] };

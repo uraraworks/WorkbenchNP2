@@ -1,0 +1,35 @@
+MIT License
+
+Copyright (c) 2026 URARA-works
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+## 同梱素材について (About bundled assets)
+
+上記のライセンスは p98lib のコード(`src/`, `include/`, `tools/`, `tests/`, `samples/`
+のC/アセンブリ/JavaScriptソース)に適用されます。
+
+`samples/mag_assets.h` / `samples/kya_assets.h` および `tests/` 配下の対応する
+故障注入版に含まれる画像データ(Cのバイト配列に変換済みのもの)は、**作者
+(URARA-works)が1996〜97年に制作した画像**です。これらの素材の出所は `docs/assets.md`
+に記載してあります。素材をコードと同じ MIT ライセンスとして扱ってよいかどうかは
+本ファイルでは判断せず明記しません。素材を再利用する場合は、まず `docs/assets.md`
+を確認し、必要であれば作者(URARA-works)へお問い合わせください。

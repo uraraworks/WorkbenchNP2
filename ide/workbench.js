@@ -1096,9 +1096,16 @@ function makeGroup(label, files, origin, { deletable = false } = {}) {
     entry.dataset.origin = origin;
     entry.dataset.path = file.path;
     entry.title = `${ORIGIN_LABELS[origin]} / ${file.path}`;
-    // サンプルはbasenameだけ表示する（フルパスはtitleに残す）。保存先グループは
-    // 常にフラットな1ファイル=1プログラム構成なのでpathがそのままbasenameになる。
-    entry.textContent = origin === 'sample' ? basename(file.path) : file.path;
+    // サンプルはsamples/直下ならbasenameだけ表示する（フルパスはtitleに残す）。
+    // 保存先グループは常にフラットな1ファイル=1プログラム構成なのでpathがそのまま
+    // basenameになる。ただしp98lib/配下のサンプルはこの例外で、パスをそのまま出す。
+    // p98libはvendor/に同梱した別ライブラリで、ビルド経路もhuge model固定と違うため、
+    // basenameだけ表示するとsamples/hello.asmやsamples/hello-c.cと同じ階層の
+    // 「ふつうのサンプル」に見えてしまい、由来もビルド経路が違うことも一覧から
+    // 伝わらなくなる。
+    entry.textContent = origin === 'sample' && file.path.startsWith('samples/')
+      ? basename(file.path)
+      : file.path;
     entry.addEventListener('click', () => {
       openFile(origin, file.path).catch((error) => setMachineStatus(error.message, true));
     });
