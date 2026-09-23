@@ -78,6 +78,7 @@ GitHub Pagesで配信されるため、別リポジトリへの相対パス参�
 | `ide/verify-p98lib-build.mjs` | `vendor/p98lib/`のバイトを使い、3サンプルがNode側の`compile-core.mjs`／`assemble.mjs`（Node用wasm factory）でhuge modelビルドできるか | `ide/browser-toolchain.mjs`のブラウザ経路そのもの（fetch先・ブラウザ用wasm factory・IDEのUI結線・`#include "p98.h"`判定の実配線）は検査しない。手順とバイトが同じだけで、実行系がNodeとブラウザで異なる |
 | `ide/verify-p98lib-browser.mjs` | 上記`ide/verify-p98lib-build.mjs`が見ていないブラウザ経路そのもの。配信（fetch先が404にならないか）・実際のIDE UIからのビルド・`#include`判定の実配線・故障注入・small経路（p98libを使わない従来のCサンプル）が壊れていないことの非回帰 | 生成したMZ EXEが実機/WebNP2上で実際に正しく動作するか（画面描画・VSYNC等）は一切見ていない。ビルドがokでMZヘッダで始まることだけを見ている |
 | `ide/verify-p98lib-repeat-run.mjs` | 実IDE（`ide/index.html`）を起動し、`p98lib/hello.c`を**同一DOSセッション内で2回連続実行**して、両方の実行でcanvas上に色5の矩形（200×80=16000px）が実際に出るかどうか。下記「パレット退避廃止と『検査の穴』」節参照 | ビルドが通るかどうかは見ていない（`ide/verify-p98lib-browser.mjs`の担当）。3回目以降の実行や、hello.c以外のサンプルでの再発は見ていない |
+| `ide/verify-p98lib-reference.mjs` | `ide/p98lib-reference.html`（このリポジトリ側で持つ日本語リファレンス）が`vendor/p98lib/include/p98.h`（APIの本家はp98lib側にある）の公開API全件を網羅しているか、`data-build="full"`と印を付けた「完全な例」が実際にhuge modelでビルドできるか。リファレンスはWB側に持つ一方APIの本家はp98lib側にあるので放っておくと必ずズレる。それを機械で検出するための検査で、どちらも故障注入で検査自体の実効性を確認している | 説明文の**内容**が正しいかは見ていない。名前が本文のどこかに登場しているかだけを見る |
 
 `ide/verify-p98lib-build.mjs`は「同じ手順・同じバイトをNode側で再現しているだけ」で
 あることを冒頭コメントで明言しており、ブラウザ経路の正しさの担保は

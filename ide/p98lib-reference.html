@@ -1,0 +1,1077 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="./pc98dev-icon.svg" />
+    <title>p98lib リファレンス</title>
+    <style>
+      /* 配色・全体の作りは help.html を踏襲する(workbench.css の --vsc-* 由来)。
+         このページは日本語のみで、言語切替の仕組みは持ち込まない。 */
+      :root {
+        color-scheme: dark;
+        --bg: #1f1f1f;
+        --bg-panel: #181818;
+        --border: #2b2b2b;
+        --text: #cccccc;
+        --text-dim: #9d9d9d;
+        --accent: #0078d4;
+        --header-bg: #0c0c0c;
+        --header-text: #f2f2f2;
+        --header-tagline-text: #a8a8a8;
+        --page-footer-bg: #181818;
+        --page-footer-text: #9d9d9d;
+        --page-footer-border: #2b2b2b;
+        --btn-bg: #313131;
+        --btn-border: #3c3c3c;
+        --btn-text: #cccccc;
+        --code-bg: #313131;
+        --note-bg: #20303f;
+        --note-border: #0078d4;
+        --warn-bg: #3a2a12;
+        --warn-border: #d48806;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        height: 100%;
+      }
+
+      body {
+        margin: 0;
+        padding: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Yu Gothic', sans-serif;
+        min-height: 100%;
+        display: flex;
+        flex-direction: column;
+        line-height: 1.7;
+      }
+
+      header.help-header {
+        flex: 0 0 auto;
+        background: var(--header-bg);
+        padding: 10px 16px;
+        box-shadow:
+          inset 0 -1px 0 rgba(255, 255, 255, 0.06),
+          0 2px 6px rgba(0, 0, 0, 0.4);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .help-header-title {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .help-header-title img {
+        width: 24px;
+        height: 24px;
+        display: block;
+      }
+
+      .help-header-title h1 {
+        font-size: 15px;
+        font-weight: 600;
+        margin: 0;
+        color: var(--header-text);
+        letter-spacing: 0.03em;
+      }
+
+      .help-header-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .help-header-actions a {
+        font: inherit;
+        font-size: 12px;
+        color: var(--btn-text);
+        background: var(--btn-bg);
+        border: 1px solid var(--btn-border);
+        border-radius: 4px;
+        padding: 4px 10px;
+        cursor: pointer;
+        text-decoration: none;
+      }
+
+      .help-header-actions a:hover {
+        background: #3a3a3a;
+      }
+
+      main {
+        flex: 1 1 auto;
+        width: 100%;
+        max-width: 920px;
+        margin: 0 auto;
+        padding: 24px 16px 40px;
+      }
+
+      h2 {
+        font-size: 18px;
+        margin: 32px 0 8px;
+        padding-bottom: 6px;
+        border-bottom: 2px solid var(--border);
+        color: #ffffff;
+      }
+
+      h2:first-of-type {
+        margin-top: 8px;
+      }
+
+      h3 {
+        font-size: 15px;
+        margin: 20px 0 6px;
+        color: #ffffff;
+      }
+
+      p,
+      ul,
+      ol {
+        margin: 8px 0;
+      }
+
+      ul,
+      ol {
+        padding-left: 24px;
+      }
+
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        margin: 12px 0;
+        font-size: 14px;
+      }
+
+      th,
+      td {
+        border: 1px solid var(--border);
+        padding: 6px 10px;
+        text-align: left;
+        vertical-align: top;
+      }
+
+      th {
+        background: var(--code-bg);
+        color: #ffffff;
+      }
+
+      kbd {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px;
+        background: var(--code-bg);
+        border: 1px solid var(--border);
+        border-bottom-width: 2px;
+        border-radius: 4px;
+        padding: 1px 5px;
+      }
+
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 13px;
+        background: var(--code-bg);
+        border-radius: 3px;
+        padding: 1px 4px;
+      }
+
+      pre {
+        background: var(--code-bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 12px 14px;
+        overflow-x: auto;
+        margin: 12px 0;
+      }
+
+      pre code {
+        background: none;
+        border-radius: 0;
+        padding: 0;
+        font-size: 13px;
+        white-space: pre;
+      }
+
+      pre.sample {
+        position: relative;
+      }
+
+      pre.sample::before {
+        content: '完全な例（そのままビルドできます）';
+        display: block;
+        font-size: 11px;
+        color: var(--text-dim);
+        margin-bottom: 6px;
+      }
+
+      pre.sample[data-build='fragment']::before {
+        content: '断片（説明用の抜粋）';
+      }
+
+      .note {
+        background: var(--note-bg);
+        border: 1px solid var(--note-border);
+        border-radius: 6px;
+        padding: 10px 14px;
+        margin: 12px 0;
+        font-size: 14px;
+      }
+
+      .warn {
+        background: var(--warn-bg);
+        border: 1px solid var(--warn-border);
+        border-radius: 6px;
+        padding: 10px 14px;
+        margin: 12px 0;
+        font-size: 14px;
+      }
+
+      .warn strong {
+        color: #ffd479;
+      }
+
+      .swatch-table td {
+        vertical-align: middle;
+      }
+
+      .swatch {
+        display: inline-block;
+        width: 22px;
+        height: 22px;
+        border: 1px solid var(--border);
+        border-radius: 3px;
+        vertical-align: middle;
+        margin-right: 8px;
+      }
+
+      .swatch-cell {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      footer.help-footer {
+        flex: 0 0 auto;
+        width: 100%;
+        font-size: 11px;
+        color: var(--page-footer-text);
+        text-align: center;
+        padding: 8px 16px;
+        background: var(--page-footer-bg);
+        border-top: 1px solid var(--page-footer-border);
+      }
+
+      footer.help-footer a {
+        color: var(--page-footer-text);
+      }
+    </style>
+  </head>
+  <body>
+    <header class="help-header">
+      <div class="help-header-title">
+        <img src="./pc98dev-icon.svg" alt="" width="24" height="24" />
+        <h1>p98lib リファレンス</h1>
+      </div>
+      <div class="help-header-actions">
+        <a href="./help.html?lang=ja">使い方に戻る</a>
+        <a class="open-app" href="./index.html">アプリを開く</a>
+      </div>
+    </header>
+
+    <main>
+      <!-- ================= 1. p98libとは ================= -->
+      <section>
+        <h2>1. p98lib とは / IDE での始め方</h2>
+
+        <p>
+          <strong>p98lib</strong> は、PC-98(386以上)向けにゲームのようなグラフィック
+          プログラムを書くための、最小限のCライブラリです。画面をグラフィックモードに
+          切り替える・矩形や絵を描く・キー入力を読む・ちらつかずに絵を動かす、といった
+          「よくやること」をひとまとめにしています。
+        </p>
+        <p>
+          このページは <code>include/p98.h</code>（ヘッダファイル）を読まなくても
+          p98lib を使えるように、「何ができるか」から使い方のコードを見せる形で
+          まとめたリファレンスです。関数の正式な一覧は最後の
+          「<a href="#reference">12. 関数の総覧</a>」にあります。
+        </p>
+
+        <h3>IDE での使い方</h3>
+        <ol>
+          <li>
+            左のエクスプローラーのサンプル一覧から、<code>p98lib/</code> で始まる
+            もの（<code>hello.c</code> / <code>walk.c</code> / <code>walk2.c</code>）を
+            開きます。
+          </li>
+          <li>
+            他のサンプルと同じように、エディタ下の<strong>実行ボタン</strong>（▷）を
+            押すだけでそのまま動きます。
+          </li>
+        </ol>
+        <p>
+          自分で新しくプログラムを書いて p98lib を使いたいときは、ファイルの
+          <strong>どこかに <code>#include "p98.h"</code> と書くだけ</strong>で構いません
+          （慣例として先頭に書きますが、行頭に空白があってもファイルの1行目でなくても
+          構いません）。それだけで、ビルドの内部処理が自動的に huge model（p98lib が
+          必要とするメモリモデル）とライブラリのリンクに切り替わります。特別な設定は要りません。
+        </p>
+
+        <h3>動く最小のプログラム</h3>
+        <p>
+          画面を初期化し、色5（緑+青）の矩形を1つ描いて表示し、しばらく待ってから
+          終了する、最小のプログラムです（サンプルの <code>hello.c</code> と同じ内容）。
+        </p>
+<pre class="sample" data-build="full"><code>#include "p98.h"
+
+int main(void) {
+    int i;
+
+    p98_init();
+    p98_clear(0);
+    p98_fill_rect(100, 50, 200, 80, 5);
+    p98_flip();
+
+    for (i = 0; i &lt; 60; i++) {
+        p98_wait_vsync();
+    }
+
+    p98_quit();
+    return 0;
+}
+</code></pre>
+        <p>
+          ここで出てきた <code>p98_init()</code>・<code>p98_clear()</code>・
+          <code>p98_fill_rect()</code>・<code>p98_flip()</code>・
+          <code>p98_wait_vsync()</code>・<code>p98_quit()</code> の意味は、
+          次の章から順番に説明します。
+        </p>
+      </section>
+
+      <!-- ================= 2. 画面を出す・消す ================= -->
+      <section>
+        <h2>2. 画面を出す・消す</h2>
+
+        <table>
+          <thead>
+            <tr><th>関数</th><th>説明</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>int p98_init(void);</code></td>
+              <td>
+                画面を <strong>640x400・16色</strong> のグラフィックモードに切り替える。
+                描画・キー入力を行う <code>p98_*</code> 関数は <code>p98_init()</code> の
+                <strong>後</strong>に呼ぶこと。ただし <code>p98_set_hide_text_on_init()</code>
+                だけは例外で、<code>p98_init()</code> より<strong>前</strong>に呼ぶ
+                （次の行参照）。戻り値は成功時0（現状は常に成功する）。
+              </td>
+            </tr>
+            <tr>
+              <td><code>void p98_quit(void);</code></td>
+              <td>
+                <code>p98_init()</code> で変更した状態(画面モード・INT 23hベクタ)を
+                元へ戻す。<strong>パレットは、呼び出し前の実際のパレットを読み出して
+                復元するのではなく、<code>p98_init()</code> と同じ既定値16色へ
+                書き戻す</strong>（詳しくは次の「3. 色とパレット」参照）。テキスト画面に
+                ついては、<strong>カーソルの表示だけは必ず元(表示)に戻す</strong>が、
+                <code>p98_init()</code> で消したテキストの中身(文字コード面)は
+                元に戻さない。<strong>プログラムの最後に必ず呼ぶこと。</strong>
+                <code>p98_init()</code> を呼んでいない状態で呼んではいけない。
+              </td>
+            </tr>
+            <tr>
+              <td><code>void p98_set_hide_text_on_init(int enable);</code></td>
+              <td>
+                <code>p98_init()</code> が起動時にテキスト画面を消す・カーソルを隠す
+                動作をするかどうかを設定する（既定は有効=消す）。
+                <code>p98_init()</code> より<strong>前に</strong>呼ぶこと。
+                テキストとグラフィックを重ねて使いたい場合に <code>0</code> を渡す。
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="note">
+          <code>p98_init()</code> を呼ぶと、画面は 640x400 の16色モードになり、
+          パレットは次の章で説明する「既定パレット」から始まります。
+        </div>
+      </section>
+
+      <!-- ================= 3. 色とパレット ================= -->
+      <section>
+        <h2>3. 色とパレット</h2>
+
+        <p>
+          p98lib の描画関数（<code>p98_clear()</code> や <code>p98_fill_rect()</code>
+          など）が受け取る「色」は、<strong>0〜15 の色番号</strong>です。これは
+          RGBの値そのものではなく、<strong>4本のビット面のON/OFFの組み合わせ</strong>を
+          表す番号です。
+        </p>
+        <p>色番号の各ビットの意味は次のとおりです。</p>
+        <table>
+          <thead>
+            <tr><th>ビット</th><th>意味</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>bit0（値1）</td><td>青</td></tr>
+            <tr><td>bit1（値2）</td><td>赤</td></tr>
+            <tr><td>bit2（値4）</td><td>緑</td></tr>
+            <tr><td>bit3（値8）</td><td>輝度（明るさ）</td></tr>
+          </tbody>
+        </table>
+        <p>
+          例えば <strong>5</strong>（2進数で <code>0101</code>）は bit0(青)+bit2(緑) が
+          立っているので「緑+青＝シアン」になります。<strong>10</strong>（<code>1010</code>）は
+          bit1(赤)+bit3(輝度) なので「輝度+赤＝明るい赤」です。慣れないうちは、
+          欲しい色を「赤・緑・青のどれを混ぜるか」＋「輝度を足すか」で考えると
+          組み立てやすいです。
+        </p>
+
+        <h3>16色の既定パレット</h3>
+        <p>
+          <code>p98_init()</code> を呼ぶと、パレットは次の16色から始まります
+          （8番だけ規則から外れて中間グレーです）。
+        </p>
+        <table class="swatch-table">
+          <thead>
+            <tr><th>番号</th><th>色見本</th><th>意味の例</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>0</td><td class="swatch-cell"><span class="swatch" style="background: rgb(0,0,0)"></span>rgb(0,0,0)</td><td>黒</td></tr>
+            <tr><td>1</td><td class="swatch-cell"><span class="swatch" style="background: rgb(0,0,119)"></span>rgb(0,0,119)</td><td>青</td></tr>
+            <tr><td>2</td><td class="swatch-cell"><span class="swatch" style="background: rgb(119,0,0)"></span>rgb(119,0,0)</td><td>赤</td></tr>
+            <tr><td>3</td><td class="swatch-cell"><span class="swatch" style="background: rgb(119,0,119)"></span>rgb(119,0,119)</td><td>赤+青＝マゼンタ</td></tr>
+            <tr><td>4</td><td class="swatch-cell"><span class="swatch" style="background: rgb(0,119,0)"></span>rgb(0,119,0)</td><td>緑</td></tr>
+            <tr><td>5</td><td class="swatch-cell"><span class="swatch" style="background: rgb(0,119,119)"></span>rgb(0,119,119)</td><td>緑+青＝シアン</td></tr>
+            <tr><td>6</td><td class="swatch-cell"><span class="swatch" style="background: rgb(119,119,0)"></span>rgb(119,119,0)</td><td>赤+緑＝黄</td></tr>
+            <tr><td>7</td><td class="swatch-cell"><span class="swatch" style="background: rgb(119,119,119)"></span>rgb(119,119,119)</td><td>赤+緑+青＝灰色</td></tr>
+            <tr><td>8</td><td class="swatch-cell"><span class="swatch" style="background: rgb(68,68,68)"></span>rgb(68,68,68)</td><td>中間グレー（規則の外側の特別枠）</td></tr>
+            <tr><td>9</td><td class="swatch-cell"><span class="swatch" style="background: rgb(0,0,255)"></span>rgb(0,0,255)</td><td>明るい青</td></tr>
+            <tr><td>10</td><td class="swatch-cell"><span class="swatch" style="background: rgb(255,0,0)"></span>rgb(255,0,0)</td><td>明るい赤</td></tr>
+            <tr><td>11</td><td class="swatch-cell"><span class="swatch" style="background: rgb(255,0,255)"></span>rgb(255,0,255)</td><td>明るいマゼンタ</td></tr>
+            <tr><td>12</td><td class="swatch-cell"><span class="swatch" style="background: rgb(0,255,0)"></span>rgb(0,255,0)</td><td>明るい緑</td></tr>
+            <tr><td>13</td><td class="swatch-cell"><span class="swatch" style="background: rgb(0,255,255)"></span>rgb(0,255,255)</td><td>明るいシアン</td></tr>
+            <tr><td>14</td><td class="swatch-cell"><span class="swatch" style="background: rgb(255,255,0)"></span>rgb(255,255,0)</td><td>明るい黄</td></tr>
+            <tr><td>15</td><td class="swatch-cell"><span class="swatch" style="background: rgb(255,255,255)"></span>rgb(255,255,255)</td><td>白</td></tr>
+          </tbody>
+        </table>
+
+        <h3>パレットを変える</h3>
+        <table>
+          <thead>
+            <tr><th>関数</th><th>説明</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>void p98_set_palette(int index, int r, int g, int b);</code></td>
+              <td>
+                パレット番号 <code>index</code>（0〜15）が実際に表す色を、
+                <code>r</code>/<code>g</code>/<code>b</code>（それぞれ<strong>0〜15</strong>の
+                濃さ）に設定する。以後、その番号で塗った場所すべての見た目が変わる。
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="warn">
+          <strong>注意:</strong> <code>p98_quit()</code> は、<code>p98_set_palette()</code>
+          で変更したパレットを<strong>プログラム開始前の実際の状態へ戻すわけではありません</strong>。
+          常に <code>p98_init()</code> と同じ既定値16色へ書き戻します。
+        </div>
+      </section>
+
+      <!-- ================= 4. 描く ================= -->
+      <section>
+        <h2>4. 描く</h2>
+
+        <table>
+          <thead>
+            <tr><th>関数</th><th>説明</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>void p98_clear(int color);</code></td>
+              <td>描画ページ全体を <code>color</code>（0〜15）で塗りつぶす。</td>
+            </tr>
+            <tr>
+              <td><code>void p98_fill_rect(int x, int y, int w, int h, int color);</code></td>
+              <td>
+                描画ページの矩形 <code>(x, y, w, h)</code> を <code>color</code> で塗る。
+                座標は<strong>左上原点</strong>、画面は640x400。
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="note">
+          <code>x</code>/<code>y</code> が負だったり、矩形が画面の右端・下端を
+          はみ出したりしても、<strong>画面内に収まる部分だけ自動でクリップして描かれる</strong>ので、
+          呼び出し側で範囲チェックをしなくても安全です。完全に画面外の矩形は何も描きません。
+        </div>
+      </section>
+
+      <!-- ================= 5. 表示を切り替える(ダブルバッファ) ================= -->
+      <section>
+        <h2>5. 表示を切り替える（ダブルバッファ）</h2>
+
+        <p>
+          画面には「今表示しているページ」と「今描いているページ」の2枚があります。
+          もし画面を1枚しか持たず、そこへ直接絵を描いていくと、
+          <strong>描いている途中の絵がそのまま見えてしまい、ちらつきの原因</strong>に
+          なります。p98lib では、見えない裏側のページに絵を描き終えてから
+          表と裏を入れ替えることで、これを防ぎます。
+        </p>
+
+        <table>
+          <thead>
+            <tr><th>関数</th><th>説明</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>void p98_wait_vsync(void);</code></td>
+              <td>次の垂直帰線（画面の描き直しの区切り）が始まるまで待つ。</td>
+            </tr>
+            <tr>
+              <td><code>void p98_flip(void);</code></td>
+              <td>
+                表示ページと描画ページを入れ替える。以後の
+                <code>p98_clear()</code>/<code>p98_fill_rect()</code> などは
+                新しい描画ページ（直前まで表示していなかった側）に書かれる。
+              </td>
+            </tr>
+            <tr>
+              <td><code>unsigned long p98_frames(void);</code></td>
+              <td><code>p98_init()</code> 以降に <code>p98_flip()</code> を呼んだ回数。</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="warn">
+          <strong>注意:</strong> <code>p98_flip()</code> は「前のフレームで描いた内容」を
+          新しい描画ページへ引き継ぎません。2枚のページはそれぞれ別々の内容を持つだけです。
+          動く絵を描くときは、毎フレーム背景を描き直すか、動いた分だけ元に戻す処理を
+          自分で書く必要があります（後述の「8. 背景ページ＋差分復帰」はこれを楽にする
+          方法です）。
+        </div>
+
+        <p>毎フレームの定型は次のとおりです：<strong>描く → <code>p98_wait_vsync()</code> → <code>p98_flip()</code></strong>。</p>
+
+<pre class="sample" data-build="full"><code>#include "p98.h"
+
+#define SC_ESC 0x00
+
+int main(void) {
+    int x = 0;
+    int running = 1;
+
+    p98_init();
+
+    while (running) {
+        p98_poll();
+        if (p98_key_down(SC_ESC)) running = 0;
+
+        p98_clear(0);
+        p98_fill_rect(x, 180, 40, 40, 10);
+        x = (x + 4) % 600;
+
+        p98_wait_vsync();
+        p98_flip();
+    }
+
+    p98_quit();
+    return 0;
+}
+</code></pre>
+        <p>
+          （<code>p98_poll()</code> と <code>p98_key_down()</code> は次の章で説明する
+          キー入力の関数です。）
+        </p>
+      </section>
+
+      <!-- ================= 6. キー入力 ================= -->
+      <section>
+        <h2>6. キー入力</h2>
+
+        <table>
+          <thead>
+            <tr><th>関数</th><th>説明</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>void p98_poll(void);</code></td>
+              <td>このフレーム分の入力を取り込む。</td>
+            </tr>
+            <tr>
+              <td><code>int p98_key_down(int scancode);</code></td>
+              <td><code>scancode</code> を<strong>押している間ずっと</strong>真(1)。</td>
+            </tr>
+            <tr>
+              <td><code>int p98_key_pressed(int scancode);</code></td>
+              <td>
+                前回の <code>p98_poll()</code> から今回までの間に、<strong>新たに
+                押された瞬間だけ</strong>真(1)。押しっぱなしにしても、真になるのは
+                最初の1回だけ。
+              </td>
+            </tr>
+            <tr>
+              <td><code>int p98_key_getch(void);</code></td>
+              <td>
+                文字入力を1文字取り出す（無ければ0。ブロックしない）。
+                SHIFT/CAPS/CTRL等の変換はBIOSまかせ。
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="warn">
+          <strong>つまずきどころ:</strong> <code>p98_poll()</code> を<strong>毎フレーム
+          呼ばないと、キー入力は一切取れません。</strong>
+          <code>p98_key_down()</code> / <code>p98_key_pressed()</code> は、直前に呼んだ
+          <code>p98_poll()</code> の結果を見ているだけです。
+        </div>
+
+        <p>
+          <code>p98_key_down</code>（押されている間ずっと真）と
+          <code>p98_key_pressed</code>（押した瞬間だけ真）は用途が違います。
+          例えば「押しっぱなしで歩き続ける」移動には <code>p98_key_down</code> を、
+          「押すたびに1回だけ色を変える」ような切り替えには
+          <code>p98_key_pressed</code> を使います（<code>samples/walk.c</code> が
+          この使い分けの実例です）。
+        </p>
+
+        <h3>scancode（実測済みの対応表）</h3>
+        <table>
+          <thead>
+            <tr><th>キー</th><th>scancode</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>UP</td><td><code>0x3A</code></td></tr>
+            <tr><td>RIGHT</td><td><code>0x3C</code></td></tr>
+            <tr><td>DOWN</td><td><code>0x3D</code></td></tr>
+            <tr><td>LEFT</td><td><code>0x3B</code></td></tr>
+            <tr><td>SPACE</td><td><code>0x34</code></td></tr>
+            <tr><td>ESC</td><td><code>0x00</code></td></tr>
+          </tbody>
+        </table>
+        <p>
+          上の6つは <code>samples/walk.c</code> で実際に使われ、動作確認済みの値です。
+          掲載した6つ以外のキーを使いたい場合は、PC-98のスキャンコード表
+          （WebNP2-wiki の <code>Keyboard.md</code> 等）を参照してください。
+        </p>
+      </section>
+
+      <!-- ================= 7. スプライト ================= -->
+      <section>
+        <h2>7. スプライト（絵を描く）</h2>
+
+        <p>
+          矩形の塗りつぶしだけでなく、あらかじめ用意したビットマップ（スプライト）を
+          画面へ描くこともできます。p98lib のスプライトは <strong>4プレーン
+          （青・赤・緑・輝度）+マスク</strong>という形式のデータを使います。
+        </p>
+
+        <h3><code>p98_sprite_t</code> の中身</h3>
+        <table>
+          <thead>
+            <tr><th>フィールド</th><th>意味</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>int w;</code></td><td>幅（ドット数、1以上）</td></tr>
+            <tr><td><code>int h;</code></td><td>高さ（ドット数、1以上）</td></tr>
+            <tr>
+              <td><code>const unsigned char *planes[4];</code></td>
+              <td>
+                <code>[0]</code>=青 <code>[1]</code>=赤 <code>[2]</code>=緑
+                <code>[3]</code>=輝度。それぞれのビットが立っている位置がその色面ONを表す。
+              </td>
+            </tr>
+            <tr>
+              <td><code>const unsigned char *mask;</code></td>
+              <td><strong>1のビットの位置だけ画面に描く</strong>（透明部分の指定）。</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          ビット順は <strong>MSBが左端のドット</strong>（<code>p98_fill_rect</code> と
+          同じ並び）で、1行は <code>ceil(w/8)</code> バイト、パディング無しで詰めて
+          並びます（1プレーン分の総バイト数は <code>ceil(w/8)*h</code>）。
+        </p>
+
+        <div class="note">
+          <strong>マスクの考え方:</strong> <code>mask</code> のビットが1の位置だけ、
+          4プレーンの内容がそのまま画面へ書かれます。0の位置は4プレーンとも
+          <strong>背景をそのまま残し</strong>、何も上書きしません。つまり
+          「背景色をキーカラーにして透明を表す」方式ではなく、
+          <strong>マスク専用のビットマップで透明・不透明を指定する</strong>方式です。
+          色を変えたいときは、<code>planes</code> の中身をその場で書き換えるのではなく、
+          色ごとに別々の <code>p98_sprite_t</code>（同じ形のマスクを共有しつつ、
+          プレーンの組み合わせだけ変えたもの）を用意して切り替えます
+          （<code>samples/walk.c</code> の <code>SPR_WHITE</code>/<code>SPR_MAGENTA</code>
+          等がその実例です）。
+        </div>
+
+        <table>
+          <thead>
+            <tr><th>関数・型</th><th>説明</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>void p98_draw_sprite(const p98_sprite_t *spr, int x, int y);</code></td>
+              <td>
+                スプライトの左上が <code>(x, y)</code> に来るように描く。<code>x</code>は
+                1ドット単位で自由。画面外へはみ出す部分は自動でクリップされる。
+                <code>spr</code> が <code>NULL</code>、または <code>w&lt;=0 || h&lt;=0</code>
+                なら何もしない。
+              </td>
+            </tr>
+            <tr>
+              <td><code>p98_sprite_backend_t</code></td>
+              <td>
+                <code>P98_SPRITE_CPU</code>（既定。1バイト単位の読み書きで確実に
+                描く）と <code>P98_SPRITE_EGC</code>（EGCで一部を高速化。見た目の
+                結果はCPU版と常に一致する）の2種類。
+              </td>
+            </tr>
+            <tr>
+              <td><code>void p98_set_sprite_backend(p98_sprite_backend_t backend);</code><br /><code>p98_sprite_backend_t p98_get_sprite_backend(void);</code></td>
+              <td>以後の <code>p98_draw_sprite()</code> が使うバックエンドを切り替える／取得する。</td>
+            </tr>
+            <tr>
+              <td><code>void p98_draw_sprite_ex(const p98_sprite_t *spr, int x, int y, p98_sprite_backend_t backend);</code></td>
+              <td>現在の設定に関わらず、バックエンドを明示して描く。</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- ================= 8. 背景ページ+差分復帰 ================= -->
+      <section>
+        <h2>8. 背景ページ＋差分復帰（動くものを速くする方法）</h2>
+
+        <p>
+          「5. 表示を切り替える」で触れたとおり、<code>p98_flip()</code> 方式では、
+          動くキャラクタを描くたびに背景を自分で描き直す必要があります。背景が
+          軽ければ問題になりませんが、背景が重い（タイルを敷き詰めるなど）場合、
+          毎フレーム全部描き直すのは無駄です。背景ページ＋差分復帰は、
+          <strong>背景を1回だけ裏の「背景ページ」に描いておき、動く部分だけ
+          そこから復元してから新しい位置に描く</strong>ことで、この無駄を減らす方法です。
+        </p>
+
+        <div class="warn">
+          <strong>つまずきどころ:</strong> この方式は <code>p98_flip()</code> による
+          ダブルバッファリングとは<strong>併用できません</strong>（どちらも同じ
+          ページ切り替えの仕組みを使うが、意味が違うため）。使うなら
+          <code>p98_init()</code> の代わりに <code>p98_init_bgpage()</code> を使い、
+          以後は <code>p98_flip()</code> を呼ばないでください。
+        </div>
+
+        <table>
+          <thead>
+            <tr><th>関数・型</th><th>説明</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>int p98_init_bgpage(void);</code></td>
+              <td><code>p98_init()</code> と同じ初期化に加え、背景ページモードにする。</td>
+            </tr>
+            <tr>
+              <td><code>p98_render_mode_t p98_get_render_mode(void);</code></td>
+              <td>
+                現在の描画モードを返す（<code>P98_RENDER_FLIP</code> が既定、
+                <code>p98_init_bgpage()</code> した場合のみ <code>P98_RENDER_BGPAGE</code>）。
+              </td>
+            </tr>
+            <tr>
+              <td><code>void p98_set_draw_target(p98_draw_target_t target);</code></td>
+              <td>
+                以後の <code>p98_clear()</code>/<code>p98_fill_rect()</code>/
+                <code>p98_draw_sprite()</code> の描画先を、<code>P98_TARGET_SCREEN</code>
+                （画面ページ、既定）と <code>P98_TARGET_BACKGROUND</code>（背景ページ）
+                で切り替える。<code>P98_RENDER_BGPAGE</code>モードでのみ意味を持つ。
+              </td>
+            </tr>
+            <tr>
+              <td><code>void p98_draw_sprite_diff(const p98_sprite_t *spr, int x, int y);</code></td>
+              <td>
+                前回この関数が描いた矩形を背景ページから画面ページへ復元してから、
+                <code>spr</code> を <code>(x, y)</code> へ描く。最初の呼び出しでは
+                復元をしない。<code>P98_RENDER_FLIP</code>モードでは
+                <code>p98_draw_sprite()</code> と同じ動作（フォールバック）になる。
+              </td>
+            </tr>
+            <tr>
+              <td><code>void p98_copy_bgpage_to_screen(void);</code></td>
+              <td>
+                背景ページの内容を画面ページへ丸ごとコピーする。背景を作り直した
+                ときに画面へ反映したい場合に使う。<code>P98_RENDER_BGPAGE</code>モード
+                でないときは何もしない。
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          典型的な使い方は「1. 背景ページへ一度だけ背景を描く → 2. 画面ページへ
+          <code>p98_copy_bgpage_to_screen()</code> でコピー → 3. 以後は毎フレーム
+          <code>p98_draw_sprite_diff()</code> でキャラクタだけを描く」という流れです
+          （<code>samples/walk2.c</code> がこの流れの実例です）。
+        </p>
+        <p>
+          同時に動かせるのは1体分（直前の1矩形）だけである点に注意してください。
+        </p>
+      </section>
+
+      <!-- ================= 9. VRAM常駐スプライト ================= -->
+      <section>
+        <h2>9. VRAM常駐スプライト（さらに速くする方法）</h2>
+
+        <p>
+          スプライトをあらかじめVRAMの余りへ「常駐」させておき、EGC（グラフィック用の
+          専用回路）に本来の転送機能を使わせることで、CPUでの1バイトずつの読み書きより
+          速く描く経路です。
+        </p>
+
+        <div class="warn">
+          <strong>つまずきどころ:</strong> 置き場は <code>P98_VRAM_STORE_SIZE</code>
+          （<strong>768バイト/プレーンしかありません</strong>）。使い切ると
+          <code>p98_vram_upload()</code> は失敗（負の値を返す）ので、
+          <strong>戻り値を必ず確認して、失敗したらCPU経路（<code>p98_draw_sprite()</code>
+          系）へ落とす</strong>書き方にしてください（<code>samples/walk2.c</code> の
+          <code>draw_character()</code> がこの書き方の実例です）。
+        </div>
+
+        <table>
+          <thead>
+            <tr><th>定数・型</th><th>説明</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>#define P98_VRAM_STORE_OFF  32000</code><br /><code>#define P98_VRAM_STORE_SIZE 768</code></td>
+              <td>VRAM常駐置き場の先頭オフセットとサイズ（1プレーンあたり768バイト）。</td>
+            </tr>
+            <tr>
+              <td><code>p98_vram_sprite_t</code></td>
+              <td>
+                <code>p98_vram_upload()</code> の結果を保持する構造体
+                （幅・高さ・置き場の位置など。フィールドは内部実装向けで、
+                呼び出し側は中身を直接いじらず関数経由で使う）。
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <table>
+          <thead>
+            <tr><th>関数</th><th>説明</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>void p98_vram_reset(void);</code></td>
+              <td>
+                VRAM置き場のバンプ割り当てを先頭へ戻す。個別解放はできないため、
+                起動時やシーン切り替え時にまとめてリセットする。
+              </td>
+            </tr>
+            <tr>
+              <td><code>int p98_vram_upload(const p98_sprite_t *spr, p98_vram_sprite_t *out);</code></td>
+              <td>
+                スプライトをVRAMの置き場へアップロードする。戻り値: 0=成功、
+                -1=幅が16の倍数でない、-2=置き場の容量不足。
+              </td>
+            </tr>
+            <tr>
+              <td><code>int p98_vram_reupload(p98_vram_sprite_t *vs, const p98_sprite_t *spr);</code></td>
+              <td>
+                既にアップロード済みの領域へ、同じ幅・高さ・不透明設定の別の絵を
+                上書きアップロードする（アニメのコマ替え用。一致しなければ-1）。
+              </td>
+            </tr>
+            <tr>
+              <td><code>int p98_vram_free_bytes(void);</code></td>
+              <td>置き場の残りバイト数（1プレーンあたり）。</td>
+            </tr>
+            <tr>
+              <td><code>void p98_draw_sprite_vram(const p98_vram_sprite_t *vs, int x, int y);</code></td>
+              <td>
+                <code>vs</code> をEGC経由で <code>(x, y)</code> へ描く。横方向に
+                画面端をはみ出す場合はCPU経路へ自動フォールバックする。
+              </td>
+            </tr>
+            <tr>
+              <td><code>void p98_draw_sprite_vram_diff(const p98_vram_sprite_t *vs, int x, int y);</code></td>
+              <td><code>p98_draw_sprite_diff()</code> のVRAM版。作りは同じで描画部分だけEGC経由になる。</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- ================= 10. つまずきやすいところ ================= -->
+      <section>
+        <h2>10. つまずきやすいところ（まとめ）</h2>
+        <ul>
+          <li>
+            ファイルの<strong>どこかに <code>#include "p98.h"</code> を書かないと</strong>
+            （慣例として先頭に書くが、1行目である必要はない）、p98lib としてビルドされず
+            （huge model・ライブラリのリンクに切り替わらず）、リンクエラーになる。
+          </li>
+          <li>
+            <strong><code>p98_poll()</code> を毎フレーム呼ばないと、キー入力は一切取れない。</strong>
+          </li>
+          <li>
+            <strong><code>p98_flip()</code>（ダブルバッファ）と <code>p98_init_bgpage()</code>
+            （背景ページ＋差分復帰）は併用できない。</strong>どちらか一方だけを使う。
+          </li>
+          <li><strong><code>p98_quit()</code> を呼ばずにプログラムを終わらせない。</strong></li>
+          <li>
+            <strong>VRAM常駐の置き場は768バイト/プレーンしかない。</strong>
+            <code>p98_vram_upload()</code>/<code>p98_vram_reupload()</code>の戻り値を
+            見て、失敗したらCPU経路へフォールバックする。
+          </li>
+        </ul>
+      </section>
+
+      <!-- ================= 11. サンプルとの対応 ================= -->
+      <section>
+        <h2>11. サンプルとの対応</h2>
+        <p>
+          IDE のサンプル一覧にある <code>p98lib/hello.c</code> /
+          <code>walk.c</code> / <code>walk2.c</code> は、この順に難易度が
+          上がっていきます。まず <code>hello.c</code> を読み、次に
+          <code>walk.c</code>、最後に <code>walk2.c</code> という順番がおすすめです。
+        </p>
+        <table>
+          <thead>
+            <tr><th>サンプル</th><th>使っている主な機能</th><th>対応する章</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>p98lib/hello.c</code></td>
+              <td>
+                <code>p98_init</code>/<code>p98_clear</code>/<code>p98_fill_rect</code>/
+                <code>p98_flip</code>/<code>p98_wait_vsync</code>/<code>p98_quit</code>
+              </td>
+              <td>1・2・3・4・5</td>
+            </tr>
+            <tr>
+              <td><code>p98lib/walk.c</code></td>
+              <td>
+                上記に加えて <code>p98_poll</code>/<code>p98_key_down</code>/
+                <code>p98_key_pressed</code>、<code>p98_draw_sprite</code>
+                （毎フレーム背景を描き直す方式）
+              </td>
+              <td>5・6・7</td>
+            </tr>
+            <tr>
+              <td><code>p98lib/walk2.c</code></td>
+              <td>
+                <code>p98_init_bgpage</code>/<code>p98_set_draw_target</code>/
+                <code>p98_draw_sprite_diff</code>/<code>p98_copy_bgpage_to_screen</code>、
+                <code>p98_vram_upload</code>/<code>p98_vram_reupload</code>/
+                <code>p98_draw_sprite_vram</code>/<code>p98_draw_sprite_vram_diff</code>
+              </td>
+              <td>8・9</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- ================= 12. 関数の総覧 ================= -->
+      <section id="reference">
+        <h2>12. 関数の総覧</h2>
+        <p>
+          <code>include/p98.h</code> にある公開API（関数・型・定数）の一覧です。
+          辞書的に引きたいときに使ってください。
+        </p>
+
+        <h3>画面の初期化・終了</h3>
+        <table>
+          <thead><tr><th>API</th><th>説明</th><th>節</th></tr></thead>
+          <tbody>
+            <tr><td><code>int p98_init(void);</code></td><td>640x400・16色モードを開始する</td><td>2</td></tr>
+            <tr><td><code>void p98_quit(void);</code></td><td>状態を元に戻す</td><td>2</td></tr>
+            <tr><td><code>void p98_set_hide_text_on_init(int enable);</code></td><td>初期化時にテキスト画面を消すかどうか</td><td>2</td></tr>
+          </tbody>
+        </table>
+
+        <h3>表示・描画</h3>
+        <table>
+          <thead><tr><th>API</th><th>説明</th><th>節</th></tr></thead>
+          <tbody>
+            <tr><td><code>void p98_wait_vsync(void);</code></td><td>次の垂直帰線まで待つ</td><td>5</td></tr>
+            <tr><td><code>void p98_flip(void);</code></td><td>表示ページと描画ページを入れ替える</td><td>5</td></tr>
+            <tr><td><code>unsigned long p98_frames(void);</code></td><td><code>p98_flip()</code>を呼んだ回数</td><td>5</td></tr>
+            <tr><td><code>void p98_clear(int color);</code></td><td>描画ページ全体を塗る</td><td>4</td></tr>
+            <tr><td><code>void p98_fill_rect(int x, int y, int w, int h, int color);</code></td><td>矩形を塗る（自動クリップ）</td><td>4</td></tr>
+            <tr><td><code>void p98_set_palette(int index, int r, int g, int b);</code></td><td>パレット番号の色を変える</td><td>3</td></tr>
+          </tbody>
+        </table>
+
+        <h3>キーボード</h3>
+        <table>
+          <thead><tr><th>API</th><th>説明</th><th>節</th></tr></thead>
+          <tbody>
+            <tr><td><code>void p98_poll(void);</code></td><td>このフレーム分の入力を取り込む</td><td>6</td></tr>
+            <tr><td><code>int p98_key_down(int scancode);</code></td><td>押している間ずっと真</td><td>6</td></tr>
+            <tr><td><code>int p98_key_pressed(int scancode);</code></td><td>押した瞬間だけ真</td><td>6</td></tr>
+            <tr><td><code>int p98_key_getch(void);</code></td><td>文字入力を1文字取り出す</td><td>6</td></tr>
+          </tbody>
+        </table>
+
+        <h3>スプライト（CPU合成/EGC）</h3>
+        <table>
+          <thead><tr><th>API</th><th>説明</th><th>節</th></tr></thead>
+          <tbody>
+            <tr><td><code>p98_sprite_t</code>（型）</td><td>4プレーン+マスクのスプライトデータ</td><td>7</td></tr>
+            <tr><td><code>void p98_draw_sprite(const p98_sprite_t *spr, int x, int y);</code></td><td>スプライトを描く</td><td>7</td></tr>
+            <tr><td><code>p98_sprite_backend_t</code>（型。<code>P98_SPRITE_CPU</code>/<code>P98_SPRITE_EGC</code>）</td><td>描画バックエンドの種類</td><td>7</td></tr>
+            <tr><td><code>void p98_set_sprite_backend(p98_sprite_backend_t backend);</code></td><td>既定のバックエンドを切り替える</td><td>7</td></tr>
+            <tr><td><code>p98_sprite_backend_t p98_get_sprite_backend(void);</code></td><td>現在のバックエンドを取得する</td><td>7</td></tr>
+            <tr><td><code>void p98_draw_sprite_ex(const p98_sprite_t *spr, int x, int y, p98_sprite_backend_t backend);</code></td><td>バックエンドを明示して描く</td><td>7</td></tr>
+          </tbody>
+        </table>
+
+        <h3>背景ページ＋差分復帰</h3>
+        <table>
+          <thead><tr><th>API</th><th>説明</th><th>節</th></tr></thead>
+          <tbody>
+            <tr><td><code>p98_render_mode_t</code>（型。<code>P98_RENDER_FLIP</code>/<code>P98_RENDER_BGPAGE</code>）</td><td>現在の描画モードの種類</td><td>8</td></tr>
+            <tr><td><code>int p98_init_bgpage(void);</code></td><td>背景ページ＋差分復帰モードで初期化する</td><td>8</td></tr>
+            <tr><td><code>p98_render_mode_t p98_get_render_mode(void);</code></td><td>現在の描画モードを取得する</td><td>8</td></tr>
+            <tr><td><code>p98_draw_target_t</code>（型。<code>P98_TARGET_SCREEN</code>/<code>P98_TARGET_BACKGROUND</code>）</td><td>描画先の種類</td><td>8</td></tr>
+            <tr><td><code>void p98_set_draw_target(p98_draw_target_t target);</code></td><td>描画先を切り替える</td><td>8</td></tr>
+            <tr><td><code>void p98_draw_sprite_diff(const p98_sprite_t *spr, int x, int y);</code></td><td>前回の矩形を復元してから描く</td><td>8</td></tr>
+            <tr><td><code>void p98_copy_bgpage_to_screen(void);</code></td><td>背景ページを画面ページへ丸ごとコピーする</td><td>8</td></tr>
+          </tbody>
+        </table>
+
+        <h3>VRAM常駐スプライト（EGC転送）</h3>
+        <table>
+          <thead><tr><th>API</th><th>説明</th><th>節</th></tr></thead>
+          <tbody>
+            <tr><td><code>#define P98_VRAM_STORE_OFF  32000</code></td><td>VRAM常駐置き場の先頭オフセット</td><td>9</td></tr>
+            <tr><td><code>#define P98_VRAM_STORE_SIZE 768</code></td><td>VRAM常駐置き場のサイズ（バイト/プレーン）</td><td>9</td></tr>
+            <tr><td><code>p98_vram_sprite_t</code>（型）</td><td>VRAMへアップロード済みのスプライトを表す</td><td>9</td></tr>
+            <tr><td><code>void p98_vram_reset(void);</code></td><td>置き場の割り当てを先頭へ戻す</td><td>9</td></tr>
+            <tr><td><code>int p98_vram_upload(const p98_sprite_t *spr, p98_vram_sprite_t *out);</code></td><td>VRAMへアップロードする</td><td>9</td></tr>
+            <tr><td><code>int p98_vram_reupload(p98_vram_sprite_t *vs, const p98_sprite_t *spr);</code></td><td>既存領域へ別の絵を上書きアップロードする</td><td>9</td></tr>
+            <tr><td><code>int p98_vram_free_bytes(void);</code></td><td>置き場の残りバイト数</td><td>9</td></tr>
+            <tr><td><code>void p98_draw_sprite_vram(const p98_vram_sprite_t *vs, int x, int y);</code></td><td>EGC経由で描く</td><td>9</td></tr>
+            <tr><td><code>void p98_draw_sprite_vram_diff(const p98_vram_sprite_t *vs, int x, int y);</code></td><td><code>p98_draw_sprite_diff()</code>のVRAM版</td><td>9</td></tr>
+          </tbody>
+        </table>
+      </section>
+    </main>
+
+    <footer class="help-footer">
+      <a class="open-app" href="./help.html?lang=ja">使い方に戻る</a> ･
+      <a class="open-app" href="./index.html">アプリを開く</a>
+    </footer>
+  </body>
+</html>
