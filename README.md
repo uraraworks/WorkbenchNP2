@@ -218,6 +218,7 @@ node ide/verify-debug-map.mjs
 node tools/verify-p98lib-vendor.mjs     # vendor/p98lib/ の同梱コピーがMANIFEST.jsonと一致するか(隣に../p98libがあれば本家とも比較)
 node ide/verify-p98lib-build.mjs        # p98libサンプル3本がNode側のwasm経路でhuge modelビルドできるか
 node ide/verify-p98lib-browser.mjs      # 同ビルドをブラウザ経路(配信・#include判定・故障注入・small経路の非回帰)で確認
+node ide/verify-p98lib-repeat-run.mjs   # 実IDEでp98lib/hello.cを同一DOSセッション内で2回連続実行し、両方でcanvas上に矩形が出るか(パレット潰れ不具合の回帰検査。故障注入あり)
 ```
 
 `ide/verify-loader.mjs`はworkbenchで、ロード済み対象のビルド出力一致、ローダ終了直前の内部状態、

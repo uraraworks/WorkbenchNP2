@@ -317,10 +317,35 @@ static int p98__diff_y = 0;
 static int p98__diff_byte_w = 0;
 static int p98__diff_h = 0;
 
-/* p98_init() で退避する状態 */
-static unsigned char p98__saved_pal_g[16];
-static unsigned char p98__saved_pal_r[16];
-static unsigned char p98__saved_pal_b[16];
+/* 起動直後(p98libのプログラムを1本も走らせていないFreeDOS)の既定パレット16色
+ * (4bit値、0-15)。tests/probe_palette_default.c で実測して求めた値
+ * (docs/verify-log.md参照。np2kai上での実測であり、実機PC-98の挙動そのもの
+ * とは限らない)。
+ *
+ * 【なぜポートから読み出さないのか】
+ * 以前はp98_init()でポート0xA8/0xAA/0xAC/0xAEから現在のパレットを読み出して
+ * 退避し、p98_quit()でそれを書き戻していた。しかし実測の結果、
+ * **np2kai上ではこの読み出しが実際のパレット値を返さない**ことが分かった
+ * (docs/design.md「パレット」節、docs/verify-log.md参照)。具体的には、
+ * 同じFreeDOSセッション内でp98libのプログラムを2回連続で実行すると、
+ * 2回目のp98_init()内の読み出しが16色すべて同じ値を返し、その後の
+ * p98_quit()がその同じ値を16色すべてへ書き込んでしまい、画面全体が
+ * 一色に潰れて何も表示されなくなる不具合を実測で確認した。読み出しに
+ * 一切頼らず、この既定値テーブルを毎回そのまま書き込む/書き戻す方式に
+ * 変更し、何回実行しても同じ状態から始まるようにした。 */
+static const unsigned char p98__default_pal_r[16] = {
+     0,  0,  7,  7,  0,  0,  7,  7,
+     4,  0, 15, 15,  0,  0, 15, 15,
+};
+static const unsigned char p98__default_pal_g[16] = {
+     0,  0,  0,  0,  7,  7,  7,  7,
+     4,  0,  0,  0, 15, 15, 15, 15,
+};
+static const unsigned char p98__default_pal_b[16] = {
+     0,  7,  0,  7,  0,  7,  0,  7,
+     4, 15,  0, 15,  0, 15,  0, 15,
+};
+
 static unsigned p98__saved_int23_seg;
 static unsigned p98__saved_int23_off;
 
@@ -417,12 +442,14 @@ int p98_init(void) {
         p98__hide_fkey_line();
     }
 
-    /* パレットを退避(WebNP2-wiki: 0xA8/0xAA/0xAC/0xAEは読み出せる、と実測記載あり) */
+    /* パレットを既定値へ明示的に書き込む(読み出して退避する方式は廃止。
+     * 上のp98__default_pal_r/g/b宣言のコメント参照)。何回p98_init()/
+     * p98_quit()を繰り返しても、常にこの既定値から始まる。 */
     for (i = 0; i < 16; i++) {
         p98__outb(P98_PORT_PAL_INDEX, (unsigned char)i);
-        p98__saved_pal_g[i] = p98__inb(P98_PORT_PAL_GREEN);
-        p98__saved_pal_r[i] = p98__inb(P98_PORT_PAL_RED);
-        p98__saved_pal_b[i] = p98__inb(P98_PORT_PAL_BLUE);
+        p98__outb(P98_PORT_PAL_GREEN, p98__default_pal_g[i]);
+        p98__outb(P98_PORT_PAL_RED, p98__default_pal_r[i]);
+        p98__outb(P98_PORT_PAL_BLUE, p98__default_pal_b[i]);
     }
 
     /* INT 23h(Ctrl+C)を退避してから無害化ハンドラへ差し替える */
@@ -515,11 +542,14 @@ void p98_quit(void) {
     p98__int18_ah(0x11);
     p98__show_fkey_line();
 
+    /* パレットを既定値へ書き戻す(退避値ではなく、p98_init()と同じ既定値
+     * テーブルを使う。読み出して退避したものを戻さない理由は
+     * p98__default_pal_r/g/b宣言のコメント参照)。 */
     for (i = 0; i < 16; i++) {
         p98__outb(P98_PORT_PAL_INDEX, (unsigned char)i);
-        p98__outb(P98_PORT_PAL_GREEN, p98__saved_pal_g[i]);
-        p98__outb(P98_PORT_PAL_RED, p98__saved_pal_r[i]);
-        p98__outb(P98_PORT_PAL_BLUE, p98__saved_pal_b[i]);
+        p98__outb(P98_PORT_PAL_GREEN, p98__default_pal_g[i]);
+        p98__outb(P98_PORT_PAL_RED, p98__default_pal_r[i]);
+        p98__outb(P98_PORT_PAL_BLUE, p98__default_pal_b[i]);
     }
 
     p98__set_vector(0x23, p98__saved_int23_seg, p98__saved_int23_off);
