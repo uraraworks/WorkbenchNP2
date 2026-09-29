@@ -419,12 +419,29 @@ static void p98__key_reset_state(void) {
  * 公開API
  * ===================================================================== */
 
+/* GRCG/EGC(ポート0x7C)を落とし、同時にEGC拡張モード(ポート0x6A)も
+ * 切る。0x7Cを落とすだけではEGC拡張モード(0x6A=05で立てたもの)が残り、
+ * 以後の0x7C=0x80(GRCGのつもり)がEGC経路を通ってしまう。そうなると
+ * 前に使ったEGCレジスタ(0x4A0〜)の値でVRAMが化ける(同じ起動で次に
+ * 走るプログラムのp98_clear()等が黄/紫の縞になった。tests/probe_egc_leak_*.c)。
+ * 0x6Aは有効化と対称に 07(拡張の許可)→04(EGCモードだけ落とす)の順で書く。
+ * 04は16色モード(0x6A=01)には影響しない(NP2kai io/gdc.c参照)。 */
+static void p98__egc_mode_off(void) {
+    p98__outb(0x7C, 0x00);
+    p98__outb(0x6A, 0x07);
+    p98__outb(0x6A, 0x04);
+}
+
 int p98_init(void) {
     int i;
     unsigned long handler_addr;
     unsigned handler_seg, handler_off;
 
     if (p98__inited) return 0;
+
+    /* 前のプログラムが異常終了してEGC拡張モードを立てたまま残していても
+     * 以後のGRCG描画が化けないよう、開始時にも確実に切っておく保険。 */
+    p98__egc_mode_off();
 
     p98__key_reset_state();
 
@@ -520,8 +537,10 @@ void p98_quit(void) {
     /* GRCG/EGC(ポート0x7C)を念のため無効化する。p98_draw_sprite()の
      * EGC経路は正常時は必ず自分で無効化して抜けるが、万一有効なまま
      * (異常系や将来の変更で)p98_quit()に来ても、以後の普通のVRAM書き込みが
-     * 化けたままにならないようにする保険(docs/design.md参照)。 */
-    p98__outb(0x7C, 0x00);
+     * 化けたままにならないようにする保険(docs/design.md参照)。
+     * 0x7Cを落とすだけではEGC拡張モード(0x6A)が残り、同じ起動で次に走る
+     * プログラムのGRCG書き込みがEGCを通ってしまうため、モードごと切る。 */
+    p98__egc_mode_off();
 
     p98__outb(P98_PORT_GDC_GRAPH, 0x0C); /* グラフィック表示終了 */
     p98__outb(P98_PORT_DISP_PAGE, 0);
@@ -772,7 +791,7 @@ static void p98__egc_enable(void) {
 /* 使い終わったら必ず戻す(wiki: 戻し忘れると以降の普通の書き込みが
  * EGCを通ったままになる)。 */
 static void p98__egc_disable(void) {
-    p98__outb(0x7C, 0x00);
+    p98__egc_mode_off();
 }
 
 static void p98__draw_sprite_impl(const p98_sprite_t *spr, int x, int y, p98_sprite_backend_t backend) {
@@ -912,7 +931,7 @@ static void p98__egc_restore_rect(int byteX, int y, int byteW, int h) {
         }
     }
 
-    p98__outb(0x7C, 0x00); /* 使い終わったら必ず戻す */
+    p98__egc_mode_off(); /* 使い終わったら必ず戻す(EGC拡張モードごと) */
     /* 読み書きの最後は画面ページのはずだが、念のため確定させておく
      * (この後すぐp98_draw_sprite()が画面ページへ描く前提のため)。 */
     p98__outb(P98_PORT_DRAW_PAGE, p98__screen_page);
@@ -983,7 +1002,7 @@ void p98_copy_bgpage_to_screen(void) {
     wordCount = (unsigned)((P98_BYTES_PER_LINE * P98_SCREEN_H) / 2);
     p98__egc_copy_page((unsigned)P98_SEG_PLANE_B, 0, 0, wordCount, p98__bg_page, p98__screen_page);
 
-    p98__outb(0x7C, 0x00); /* 使い終わったら必ず戻す */
+    p98__egc_mode_off(); /* 使い終わったら必ず戻す(EGC拡張モードごと) */
     /* 読み書きの最後は画面ページのはずだが、念のため確定させておく
      * (p98__egc_restore_rect()と同じ理由)。 */
     p98__outb(P98_PORT_DRAW_PAGE, p98__screen_page);
@@ -1310,7 +1329,7 @@ void p98_draw_sprite_vram(const p98_vram_sprite_t *vs, int x, int y) {
         p98__egc_row(P98_SEG_PLANE_B, srcOff, dstBase, (unsigned)destWords);
     }
 
-    p98__outb(0x7C, 0x00); /* 使い終わったら必ず無効化する */
+    p98__egc_mode_off(); /* 使い終わったら必ず無効化する(EGC拡張モードごと) */
 }
 
 void p98_draw_sprite_vram_diff(const p98_vram_sprite_t *vs, int x, int y) {
