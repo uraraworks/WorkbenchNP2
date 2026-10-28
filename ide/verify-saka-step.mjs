@@ -78,16 +78,16 @@ window.sakaStepProbe = {
       screen: engine.getScreenText().text,
     };
   },
-  enterAtEntry: (control, compareLength) => {
-    const regs = releaseLoaderAtEntry(debug, control);
+  enterAtEntry: async (control, compareLength) => {
+    const regs = await releaseLoaderAtEntry(debug, control);
     const guestEntryBytes = Array.from(debug.readMemory(control.cs * 16 + control.ip, compareLength));
     return { guestEntryBytes, regs, screen: engine.getScreenText().text };
   },
-  stepOne: () => {
+  stepOne: async () => {
     const before = debug.readRegisters();
     const instruction = debug.disassemble(before.cs, before.eip, 1)[0];
     if (!instruction) throw new Error('逆アセンブル結果が空です');
-    const executed = debug.step(1);
+    const executed = await debug.step(1);
     const after = debug.readRegisters();
     return { before, instruction, after, executed };
   },

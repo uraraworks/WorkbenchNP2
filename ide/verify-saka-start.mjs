@@ -123,8 +123,8 @@ window.sakaStartProbe = {
       screen: engine.getScreenText().text,
     };
   },
-  enterAtEntry: (control, compareLength) => {
-    const regs = releaseLoaderAtEntry(debug, control);
+  enterAtEntry: async (control, compareLength) => {
+    const regs = await releaseLoaderAtEntry(debug, control);
     return {
       guestEntryBytes: Array.from(debug.readMemory(control.cs * 16 + control.ip, compareLength)),
       regs, screen: engine.getScreenText().text,
@@ -132,11 +132,11 @@ window.sakaStartProbe = {
   },
   resume: () => debug.setPaused(false),
   sendKey: (key) => engine.sendKeys(key),
-  runToSourceLine: (control, expectedLine) => {
+  runToSourceLine: async (control, expectedLine) => {
     if (!sourceMap || !sourceLines) throw new Error('source debug data is unavailable');
     const offset = sourceBreakpointOffset(sourceMap, expectedLine);
     debug.setBreakpoint(0, control.cs, offset, true);
-    const hit = debug.runUntilBreakpoint(5_000_000);
+    const hit = await debug.runUntilBreakpoint(5_000_000);
     debug.setBreakpoint(0, control.cs, offset, false);
     if (hit !== 0) throw new Error('ソースBPへ到達できませんでした (hit=' + hit + ')');
     const registers = debug.readRegisters();
@@ -152,10 +152,10 @@ window.sakaStartProbe = {
       + ':' + offset.toString(16).toUpperCase().padStart(4, '0') + '\\n' + sourceLines[expectedLine - 1];
     return { registers, stopped, sourceText: sourceLines[expectedLine - 1], previousText: sourceLines[expectedLine - 2] };
   },
-  stepSource: (programCs) => {
+  stepSource: async (programCs) => {
     const before = debug.readRegisters();
     const instruction = debug.disassemble(before.cs, before.eip, 1)[0];
-    const executed = debug.step(1);
+    const executed = await debug.step(1);
     const after = debug.readRegisters();
     const sourceLine = sourceLineForRegisters(sourceMap, programCs, after);
     renderSourceLines(document.querySelector('#source-panel'), {

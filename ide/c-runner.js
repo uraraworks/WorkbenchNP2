@@ -25,12 +25,12 @@ const api = {
     const control = await waitForLoaderControl(debug);
     if (!control) throw new Error('C対象のローダ制御ブロックを検出できません');
     if (control.kind !== 1) throw new Error(`C対象がMZ EXEではありません: kind=${control.kind}`);
-    const entryRegisters = releaseLoaderAtEntry(debug, control);
+    const entryRegisters = await releaseLoaderAtEntry(debug, control);
     const ranges = cLineToRanges(expectedMap, line);
     if (ranges.length === 0) throw new Error(`C ${line}行の生成区間がありません`);
     if (ranges.length > 6) throw new Error(`C ${line}行の区間数${ranges.length}がBP枠を超えます`);
     ranges.forEach((range, index) => debug.setBreakpoint(index, control.cs, range.start, true));
-    const hit = debug.runUntilBreakpoint(5_000_000);
+    const hit = await debug.runUntilBreakpoint(5_000_000);
     ranges.forEach((range, index) => debug.setBreakpoint(index, control.cs, range.start, false));
     if (hit < 0 || hit >= ranges.length) throw new Error(`C ${line}行へ到達できませんでした (hit=${hit})`);
     const registers = debug.readRegisters();

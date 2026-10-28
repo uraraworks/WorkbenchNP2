@@ -89,12 +89,14 @@ export interface WebNP2Engine {
 export interface WebNP2DebugTarget {
     isBooted(): boolean;
     dbgSetPaused(paused: boolean): void;
+    /** ポーズ中のイベントループ待ち時間(ms)を切り替える。 */
+    dbgSetPauseSleepMs(ms: number): void;
     dbgIsPaused(): boolean;
-    dbgStep(count: number): number;
+    dbgStep(count: number): Promise<number>;
     dbgReadRegs(): Registers;
     dbgDisasm(seg: number, off: number, count: number): DisasmLine[];
     dbgSetBreakpoint(index: number, seg: number, off: number, enabled: boolean): void;
-    dbgRunUntilBreakpoint(maxSteps: number): number;
+    dbgRunUntilBreakpoint(maxSteps: number): Promise<number>;
     readMemoryBase64(addr: number, len: number): {
         addr: number;
         len: number;

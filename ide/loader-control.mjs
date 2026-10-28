@@ -108,7 +108,7 @@ export function freezeLoaderControl(debug, control) {
 }
 
 /** releaseを書き、4B01h返却CS:IPに置いたBPで対象の1命令目より前に止める。 */
-export function releaseLoaderAtEntry(debug, control, breakpointIndex = 7) {
+export async function releaseLoaderAtEntry(debug, control, breakpointIndex = 7) {
   debug.setPaused(true);
   const frozenBytes = debug.readMemory(control.address, CONTROL.size);
   const frozen = parseLoaderControl(frozenBytes, 0);
@@ -117,8 +117,12 @@ export function releaseLoaderAtEntry(debug, control, breakpointIndex = 7) {
   }
   debug.setBreakpoint(breakpointIndex, control.cs, control.ip, true);
   debug.writeMemory(control.address + CONTROL.release, new Uint8Array([0xa5]));
-  const hit = debug.runUntilBreakpoint(100_000);
-  debug.setBreakpoint(breakpointIndex, control.cs, control.ip, false);
+  let hit;
+  try {
+    hit = await debug.runUntilBreakpoint(100_000);
+  } finally {
+    debug.setBreakpoint(breakpointIndex, control.cs, control.ip, false);
+  }
   if (hit !== breakpointIndex) throw new Error(`対象エントリへ到達できませんでした (hit=${hit})`);
   const regs = debug.readRegisters();
   if (regs.cs !== control.cs || regs.eip !== control.ip || regs.ss !== control.ss ||

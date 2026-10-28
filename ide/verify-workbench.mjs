@@ -960,7 +960,7 @@ try {
     const marks = wb.getEditorMarks();
     let stepped = null;
     let stepError = null;
-    try { stepped = wb.stepOverLine(); } catch (error) { stepError = error.message; }
+    try { stepped = await wb.stepOverLine(); } catch (error) { stepError = error.message; }
     const breakpointListLength = wb.getBreakpointList().length;
     await wb.stopDebug();
     return {
@@ -1024,9 +1024,9 @@ try {
     const started = await wb.startDebug();
     const statusAfter = wb.getMachineStatus();
     const entry = { state: wb.getDebugState(), marks: wb.getEditorMarks(), registers: wb.getRegisters() };
-    const stepped = wb.stepOverLine();
+    const stepped = await wb.stepOverLine();
     const afterStep = { state: wb.getDebugState(), marks: wb.getEditorMarks() };
-    const hit = wb.continueToBreakpoint();
+    const hit = await wb.continueToBreakpoint();
     return {
       control: started.control, entry, stepped: stepped.line, afterStep,
       hit: { line: hit.line, eip: hit.registers.eip, cs: hit.registers.cs },
@@ -1496,15 +1496,15 @@ try {
   const stepInto = await page.evaluate(async () => {
     const wb = window.pc98workbench;
     await wb.startDebug();
-    const result = wb.stepInto();
+    const result = await wb.stepInto();
     return { result, marks: wb.getEditorMarks() };
   });
   assert.equal(stepInto.result.entered, false, 'callの無いhello.asmで呼び先へ入った扱いになりました');
   assert.equal(stepInto.result.line, stepInto.result.expectedLine);
   assert.equal(stepInto.marks.currentLine, stepInto.result.line, 'ステップイン後の停止行強調が不一致です');
 
-  const instruction = await page.evaluate(() => {
-    const result = window.pc98workbench.stepInstruction();
+  const instruction = await page.evaluate(async () => {
+    const result = await window.pc98workbench.stepInstruction();
     return { result, marks: window.pc98workbench.getEditorMarks() };
   });
   assert.equal(instruction.result.steps, 1);
@@ -1601,7 +1601,7 @@ int StrLen (char *Str)
     const debuggable = wb.getDebugState().debuggableLines;
     wb.toggleBreakpoint(22);
     const started = await wb.startDebug();
-    const hit = wb.continueToBreakpoint();
+    const hit = await wb.continueToBreakpoint();
     return {
       debuggable, control: started.control, entryLine: started.line,
       hit: { line: hit.line, cs: hit.registers.cs }, marks: wb.getEditorMarks(),

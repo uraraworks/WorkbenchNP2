@@ -112,6 +112,7 @@ const prewarm = new Promise((resolve, reject) => {
 // readyより前から公開するが、利用者がawaitするまでの未処理rejectionは発生させない。
 prewarm.catch(() => {});
 let session;
+let debugExecuting = false;
 let disassemblyView;
 let panesSwapped = false;
 let maximizedPane = null;
@@ -1553,13 +1554,13 @@ function setDebugControls(active) {
   nodes.editLock.hidden = !targetActive;
   document.body.classList.toggle('debugging', active);
   setEditorReadOnly(targetActive);
-  const paused = active && session?.isPaused();
+  const paused = active && !debugExecuting && session?.isPaused();
   nodes.continue.disabled = !paused;
   nodes.stepOver.disabled = !paused;
   nodes.stepInto.disabled = !paused;
   nodes.stepInstruction.disabled = !paused;
-  nodes.restart.disabled = !active || !activeTab()?.build;
-  nodes.stopDebug.disabled = !active;
+  nodes.restart.disabled = debugExecuting || !active || !activeTab()?.build;
+  nodes.stopDebug.disabled = debugExecuting || !active;
 }
 
 function renderRegisters(regs) {
@@ -1593,6 +1594,7 @@ function refreshDebugViews() {
 
 /** BP行の集合を1つの真実として持ち、セッション中は即座にハードウェアBPへ反映する。 */
 function toggleBreakpoint(line) {
+  if (debugExecuting) return false;
   const tab = activeTab();
   if (!tab) return false;
   const previous = new Set(tab.breakpoints);
@@ -1624,6 +1626,7 @@ function toggleBreakpoint(line) {
 }
 
 async function startDebug() {
+  if (debugExecuting) throw new Error('デバッグ実行中です');
   const tab = activeTab();
   const built = tab?.build ?? await buildCurrent();
   if (!built?.ok) return built;
@@ -1685,15 +1688,33 @@ function requireSession() {
   return session;
 }
 
-function stepInstruction() {
-  const result = requireSession().stepInstruction(1);
+async function withDebugExecution(action) {
+  if (debugExecuting) throw new Error('デバッグ実行中です');
+  debugExecuting = true;
+  setDebugControls(Boolean(session?.isStarted()));
+  try {
+    return await action();
+  } finally {
+    debugExecuting = false;
+    setDebugControls(Boolean(session?.isStarted()));
+  }
+}
+
+const stepInstruction = () => withDebugExecution(stepInstructionImpl);
+const stepOverLine = () => withDebugExecution(stepOverLineImpl);
+const stepInto = () => withDebugExecution(stepIntoImpl);
+const continueToBreakpoint = () => withDebugExecution(continueToBreakpointImpl);
+const runTargetToLoaderExit = () => withDebugExecution(runTargetToLoaderExitImpl);
+
+async function stepInstructionImpl() {
+  const result = await requireSession().stepInstruction(1);
   refreshDebugViews();
   setDebugStatus(`${result.steps}命令実行しました`);
   return result;
 }
 
-function stepOverLine() {
-  const result = requireSession().stepOverLine();
+async function stepOverLineImpl() {
+  const result = await requireSession().stepOverLine();
   refreshDebugViews();
   if (result.line !== result.expectedLine) {
     throw new Error(`次行が不一致です: expected=${result.expectedLine}, actual=${result.line}`);
@@ -1702,8 +1723,8 @@ function stepOverLine() {
   return result;
 }
 
-function stepInto() {
-  const result = requireSession().stepInto();
+async function stepIntoImpl() {
+  const result = await requireSession().stepInto();
   refreshDebugViews();
   if (!result.entered && !result.steppedOverCall && result.line !== result.expectedLine) {
     throw new Error(`次行が不一致です: expected=${result.expectedLine}, actual=${result.line}`);
@@ -1714,8 +1735,8 @@ function stepInto() {
   return result;
 }
 
-function continueToBreakpoint() {
-  const result = requireSession().continueToBreakpoint();
+async function continueToBreakpointImpl() {
+  const result = await requireSession().continueToBreakpoint();
   refreshDebugViews();
   if (result.line !== result.expectedLine) {
     throw new Error(`停止行が不一致です: expected=${result.expectedLine}, actual=${result.line}`);
@@ -1725,8 +1746,8 @@ function continueToBreakpoint() {
 }
 
 /** 対象の終了後、ローダ自身が終了コードを返す直前の診断値を取得する。 */
-function runTargetToLoaderExit() {
-  const diagnostic = requireSession().runToLoaderExit();
+async function runTargetToLoaderExitImpl() {
+  const diagnostic = await requireSession().runToLoaderExit();
   const { registers, loaderControl } = diagnostic;
   refreshDebugViews();
   return {
@@ -1746,6 +1767,7 @@ async function continueOrRun() {
 
 /** BPを外して通常実行へ戻す。プログラム終了後のDOSプロンプト復帰まで待つ。 */
 async function stopDebug() {
+  if (debugExecuting) throw new Error('デバッグ実行中です');
   requireSession().detach();
   session = undefined;
   debugTabId = undefined;
@@ -1860,9 +1882,9 @@ nodes.maximizeMachine.addEventListener('click', () => setMaximizedPane(maximized
 nodes.run.addEventListener('click', () => runCurrent());
 nodes.debug.addEventListener('click', () => startDebug().catch((error) => setDebugStatus(error.message, true)));
 nodes.continue.addEventListener('click', () => continueOrRun().catch((error) => setDebugStatus(error.message, true)));
-nodes.stepOver.addEventListener('click', () => { try { stepOverLine(); } catch (error) { setDebugStatus(error.message, true); } });
-nodes.stepInto.addEventListener('click', () => { try { stepInto(); } catch (error) { setDebugStatus(error.message, true); } });
-nodes.stepInstruction.addEventListener('click', () => { try { stepInstruction(); } catch (error) { setDebugStatus(error.message, true); } });
+nodes.stepOver.addEventListener('click', () => stepOverLine().catch((error) => setDebugStatus(error.message, true)));
+nodes.stepInto.addEventListener('click', () => stepInto().catch((error) => setDebugStatus(error.message, true)));
+nodes.stepInstruction.addEventListener('click', () => stepInstruction().catch((error) => setDebugStatus(error.message, true)));
 nodes.restart.addEventListener('click', () => startDebug().catch((error) => setDebugStatus(error.message, true)));
 nodes.stopDebug.addEventListener('click', () => stopDebug().catch((error) => setDebugStatus(error.message, true)));
 

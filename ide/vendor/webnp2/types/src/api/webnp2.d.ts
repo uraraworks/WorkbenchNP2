@@ -1,4 +1,5 @@
 import { type DiskFile, type EmscriptenFS, type HostDrvConfig } from '../core/module.ts';
+import { type ScreenEvent } from './screen-diff.ts';
 import { type FatEntry } from './fat.ts';
 export type DiskSlot = 'hdd' | 'fd1' | 'fd2';
 /** ia32デバッガが公開するCPUレジスタ。セグメントレジスタもUINT32として返す。 */
@@ -147,10 +148,15 @@ export declare class WebNP2 extends TypedEmitter<WebNP2EventMap> {
     isBooted(): boolean;
     /** CPU実行の一時停止を切り替える。描画・イベント処理は継続する。 */
     dbgSetPaused(paused: boolean): void;
+    /**
+     * ポーズ中のイベントループ待ち時間(ms)を切り替える。呼び出し元(ツールバー/デバッガ)で
+     * 待ち時間を使い分けるための入口。未対応コアでは coreSetPauseSleepMs 内で無視される。
+     */
+    dbgSetPauseSleepMs(ms: number): void;
     /** CPUがデバッガによって一時停止中かを返す。 */
     dbgIsPaused(): boolean;
     /** 一時停止中に指定命令数だけ実行し、実際の実行数を返す。 */
-    dbgStep(count: number): number;
+    dbgStep(count: number): Promise<number>;
     /** CPUレジスタを名前付きオブジェクトとして取得する。 */
     dbgReadRegs(): Registers;
     /** 逆アセンブル文字列を解析し、各行のaddrを命令長の積算で補う。 */
@@ -158,7 +164,7 @@ export declare class WebNP2 extends TypedEmitter<WebNP2EventMap> {
     /** index 0..7のソフトウェアブレークポイントを設定する。 */
     dbgSetBreakpoint(index: number, seg: number, off: number, enabled: boolean): void;
     /** 最大命令数まで実行し、ヒットしたブレークポイントindex（無ヒットは-1）を返す。 */
-    dbgRunUntilBreakpoint(maxSteps: number): number;
+    dbgRunUntilBreakpoint(maxSteps: number): Promise<number>;
     getMountedImages(): MountedImage[];
     /** 現在マウント中のディスク一覧を返す(getMountedImagesの整形版)。 */
     listDisks(): Array<{
@@ -227,6 +233,9 @@ export declare class WebNP2 extends TypedEmitter<WebNP2EventMap> {
         roms?: DiskFile[];
         /** HOSTDRV設定。省略時は無効(core/module.ts のBootConfigへそのまま渡すだけ)。 */
         hostdrv?: HostDrvConfig;
+        /** 起動時のFDDシーク音の初期値。省略時true(core/module.ts のBootConfigへそのまま渡すだけ)。 */
+        seekSound?: boolean;
+        nowait?: boolean;
     }): Promise<void>;
     /** hostdrv未設定(boot時にhostdrvを渡していない)ならErrorを投げてFS/rootを返す。 */
     private requireHostDrv;
@@ -413,6 +422,36 @@ export declare class WebNP2 extends TypedEmitter<WebNP2EventMap> {
         slot: string;
         savedAt: number;
     }>>;
+    private outputSubs;
+    private outputTimer;
+    private streamTimer;
+    private streamTick;
+    /**
+     * 画面テキストの差分から「新しく流れた出力」をイベントとして通知する(試作)。
+     * 購読者がいる間だけ約100msごとに getScreenText() を読み、screen-diff で
+     * line(確定行) / pending(入力中の行) / clear / takeover / gap に変換して cb へ渡す。
+     * 最初の1回は現在の画面全体を流す。未起動の間は何も流さず、起動後に始まる。
+     * 戻り値は購読解除関数(購読者が0になるとポーリングも止まる)。
+     *
+     * opts.source で出力源を選べる:
+     *  - 'screen': 従来どおり画面の差分だけ(既定の挙動はこれと同じ)
+     *  - 'stream': ゲスト側 TSR(guest/conhook/CONHOOK.COM)が捕まえた出力の流れを読む。
+     *              TSR が常駐するまでは何も流さない。
+     *  - 'auto'(既定): TSR が常駐していれば stream、いなければ screen。TSR が後から常駐したら
+     *              その時点で screen から stream へ切り替わる。
+     * opts.onSource は現在の出力源が決まる/切り替わるたびに呼ばれる。
+     */
+    onOutput(cb: (ev: ScreenEvent) => void, opts?: {
+        source?: 'auto' | 'screen' | 'stream';
+        onSource?: (s: 'screen' | 'stream') => void;
+    }): () => void;
+    private safeOnSource;
+    private emitOutput;
+    private pollOutput;
+    /** 画面方式の残りを流し切り(flush=true のとき)、現在の入力行をパーサへ引き継ぐ。 */
+    private handoverToStream;
+    /** TSR のリングバッファを25msごとに読む。auto の購読者が screen のときも毎回常駐を探す。 */
+    private pollStream;
     /**
      * 画面テキストが変化し、その後 stableMs の間変化が止まるまで待つ。
      * ロード完了やコマンド終了検出など、待つべき文字列が未知な場合に固定sleepの代わりに使う。

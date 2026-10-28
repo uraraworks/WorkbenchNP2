@@ -16,12 +16,14 @@ export declare class DebuggerController {
     constructor(target: WebNP2DebugTarget);
     isBooted(): boolean;
     setPaused(paused: boolean): void;
+    /** ポーズ中のイベントループ待ち時間(ms)を切り替える。呼び出し側(UI/デバッガ)で使い分ける。 */
+    setPauseSleepMs(ms: number): void;
     isPaused(): boolean;
-    step(count: number): number;
+    step(count: number): Promise<number>;
     readRegisters(): Registers;
     disassemble(seg: number, off: number, count: number): DisasmLine[];
     setBreakpoint(index: number, seg: number, off: number, enabled: boolean): void;
-    runUntilBreakpoint(maxSteps: number): number;
+    runUntilBreakpoint(maxSteps: number): Promise<number>;
     readMemory(addr: number, len: number): Uint8Array;
     /** ゲストRAMへ書き込む。実行中CPUとの競合を避けるためpause中だけ許可する。 */
     writeMemory(addr: number, bytes: Uint8Array): void;

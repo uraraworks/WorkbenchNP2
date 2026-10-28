@@ -14,6 +14,13 @@ export interface BootConfig {
     roms?: DiskFile[];
     /** HOSTDRV(ホストディレクトリをゲストDOSドライブとして見せる機能)の設定。省略時は無効。 */
     hostdrv?: HostDrvConfig;
+    /** 起動時のFDDシーク音の初期値。省略時true(鳴らす)。実行中の切替は coreSeekSoundSet() で行う。 */
+    seekSound?: boolean;
+    /**
+     * 較正用(?nowait=1)。s_NOWAIT=true を出力し、実時間の同期待ちをせず全力で回す。
+     * 何倍速まで出るか(端末の実力)を測るためのもので、通常運用では使わない。
+     */
+    nowait?: boolean;
 }
 /**
  * HOSTDRVのアクセス権限。NP2kai/generic/hostdrv.h のビットフラグに対応する
@@ -49,7 +56,9 @@ export interface EmscriptenFS {
     unlink(path: string): void;
 }
 export type CCallType = 'number' | 'string' | 'array' | 'boolean' | null;
-export type CCallFn = (ident: string, returnType: CCallType, argTypes: CCallType[], args: unknown[]) => unknown;
+export type CCallFn = (ident: string, returnType: CCallType, argTypes: CCallType[], args: unknown[], opts?: {
+    async?: boolean;
+}) => unknown;
 interface EmscriptenSDL2 {
     audioContext?: AudioContext;
 }
@@ -63,6 +72,8 @@ interface EmscriptenModule {
     onRuntimeInitialized?: () => void;
     FS?: EmscriptenFS;
     ccall?: CCallFn;
+    _webnp2_present_count?: () => number;
+    _webnp2_audio_render?: () => number;
     onAbort?: (what: unknown) => void;
     SDL2?: EmscriptenSDL2;
     HEAPU8?: Uint8Array;
@@ -78,6 +89,8 @@ declare global {
         HEAPU32?: Uint32Array;
     }
 }
+/** SDLのpresent累計を直接取得する。未起動または旧コアではundefined。 */
+export declare function corePresentCount(): number | undefined;
 /**
  * SDL2ポートが保持するAudioContextを取得する。
  * emnp21kai_sdl2.js内では `Module["SDL2"] = Module["SDL2"] || {}` として遅延生成され、
@@ -85,6 +98,10 @@ declare global {
  * 出てこない。念のため window.SDL2 もフォールバックとして見ておく。
  */
 export declare function resolveAudioContext(): AudioContext | undefined;
+export type CoreVariant = 'full' | 'jspi';
+/** URL指定を優先し、それ以外はJSPI対応状況で選ぶ。 */
+export declare function selectCoreVariant(param: string | null, supportsJspi: boolean): CoreVariant;
+export declare function coreVariant(): CoreVariant | undefined;
 /**
  * YM2608リズム波形6本の名前(小文字、コアのMEMFS上での基本表記)。
  * roms.ts の同梱波形読み込み・登録名検証と共有するためここで定義する。
@@ -155,9 +172,17 @@ export declare function statDiskFile(fs: EmscriptenFS, name: string): {
 } | null;
 /** マシンリセット (pccore_cfgupdate + pccore_reset)。 */
 export declare function coreReset(): void;
+/** 実時間制限なしの全力実行(s_NOWAIT)を切り替える。未対応コアでは false。 */
+export declare function coreSetNowait(on: boolean): boolean;
+/** CPUクロック倍率を設定する。反映は coreReset() 後。未対応コアでは false。 */
+export declare function coreSetClkMult(n: number): boolean;
 /** バスマウスのキャプチャをトグルする。戻り値は新しい状態(1=キャプチャ中)。
  *  キャプチャ開始はブラウザのpointer lock要求になるため、ユーザー操作
  *  (クリックハンドラ等)の中から同期的に呼ぶこと。 */
+/** コアが実行した累積フレーム数。古いコア(関数なし)や例外時は null。 */
+export declare function coreFrameCount(): number | null;
+/** コアの目標フレームレート(Hz)。古いコアや例外時は null。 */
+export declare function coreFrameHz(): number | null;
 export declare function coreMouseToggle(): number;
 /** 現在のマウスキャプチャ状態(1=キャプチャ中)。 */
 export declare function coreMouseCaptured(): number;
@@ -172,6 +197,32 @@ export declare function coreSetFdd(drive: number, path: string): void;
  * アクセスする側は setTimeout ではなくこれで準備完了を待つこと。
  */
 export declare function coreFddReady(drive: number): number;
+/**
+ * 実行中にFDDシーク音のON/OFFを切り替える(webnp2_seeksnd_set)。
+ *
+ * この2つのエクスポート(coreSeekSoundSet/coreSeekSound)は追加作業中で、
+ * このファイルを書いた時点ではまだ public/core/ の wasm に入っていない
+ * (2026-09-03時点)。未対応の古いコアで呼ぶと ccall が例外を投げるため、
+ * UI側を壊さないよう例外を握りつぶして何もしない。新しいコアに差し替わり
+ * 次第、そのまま有効になる。
+ */
+export declare function coreSeekSoundSet(on: boolean): void;
+/** FDDシーク音の現在のON/OFFを取得する(webnp2_seeksnd)。未対応コアではfalseを返す。 */
+export declare function coreSeekSound(): boolean;
+/**
+ * ポーズ中のイベントループ待ち時間(ms)を切り替える(webnp2_set_pause_sleep_ms)。
+ *
+ * このエクスポートも coreSeekSoundSet と同様、追加作業中で public/core/ の wasm に
+ * まだ入っていない可能性がある(2026-09-03時点、別作業者がコア側へ追加中)。未対応の
+ * 古いコアで呼ぶと ccall が例外を投げるため、UI側を壊さないよう例外を握りつぶして
+ * 何もしない。新しいコアに差し替わり次第、そのまま有効になる。
+ */
+export declare function coreSetPauseSleepMs(ms: number): void;
+/**
+ * メインループの制御返却方式を切り替える(A/B計測用)。0=MessageChannel(既定)、
+ * 1=従来の emscripten_sleep(0)(setTimeout 由来の4ms丸めあり)。未対応コアでは何もしない。
+ */
+export declare function coreSetYieldMode(mode: number): void;
 /** MEMFS 上の path へステートセーブする。戻り値は statsave.c の仕様に準じる。 */
 export declare function coreStatSave(path: string): number;
 /** MEMFS 上の path からステートロードする。戻り値は statsave.c の仕様に準じる。 */
@@ -184,8 +235,8 @@ export declare function coreMousePending(): number;
 export declare function coreMouseButton(button: number, down: number): void;
 /** PC-98スキャンコードを注入する。down=true でmake、false でbreak。 */
 export declare function coreKey(code: number, down: boolean): void;
-/** AudioWorklet外部音声経路の有効/無効。有効中はコアのSDLコールバックが無音を返す。 */
-export declare function coreAudioExternal(enable: boolean): void;
+/** AudioWorklet外部音声経路の有効/無効。従来モードではSDLコールバックを無音化する。 */
+export declare function coreAudioExternal(enable: boolean, stopDevice?: boolean): void;
 /** コアのサンプリングレート(Hz)。JS側AudioContextはこのレートで作る。 */
 export declare function coreAudioRate(): number;
 /** 1回のrenderで得られるフレーム数(ステレオ1組=1フレーム)。0なら音声未初期化。 */
@@ -195,7 +246,7 @@ export declare function coreAudioChunkFrames(): number;
  * -1.0〜1.0 に正規化して書き込む。sound_pcmlock/unlock が1サイクル固定量消費のため、
  * dst は必ず coreAudioChunkFrames() ちょうどのフレーム数で渡すこと。
  */
-export declare function coreAudioRenderInto(dst: Float32Array): boolean;
+export declare function coreAudioRenderInto(dst: Float32Array, legacy?: boolean): boolean;
 /**
  * PC-98キーボードBIOSリングバッファへ1エントリ(上位scan=0, 下位=SJISバイト等)を直接積む。
  * ゲスト側FEP無しで全角文字を入力するためのホスト側テキスト送信機能で使う。
@@ -253,7 +304,7 @@ export declare function coreDbgSetPaused(paused: boolean): void;
 /** デバッガの一時停止状態を返す。 */
 export declare function coreDbgPaused(): number;
 /** 一時停止中にcount命令だけ実行し、実際の実行数を返す。 */
-export declare function coreDbgStep(count: number): number;
+export declare function coreDbgStep(count: number): Promise<number>;
 /** デバッガレジスタ配列をwasmメモリから独立したコピーとして返す。 */
 export declare function coreDbgReadRegs(): Uint32Array;
 /** 逆アセンブル結果のNUL終端UTF-8文字列を静的バッファからコピーする。 */
@@ -261,5 +312,5 @@ export declare function coreDbgDisasm(seg: number, off: number, count: number): 
 /** ソフトウェアブレークポイントを設定する。indexは0..7。 */
 export declare function coreDbgSetBreakpoint(index: number, seg: number, off: number, enabled: boolean): void;
 /** 最大maxSteps命令を実行し、ヒットしたブレークポイントindex（無ヒットは-1）を返す。 */
-export declare function coreDbgRunUntilBreakpoint(maxSteps: number): number;
+export declare function coreDbgRunUntilBreakpoint(maxSteps: number): Promise<number>;
 export {};

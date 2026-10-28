@@ -11,9 +11,27 @@ interface Dict {
     toolbarHelp(): string;
     /** ツールバーの「…」オーバーフローボタンのツールチップ/メニュー見出し。 */
     toolbarMore(): string;
+    toolbarGroupDisplay(): string;
     toolbarGroupInput(): string;
+    toolbarGroupSound(): string;
     toolbarGroupDisk(): string;
     toolbarGroupState(): string;
+    /** ツールバー「…」内、表示縦横比モード(4:3/ドット等倍)の切替トグル。 */
+    toolbarAspect(): string;
+    /** 表示縦横比モードの右端表示: 4:3表示中。 */
+    toolbarAspect43(): string;
+    /** 表示縦横比モードの右端表示: ドット等倍表示中。 */
+    toolbarAspectNative(): string;
+    /** ツールバー「…」内、ミュートON/OFFトグル。 */
+    toolbarMute(): string;
+    /** ツールバー「…」内、FDDシーク音ON/OFFトグル。 */
+    toolbarFddSeekSound(): string;
+    /** ツールバー「…」内、HDD欄(FDD欄の下)の表示ON/OFFトグル。 */
+    toolbarToggleHddSlot(): string;
+    /** トグル項目の右端に出すON表示。 */
+    toggleOn(): string;
+    /** トグル項目の右端に出すOFF表示。 */
+    toggleOff(): string;
     overlayNote1(): string;
     overlayNote2(): string;
     startBtn(): string;
@@ -25,6 +43,12 @@ interface Dict {
     toolbarFullscreen(): string;
     toolbarMachineReset(): string;
     toolbarScreenshot(): string;
+    /** ツールバーのポーズボタン(停止中)。 */
+    toolbarPause(): string;
+    /** ツールバーのポーズボタン(再開させるとき)。 */
+    toolbarResume(): string;
+    /** ポーズ中オーバーレイの「ポーズ中」ラベル。 */
+    pauseOverlayLabel(): string;
     statusScreenshotSaved(): string;
     toolbarMouse(): string;
     statusMouseCaptured(): string;
@@ -67,6 +91,10 @@ interface Dict {
     slotDownload(): string;
     /** 起動前にFDスロット行へディスクイメージをドロップしたときの案内。 */
     statusMachineReset(): string;
+    statusClkTuning(): string;
+    statusClkAuto(args: {
+        clk: number;
+    }): string;
     statusStateSaved(): string;
     statusStateLoaded(): string;
     statusFdInserted(args: {
@@ -131,6 +159,7 @@ interface Dict {
     }): string;
     pickSlotActionReset(): string;
     statusPreparing(): string;
+    statusDbUpgradeBlocked(): string;
     statusNoImage(): string;
     statusCoreBooting(): string;
     statusBootSuccess(): string;

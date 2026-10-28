@@ -91,7 +91,7 @@ export function createDebugSession(debug) {
    * 同時にBPを張り、実際に発火した側をcodeSegment/offsetBiasとして確定する
    * (candidateCodeSegmentsのコメント参照)。
    */
-  const advanceToFirstDebuggableLine = (entryRegisters, header) => {
+  const advanceToFirstDebuggableLine = async (entryRegisters, header) => {
     const lines = map?.debuggableLines() ?? [];
     if (lines.length === 0) {
       codeSegment = control.cs; offsetBias = 0;
@@ -125,7 +125,7 @@ export function createDebugSession(debug) {
     let hit;
     let settledRegisters;
     try {
-      hit = debug.runUntilBreakpoint(5_000_000);
+      hit = await debug.runUntilBreakpoint(5_000_000);
       settledRegisters = debug.readRegisters();
     } finally {
       for (const candidate of candidates) {
@@ -172,8 +172,8 @@ export function createDebugSession(debug) {
         throw new Error(`対象の種別が${expectedKind}ではありません: kind=${found.kind}`);
       }
       control = found;
-      const entryRegisters = releaseLoaderAtEntry(debug, found, BREAKPOINT_SLOTS.entry);
-      const { registers: settledRegisters, noDebuggableLines } = advanceToFirstDebuggableLine(entryRegisters, header);
+      const entryRegisters = await releaseLoaderAtEntry(debug, found, BREAKPOINT_SLOTS.entry);
+      const { registers: settledRegisters, noDebuggableLines } = await advanceToFirstDebuggableLine(entryRegisters, header);
       return { control: found, registers: settledRegisters, driveErrorRetries, noDebuggableLines };
     },
 
@@ -199,18 +199,18 @@ export function createDebugSession(debug) {
     },
 
     /** 有効なBPのどれかへ到達するまで実行する。到達行は行マップから引き直す。 */
-    continueToBreakpoint(maxSteps = 5_000_000) {
+    async continueToBreakpoint(maxSteps = 5_000_000) {
       requireStarted();
       if (assignments.length === 0) throw new Error('有効なBPがありません');
       const slots = new Set(assignments.map((item) => item.slot));
-      const hit = debug.runUntilBreakpoint(maxSteps);
+      const hit = await debug.runUntilBreakpoint(maxSteps);
       if (!slots.has(hit)) throw new Error(`BPへ到達できませんでした (hit=${hit})`);
       const stopped = assignments.find((item) => item.slot === hit);
       return { hit, line: currentLine(), expectedLine: stopped.line, registers: registers() };
     },
 
     /** 現在の実行offsetより後の、初めて別の行になる区間まで進む。 */
-    stepOverLine(maxSteps = 1_000_000) {
+    async stepOverLine(maxSteps = 1_000_000) {
       requireStarted();
       const regs = registers();
       if (regs.cs !== codeSegment) throw new Error('対象CS外で停止しているため行送りできません');
@@ -219,8 +219,12 @@ export function createDebugSession(debug) {
       const slot = BREAKPOINT_SLOTS.stepOver;
       const offsets = next.offsets.map(toSegmentOffset);
       for (const offset of offsets) debug.setBreakpoint(slot, codeSegment, offset, true);
-      const hit = debug.runUntilBreakpoint(maxSteps);
-      for (const offset of offsets) debug.setBreakpoint(slot, codeSegment, offset, false);
+      let hit;
+      try {
+        hit = await debug.runUntilBreakpoint(maxSteps);
+      } finally {
+        for (const offset of offsets) debug.setBreakpoint(slot, codeSegment, offset, false);
+      }
       if (hit !== slot) throw new Error(`次の行へ到達できませんでした (hit=${hit})`);
       return { line: currentLine(), expectedLine: next.line, registers: registers() };
     },
@@ -230,28 +234,32 @@ export function createDebugSession(debug) {
      * 呼び先に行情報が無い（ライブラリやDOS）ときは、そこで迷子にせず
      * 戻り先アドレスへBPを置いて呼び出し元まで抜けてから次の行へ進める。
      */
-    stepInto(maxSteps = 1_000_000) {
+    async stepInto(maxSteps = 1_000_000) {
       requireStarted();
       const regs = registers();
       if (regs.cs !== codeSegment) throw new Error('対象CS外で停止しているためステップインできません');
       const [instruction] = debug.disassemble(regs.cs, regs.eip, 1);
-      if (!/^call\b/i.test(instruction?.text ?? '')) return { ...this.stepOverLine(maxSteps), entered: false };
+      if (!/^call\b/i.test(instruction?.text ?? '')) return { ...await this.stepOverLine(maxSteps), entered: false };
       const returnOffset = (regs.eip + instruction.len) & 0xffff;
-      debug.step(1);
+      await debug.step(1);
       const inside = registers();
       const line = inside.cs === codeSegment ? map.lineAt(toMapOffset(inside.eip)) : null;
       if (line !== null) return { line, expectedLine: line, entered: true, registers: inside };
       const slot = BREAKPOINT_SLOTS.stepOver;
       debug.setBreakpoint(slot, codeSegment, returnOffset, true);
-      const hit = debug.runUntilBreakpoint(maxSteps);
-      debug.setBreakpoint(slot, codeSegment, returnOffset, false);
+      let hit;
+      try {
+        hit = await debug.runUntilBreakpoint(maxSteps);
+      } finally {
+        debug.setBreakpoint(slot, codeSegment, returnOffset, false);
+      }
       if (hit !== slot) throw new Error(`呼び出し元へ戻れませんでした (hit=${hit})`);
-      return { ...this.stepOverLine(maxSteps), entered: false, steppedOverCall: true };
+      return { ...await this.stepOverLine(maxSteps), entered: false, steppedOverCall: true };
     },
 
-    stepInstruction(count = 1) {
+    async stepInstruction(count = 1) {
       requireStarted();
-      return { steps: debug.step(count), line: currentLine(), registers: registers() };
+      return { steps: await debug.step(count), line: currentLine(), registers: registers() };
     },
 
     setPaused(paused) {
@@ -260,7 +268,7 @@ export function createDebugSession(debug) {
     },
 
     /** 解除済みのエントリBP枠を再利用し、ローダ自身のAH=4Ch直前で止める。 */
-    runToLoaderExit(maxSteps = 5_000_000) {
+    async runToLoaderExit(maxSteps = 5_000_000) {
       const active = requireStarted();
       const slot = BREAKPOINT_SLOTS.loaderExit;
       // このAPIはローダ終了だけを観測するため、利用者BPは一時的に外して後で戻す。
@@ -269,7 +277,7 @@ export function createDebugSession(debug) {
       debug.setBreakpoint(slot, active.loaderPsp, active.exitReadyIp, true);
       let hit;
       try {
-        hit = debug.runUntilBreakpoint(maxSteps);
+        hit = await debug.runUntilBreakpoint(maxSteps);
       } finally {
         debug.setBreakpoint(slot, active.loaderPsp, active.exitReadyIp, false);
         for (const item of assignments) debug.setBreakpoint(item.slot, codeSegment, item.offset, true);
